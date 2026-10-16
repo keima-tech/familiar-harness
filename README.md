@@ -27,14 +27,25 @@ node packages/cli/dist/familiar.js run -p "hello" --provider mock
 # ローカル LLM(Ollama)で実行
 node packages/cli/dist/familiar.js run -p "ファイル一覧を教えて" --provider ollama --model qwen2.5-coder:3b -y
 
+# 計画モード(読み取り専用ツールで設計だけ行う)
+node packages/cli/dist/familiar.js run -p "新機能の実装計画を出して" --plan
+
 # 対話 REPL
 node packages/cli/dist/familiar.js chat
 
 # サーバ単体起動(デスクトップ等の外部クライアント用)
 node packages/cli/dist/familiar.js serve --port 46210
+
+# 別ターミナルの CLI は、serve が生きていれば自動で RPC 経由に接続(リモートモード)
+node packages/cli/dist/familiar.js run -p "ping" --json
+
+# git worktree の作成・一覧・削除
+node packages/cli/dist/familiar.js worktree add my-feature
 ```
 
 設定は `~/.familiar/config.yaml`。トークン等の秘密情報は `~/.familiar/*.token` ファイルか環境変数で与え、リポジトリや設定ファイルに直書きしない。
+
+M2 で利用できる周辺機能: `webfetch` / `websearch`(要 SearXNG 設定)/ セッション todo / `task`(サブエージェント委任)。`familiar serve` では承認要求が `permission.request` イベントとして WS に流れ、クライアントの `permission.respond` で続行/拒否する。
 
 ## 構成
 
@@ -44,7 +55,7 @@ packages/
   core/       エージェントループ・ツール・プロバイダ・セッションストア
   server/     JSON-RPC over HTTP+WebSocket デーモン
   cli/        familiar コマンド(TUI/REPL・headless)
-  desktop/    Electron シェル(M4 で実装)
+  desktop/    Electron シェル(M4 で実装・インストーラ形式で配布)
 docs/spec/    詳細仕様
 ```
 
@@ -52,12 +63,12 @@ docs/spec/    詳細仕様
 
 | Phase | 内容 |
 |---|---|
-| M1 (現在) | agent loop + 基本ツール(read/write/edit/glob/grep/bash) + セッション永続化 + CLI |
-| M2 | provider 拡張(Google など)・fallback・plan モード・権限ゲート強化 |
+| M1 | agent loop + 基本ツール(read/write/edit/glob/grep/bash) + セッション永続化 + CLI ✅ |
+| M2 (現在) | Google provider・fallback 連鎖・plan モード・動的承認 RPC・CLI リモート接続・webfetch/websearch/todo/task・worktree ✅ |
 | M3 | memory + skills + background self-review + write_approval |
-| M4 | curator + Desktop α |
+| M4 | curator + Desktop α + `familiar serve` 同梱 Web UI |
 | M5 | MCP / LSP / hooks・プラグイン / cron |
-| M6 | v1.0(プロファイル多段エージェント等は検討) |
+| M6 | v1.0(配布: electron-builder によるインストーラ。Windows: NSIS / Linux: deb・AppImage) |
 
 詳細は `docs/spec/` を参照。
 

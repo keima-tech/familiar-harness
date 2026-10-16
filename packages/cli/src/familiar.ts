@@ -27,16 +27,19 @@ import {
 import { AgentServer, startHttpTransport } from "@familiar/server";
 import { createPrettyPrinter, createJsonPrinter, ansi, useColor } from "./ui/display.js";
 import { CliApprovalAdapter } from "./ui/approvals.js";
+import { RemoteFamiliarClient } from "./client/remote.js";
+import { cmdWorktree } from "./worktree.js";
 
 const USAGE = `familiar — OpenCode/Claude Code-style agent harness (CLI)
 
 Usage:
   familiar run [-p "prompt"] [--provider ID] [--model ID] [--session ID] [--new]
-            [--cwd DIR] [--max-steps N] [-y] [--json] [--title S]
+            [--cwd DIR] [--max-steps N] [-y] [--plan] [--json] [--title S]
   familiar chat [--session ID] [--provider ID] [--model ID] [--cwd DIR] [-y]
   familiar serve [--port N] [--config PATH]
   familiar sessions list | show <id> [--messages] | delete <id>
   familiar model list [provider]
+  familiar worktree list | add <name> | remove <name> | prune   (git worktree wrapper)
   familiar init
   familiar doctor
   familiar help | --version
@@ -44,8 +47,11 @@ Usage:
 Options:
   -p, --prompt TEXT      prompt text (or pass it as positional args)
   -y, --yolo             skip approval prompts for risky actions
+      --plan             plan mode: read-only tools, produce a plan instead of edits
       --json             emit NDJSON agent events (machine-readable)
       --config PATH      path to config.yaml (default ~/.familiar/config.yaml)
+      --server URL       RPC base URL of a running 'familiar serve'
+      --local            force in-process mode (skip the serve probe)
   -c, --continue         resume the most recent session
 `;
 
@@ -63,10 +69,23 @@ const STRING_FLAGS = new Set([
   "--port",
   "--profile",
   "--title",
+  "--server",
+  "--root",
   "-p",
   "--prompt",
 ]);
-const BOOL_FLAGS = new Set(["-y", "--yolo", "--json", "--new", "-c", "--continue", "--messages"]);
+const BOOL_FLAGS = new Set([
+  "-y",
+  "--yolo",
+  "--json",
+  "--new",
+  "-c",
+  "--continue",
+  "--messages",
+  "--plan",
+  "--local",
+  "--force",
+]);
 
 export interface ParsedArgs {
   flags: Record<string, string | boolean>;
@@ -151,6 +170,94 @@ const cyan = (s: string) => (useColor() ? ansi.cyan(s) : s);
 const green = (s: string) => (useColor() ? ansi.green(s) : s);
 
 // ---------------------------------------------------------------------------
+// transports: in-process or remote (familiar serve)
+// ---------------------------------------------------------------------------
+
+interface FamiliarTransport {
+  kind: "local" | "remote";
+  dispatch(
+    method: string,
+    params: Record<string, unknown>,
+    opts?: { onEvent?: (ev: AgentEvent) => void },
+  ): Promise<unknown>;
+}
+
+function localTransport(server: AgentServer): FamiliarTransport {
+  return {
+    kind: "local",
+    async dispatch(method, params, opts) {
+      return server.dispatch(method, params, {
+        onEvent: (_sid, ev) => opts?.onEvent?.(ev as AgentEvent),
+      });
+    },
+  };
+}
+
+/** Pretty-print server-level events (permission prompts) in human mode. */
+function serverEventPrettyPrinter(): (ev: AgentEvent) => void {
+  return (ev) => {
+    if (ev.type === "permission.request") {
+      process.stdout.write(dim(`\n⏺ approval needed (${ev.tool}): ${ev.summary}\n`));
+    } else if (ev.type === "permission.resolved") {
+      process.stdout.write(dim(`⏺ approval ${ev.approved ? "granted" : "denied"}\n`));
+    }
+  };
+}
+
+async function openRunTransport(
+  flags: Record<string, string | boolean>,
+  cfg: ReturnType<typeof loadCliConfig>,
+  interactive: boolean,
+  json: boolean,
+  closeAfterDispatch: boolean,
+): Promise<{
+  transport: FamiliarTransport;
+  setJsonServerSink?: (sink: (ev: AgentEvent) => void) => void;
+  close?: () => void;
+}> {
+  if (flagBool(flags, "local")) {
+    const server = new AgentServer({
+      config: cfg,
+      approval: interactive ? new CliApprovalAdapter() : undefined,
+    });
+    return { transport: localTransport(server) };
+  }
+  const baseUrl = flag(flags, "server") ?? `http://${cfg.server.bind}:${cfg.server.port}`;
+  if (await RemoteFamiliarClient.probe(baseUrl)) {
+    let sink: ((ev: AgentEvent) => void) | undefined = serverEventPrettyPrinter();
+    const approval = interactive ? new CliApprovalAdapter() : undefined;
+    const client = new RemoteFamiliarClient(
+      baseUrl,
+      approval
+        ? (req) => approval.request({ tool: req.tool, summary: req.summary, detail: req.detail })
+        : undefined,
+      (ev) => sink?.(ev),
+    );
+    return {
+      transport: {
+        kind: "remote",
+        async dispatch(method, params, opts) {
+          const sessionId = typeof params["id"] === "string" ? (params["id"] as string) : undefined;
+          return client.dispatch(method, params, {
+            sessionId,
+            onEvent: opts?.onEvent,
+          });
+        },
+      },
+      setJsonServerSink: (next) => {
+        sink = next;
+      },
+      close: () => client.close(),
+    };
+  }
+  const server = new AgentServer({
+    config: cfg,
+    approval: interactive ? new CliApprovalAdapter() : undefined,
+  });
+  return { transport: localTransport(server) };
+}
+
+// ---------------------------------------------------------------------------
 // commands
 // ---------------------------------------------------------------------------
 
@@ -160,22 +267,27 @@ async function cmdRun(flags: Record<string, string | boolean>, positionals: stri
   if (!text) fail(`no prompt given. usage:\n${USAGE}`);
   const cwd = resolveCwd(flags);
   const cfg = loadCliConfig(flags);
-  const isInteractive = !!process.stdout.isTTY && !flagBool(flags, "json");
+  const json = flagBool(flags, "json");
+  const isInteractive = !!process.stdout.isTTY && !json;
 
-  const server = new AgentServer({
-    config: cfg,
-    approval: isInteractive ? new CliApprovalAdapter() : undefined,
-  });
+  const { transport, setJsonServerSink, close } = await openRunTransport(
+    flags,
+    cfg,
+    isInteractive,
+    json,
+    true,
+  );
 
   let sessionId: string;
   if (flag(flags, "session")) {
     sessionId = flag(flags, "session")!;
   } else if (flagBool(flags, "continue")) {
-    const latest = latestSessionInCwd(server, cwd);
+    const list = (await transport.dispatch("session.list", {})) as SessionRecord[];
+    const latest = list.find((s) => s.cwd === cwd);
     if (!latest) fail("no previous session to continue (this cwd)");
     sessionId = latest.id;
   } else {
-    const created = (await server.dispatch("session.create", {
+    const created = (await transport.dispatch("session.create", {
       provider: providerId(flags),
       model: modelId(flags),
       cwd,
@@ -184,12 +296,15 @@ async function cmdRun(flags: Record<string, string | boolean>, positionals: stri
     sessionId = created.id;
   }
 
-  const printer = flagBool(flags, "json")
-    ? createJsonPrinter(sessionId)
-    : createPrettyPrinter();
+  const printer = json ? createJsonPrinter(sessionId) : createPrettyPrinter();
+  if (json && setJsonServerSink) {
+    setJsonServerSink((ev) => {
+      process.stdout.write(`${JSON.stringify({ sessionId, ...ev })}\n`);
+    });
+  }
 
   try {
-    const res = (await server.dispatch(
+    const res = (await transport.dispatch(
       "session.send",
       {
         id: sessionId,
@@ -198,34 +313,44 @@ async function cmdRun(flags: Record<string, string | boolean>, positionals: stri
         model: modelId(flags),
         maxSteps: toNumber(flag(flags, "max-steps")),
         yolo: flagBool(flags, "yolo"),
+        plan: flagBool(flags, "plan"),
       },
-      { onEvent: (_sid, ev) => printer(ev as AgentEvent) },
+      { onEvent: (ev) => printer(ev) },
     )) as { turnId: string; steps: number };
-    if (!flagBool(flags, "json")) {
+    if (!json) {
       process.stdout.write(
-        dim(`(session: ${sessionId} · turn: ${res.turnId.slice(0, 8)} · steps: ${res.steps})\n`),
+        dim(
+          `(session: ${sessionId} · turn: ${res.turnId.slice(0, 8)} · steps: ${res.steps}${flagBool(flags, "plan") ? " · plan" : ""})\n`,
+        ),
       );
     }
   } catch (err) {
-    if (!flagBool(flags, "json")) {
+    if (!json) {
       process.stderr.write(red(`run failed: ${err instanceof Error ? err.message : String(err)}\n`));
     }
     process.exitCode = 1;
+  } finally {
+    // In remote mode the WebSocket keeps the process alive — release it after
+    // a short drain so trailing events can still print.
+    if (!flagBool(flags, "local")) {
+      setTimeout(() => close?.(), 250).unref();
+    }
   }
 }
 
 async function cmdChat(flags: Record<string, string | boolean>): Promise<void> {
   const cwd = resolveCwd(flags);
   const cfg = loadCliConfig(flags);
-  const server = new AgentServer({ config: cfg, approval: new CliApprovalAdapter() });
+  const { transport } = await openRunTransport(flags, cfg, true, false, false);
 
   let session: SessionRecord | null = null;
   if (flag(flags, "session")) {
     const id = flag(flags, "session")!;
-    const got = (await server.dispatch("session.get", { id })) as { session: SessionRecord };
+    const got = (await transport.dispatch("session.get", { id })) as { session: SessionRecord };
     session = got.session;
   } else if (flagBool(flags, "continue")) {
-    session = latestSessionInCwd(server, cwd);
+    const list = (await transport.dispatch("session.list", {})) as SessionRecord[];
+    session = list.find((s) => s.cwd === cwd) ?? null;
   }
 
   process.stdout.write(dim("familiar chat — /help for commands, /exit to quit\n"));
@@ -234,7 +359,7 @@ async function cmdChat(flags: Record<string, string | boolean>): Promise<void> {
 
   const ensureSession = async (): Promise<SessionRecord> => {
     if (session) return session;
-    const created = (await server.dispatch("session.create", {
+    const created = (await transport.dispatch("session.create", {
       provider: providerId(flags),
       model: modelId(flags),
       cwd,
@@ -266,7 +391,7 @@ async function cmdChat(flags: Record<string, string | boolean>): Promise<void> {
       } else if (line === "/help") {
         process.stdout.write(
           dim(
-            "commands: /new /sessions /session <id> /model <id|reset> /help /exit\n(any other text is sent to the agent)\n",
+            "commands: /new /sessions /session <id> /model <id|reset> /plan [off] /help /exit\n(any other text is sent to the agent)\n",
           ),
         );
       } else if (line === "/new") {
@@ -274,7 +399,7 @@ async function cmdChat(flags: Record<string, string | boolean>): Promise<void> {
         const s = await ensureSession();
         process.stdout.write(dim(`(new session ${s.id.slice(0, 8)})\n`));
       } else if (line.startsWith("/sessions")) {
-        const list = (await server.dispatch("session.list", {})) as SessionRecord[];
+        const list = (await transport.dispatch("session.list", {})) as SessionRecord[];
         for (const s of list.slice(0, 10)) {
           process.stdout.write(
             dim(`${s.id.slice(0, 8)}  ${s.provider}/${s.model}  ${s.title || "(untitled)"}\n`),
@@ -282,9 +407,14 @@ async function cmdChat(flags: Record<string, string | boolean>): Promise<void> {
         }
       } else if (line.startsWith("/session ")) {
         const id = line.slice("/session ".length).trim();
-        const got = (await server.dispatch("session.get", { id })) as { session: SessionRecord };
+        const got = (await transport.dispatch("session.get", { id })) as { session: SessionRecord };
         session = got.session;
         process.stdout.write(dim(`(switched to ${got.session.id.slice(0, 8)})\n`));
+      } else if (line.startsWith("/plan")) {
+        const value = line.slice("/plan".length).trim();
+        if (value === "off") delete flags["plan"];
+        else flags["plan"] = true;
+        process.stdout.write(dim(`(plan mode ${flags["plan"] ? "ON" : "OFF"} for the next messages)\n`));
       } else if (line.startsWith("/model")) {
         const value = line.slice("/model".length).trim();
         // start a fresh session with the new model (model is per-session)
@@ -298,10 +428,15 @@ async function cmdChat(flags: Record<string, string | boolean>): Promise<void> {
       } else {
         const s = await ensureSession();
         const printer = createPrettyPrinter();
-        await server.dispatch(
+        await transport.dispatch(
           "session.send",
-          { id: s.id, text: line, yolo: flagBool(flags, "yolo") },
-          { onEvent: (_sid, ev) => printer(ev as AgentEvent) },
+          {
+            id: s.id,
+            text: line,
+            yolo: flagBool(flags, "yolo"),
+            plan: flagBool(flags, "plan"),
+          },
+          { onEvent: (ev) => printer(ev) },
         );
       }
     } catch (err) {
@@ -315,7 +450,7 @@ async function cmdChat(flags: Record<string, string | boolean>): Promise<void> {
 async function cmdServe(flags: Record<string, string | boolean>): Promise<void> {
   const cfg = loadCliConfig(flags);
   const port = toNumber(flag(flags, "port")) ?? cfg.server.port;
-  const server = new AgentServer({ config: cfg });
+  const server = new AgentServer({ config: cfg, rpcApprovals: true });
   const transport = await startHttpTransport(server, { port, bind: cfg.server.bind });
   process.stdout.write(cyan(`familiar server listening on ${transport.url}\n`));
   process.stdout.write(dim(`  rpc:   POST ${transport.url}/rpc\n  events: WS ${transport.url}/ws\n`));
@@ -462,11 +597,6 @@ async function cmdDoctor(): Promise<void> {
   if (failures > 0) process.exitCode = 1;
 }
 
-function latestSessionInCwd(server: AgentServer, cwd: string): SessionRecord | null {
-  const list = server.store.listSessions();
-  return list.find((s) => s.cwd === cwd) ?? null;
-}
-
 /** Accept 8-char prefixes for session ids in CLI commands. */
 function resolveSessionPrefix(server: AgentServer, partial: string | undefined): string | undefined {
   if (!partial) return undefined;
@@ -533,6 +663,9 @@ async function main(): Promise<void> {
         break;
       case "model":
         await cmdModel(flags, rest);
+        break;
+      case "worktree":
+        await cmdWorktree(flags, rest, resolveCwd(flags));
         break;
       case "init":
         await cmdInit();

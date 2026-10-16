@@ -1,0 +1,21 @@
+{
+  "name": "@familiar/cli",
+  "version": "0.1.0",
+  "description": "familiar command line (headless run, chat REPL, serve)",
+  "type": "module",
+  "main": "dist/familiar.js",
+  "types": "dist/familiar.d.ts",
+  "bin": {
+    "familiar": "dist/familiar.js"
+  },
+  "scripts": {
+    "build": "tsc -b .",
+    "clean": "tsc -b . --clean",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "@familiar/core": "*",
+    "@familiar/protocol": "*",
+    "@familiar/server": "*"
+  }
+}

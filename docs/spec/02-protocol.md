@@ -1,0 +1,81 @@
+# 02 — RPC プロトコル(@familiar/protocol)
+
+ステータス: 確定(M1 サブセットを実装) / 最終更新: 2026-10-17
+
+## 1. 原則
+
+- すべてのクライアント(CLI / Desktop / 将来 Web)は同一の RPC インターフェースのみを利用。
+  コアのロジックに直接触れない。
+- リクエスト/レスポンスは JSON-RPC 2.0 形式(`POST /rpc`)。
+- ストリーミングは WebSocket(`/ws`)経由の `event` 通知。
+
+## 2. トランスポート(M1)
+
+### HTTP RPC
+
+```
+POST /rpc
+{ "jsonrpc": "2.0", "id": 1, "method": "session.list", "params": {} }
+→ 200 { "jsonrpc": "2.0", "id": 1, "result": [ ... ] }
+```
+
+### WebSocket イベント
+
+- 接続先 `/ws`。
+- サーバ→クライアント: `{ "type": "event", "sessionId": "...", "event": AgentEvent }`
+- クライアント→サーバ(M2 以降): 購読フィルタ・キャンセル。
+
+### InProcessTransport(CLI 用)
+
+`AgentServer.dispatch(method, params, { onEvent })` を直接呼ぶ。イベントは
+`onEvent` コールバックに同期的に流れる。WS と同一のメソッド・イベント集合。
+
+## 3. メソッド一覧(M1 実装)
+
+| メソッド | 引数 | 返却 |
+|---|---|---|
+| `ping` | — | `"pong"` |
+| `config.get` | — | サニタイズ済み設定(シークレットは `"***"` 表示) |
+| `models.list` | `{ provider?: string }` | `ModelInfo[]` |
+| `session.create` | `{ title?, provider?, model?, profile?, cwd? }` | `SessionRecord` |
+| `session.list` | — | `SessionRecord[]`(updated_at 降順) |
+| `session.get` | `{ id }` | `{ session, messages }` |
+| `session.delete` | `{ id }` | `{ deleted: true }` |
+| `session.send` | `{ id, text, provider?, model?, maxSteps?, yolo? }` | `{ turnId }`(イベントは WS / onEvent で流れる) |
+| `session.abort`(M2) | `{ id }` | — |
+
+`ModelInfo = { id: string; provider: string; contextTokens?: number }`
+`SessionRecord = { id, title, provider, model, profile?, cwd, createdAt, updatedAt }`
+
+## 4. AgentEvent 型
+
+すべての turn 関連イベントは `sessionId` を添えて通知される。
+
+```ts
+type AgentEvent =
+  | { type: "turn.start";    turnId: string }
+  | { type: "step.start";    turnId: string; index: number }
+  | { type: "message.start"; messageId: string; role: "assistant" }
+  | { type: "text.delta";    messageId: string; text: string }
+  | { type: "message.end";   messageId: string; stopReason?: string; usage?: Usage }
+  | { type: "tool.call";     messageId: string; toolCall: ToolCall }
+  | { type: "tool.result";   toolCallId: string; name: string;
+                             content: string; isError: boolean; durationMs: number }
+  | { type: "turn.end";      turnId: string; usage?: Usage }
+  | { type: "turn.error";    turnId: string; error: string }
+  | { type: "compaction";    dropped: number; kept: number };
+Usage = { promptTokens?: number; completionTokens?: number };
+ToolCall = { id: string; name: string; arguments: string /* JSON text */ };
+```
+
+- `text.delta` は streaming 中のみ。UI は `message.start … text.delta* … message.end` を
+  ひとつのアシスタント応答として描画。
+- `tool.call` はループ内で新しく観測されたツール呼び出し完成時点(`tool_use` 確定時)。
+- `turn.error` は provider 通信エラー等の復帰不能エラー。turn は異常終了し、メッセージは
+  保存済みの状態までコミットされる。
+
+## 5. M2 以降の追加予定
+
+- `session.fork`、`session.rename`
+- `permission.request` イベント + 待ち合せ RPC(desktop の承認 Inbox 用)
+- `file appetizer`/diff 通知(desktop のエディタ連携)

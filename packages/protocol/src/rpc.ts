@@ -50,6 +50,13 @@ export interface SessionSendParams {
   model?: string;
   maxSteps?: number;
   yolo?: boolean;
+  /** M2: plan mode — read-only toolset, research/design only */
+  plan?: boolean;
+}
+
+export interface PermissionRespondParams {
+  requestId: string;
+  approved: boolean;
 }
 
 export interface SessionGetResult {
@@ -76,6 +83,7 @@ export const RPC_METHODS = [
   "session.get",
   "session.delete",
   "session.send",
+  "permission.respond",
 ] as const;
 
 export type RpcMethod = (typeof RPC_METHODS)[number];

@@ -76,3 +76,19 @@ export interface ModelInfo {
   provider: string;
   contextTokens?: number;
 }
+
+/** M2: session-scoped task list managed by the `todo` tool. */
+export type TodoStatus = "pending" | "in_progress" | "done";
+
+export interface TodoItem {
+  id: string;
+  title: string;
+  status: TodoStatus;
+  createdAt: number;
+}
+
+/** Implemented by the server (memory-backed); consumed by the todo tool. */
+export interface TodoStore {
+  get(sessionId: string): TodoItem[];
+  set(sessionId: string, items: TodoItem[]): void;
+}

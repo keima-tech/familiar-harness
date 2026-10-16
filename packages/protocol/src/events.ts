@@ -21,7 +21,10 @@ export type AgentEvent =
     }
   | { type: "turn.end"; turnId: string; usage?: Usage }
   | { type: "turn.error"; turnId: string; error: string; recoverable: boolean }
-  | { type: "compaction"; dropped: number; kept: number };
+  | { type: "compaction"; dropped: number; kept: number }
+  /** M2 dynamic approval (serve mode): broadcast, wait for permission.respond */
+  | { type: "permission.request"; requestId: string; tool: string; summary: string; detail?: string }
+  | { type: "permission.resolved"; requestId: string; approved: boolean };
 
 export const isTerminalEvent = (e: AgentEvent): boolean =>
   e.type === "turn.end" || e.type === "turn.error";

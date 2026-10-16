@@ -53,6 +53,10 @@ export function startHttpTransport(
     });
   });
 
+  // Permission prompts must reach all clients even from POST-originated turns.
+  // Server-level events (no session) use an empty sessionId.
+  agent.attachBroadcast((event) => broadcast("", event));
+
   const wss = new WebSocketServer({ noServer: true });
   httpServer.on("upgrade", (req, socket, head) => {
     const url = (req.url ?? "").split("?")[0];

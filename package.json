@@ -1,0 +1,27 @@
+{
+  "name": "familiar-harness",
+  "description": "Familiar - a client/server agent harness (CLI + Desktop) inspired by OpenCode, HermEs Agent, and Claude Code",
+  "private": true,
+  "type": "module",
+  "license": "UNLICENSED",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "build": "tsc -b .",
+    "clean": "tsc -b . --clean",
+    "typecheck": "tsc -b . --noEmit",
+    "dev:cli": "node packages/cli/dist/familiar.js",
+    "smoke": "npm run -w packages/cli smoke",
+    "serve": "npm run -w packages/cli serve"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/ws": "^8.18.0",
+    "typescript": "^5.8.0",
+    "ws": "^8.18.0"
+  }
+}

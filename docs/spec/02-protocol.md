@@ -41,8 +41,10 @@ POST /rpc
 | `session.list` | — | `SessionRecord[]`(updated_at 降順) |
 | `session.get` | `{ id }` | `{ session, messages }` |
 | `session.delete` | `{ id }` | `{ deleted: true }` |
-| `session.send` | `{ id, text, provider?, model?, maxSteps?, yolo? }` | `{ turnId }`(イベントは WS / onEvent で流れる) |
+| `session.send` | `{ id, text, provider?, model?, maxSteps?, yolo?, plan? }` | `{ turnId, steps, toolCalls, usage }`(イベントは WS / onEvent で流れる) |
 | `session.abort`(M2) | `{ id }` | — |
+| `permission.respond`(M2) | `{ requestId, approved }` | `{ resolved: true }` — serve モードの動的承認 |
+| `config.get` に含まれるサニタイズ項目は 05 を参照 | | |
 
 `ModelInfo = { id: string; provider: string; contextTokens?: number }`
 `SessionRecord = { id, title, provider, model, profile?, cwd, createdAt, updatedAt }`
@@ -62,8 +64,11 @@ type AgentEvent =
   | { type: "tool.result";   toolCallId: string; name: string;
                              content: string; isError: boolean; durationMs: number }
   | { type: "turn.end";      turnId: string; usage?: Usage }
-  | { type: "turn.error";    turnId: string; error: string }
-  | { type: "compaction";    dropped: number; kept: number };
+  | { type: "turn.error";    turnId: string; error: string; recoverable: boolean }
+  | { type: "compaction";    dropped: number; kept: number }
+  // M2: dynamic approval (serve mode)
+  | { type: "permission.request";  requestId: string; tool: string; summary: string; detail?: string }
+  | { type: "permission.resolved"; requestId: string; approved: boolean };
 Usage = { promptTokens?: number; completionTokens?: number };
 ToolCall = { id: string; name: string; arguments: string /* JSON text */ };
 ```
@@ -74,8 +79,26 @@ ToolCall = { id: string; name: string; arguments: string /* JSON text */ };
 - `turn.error` は provider 通信エラー等の復帰不能エラー。turn は異常終了し、メッセージは
   保存済みの状態までコミットされる。
 
-## 5. M2 以降の追加予定
+## 5. 承認の流れ(serve モード / M2)
+
+1. ツールが `ctx.approval.request()` を呼ぶ(例： bash の承認必要コマンド)
+2. serve モードでは `RpcApprovalAdapter` が `permission.request` を全 WS クライアントへ
+   ブロードキャストし、応答を待つ(既定 300 秒タイムアウト = deny)
+3. クライアントは `permission.respond { requestId, approved }` を `POST /rpc` で返す
+   → `permission.resolved` が全クライアントに配信され、ツール実行が継続 / 拒否される
+4. 接続 UI がない場合・タイムアウトは **deny(安全側)**
+
+## 6. CLI リモートモード(M2)
+
+- `run` / `chat` 起動時に `POST /rpc ping` をプローブし、`familiar serve` が生きていれば
+  **リモートモード**(RPC + WS)で動作、なければ従来の InProcess モード。
+- `--local` で常時 InProcess 強制、`--server URL` で明示指定。
+- リモートモードでは CLI が permission.request をローカルの y/n プロンプトにブリッジし
+  `permission.respond` を返す。
+
+## 7. M3 以降の追加予定
 
 - `session.fork`、`session.rename`
-- `permission.request` イベント + 待ち合せ RPC(desktop の承認 Inbox 用)
-- `file appetizer`/diff 通知(desktop のエディタ連携)
+- file diff 通知(desktop のエディタ連携)
+- `memory.get|pending|approve`、`skills.*`(自己改善 M3)
+

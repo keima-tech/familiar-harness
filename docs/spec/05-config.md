@@ -15,7 +15,13 @@ providers:
   openai:
     kind: openai_compatible
     base_url: https://api.openai.com/v1
-    auth: { env: OPENAI_API_KEY }          # env | api_key_file | api_key
+    auth: { env: OPENAI_API_KEY }
+  google:                    # M2+: Gemini の OpenAI 互換エンドポイント
+    kind: openai_compatible
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
+    auth: { env: GEMINI_API_KEY }
+    models: [gemini-2.5-flash, gemini-2.5-pro]   # 静態リスト(ネットワーク照会回避)
+    default_model: gemini-2.5-flash
   ollama:
     kind: openai_compatible
     base_url: http://127.0.0.1:11434/v1
@@ -30,6 +36,10 @@ providers:
     auth: { env: OPENROUTER_API_KEY }
   mock:
     kind: mock
+
+# M2: fallback 連鎖(主プロバイダがストリーム開始前に失敗したら順に試す)
+fallback:
+  - "ollama/qwen2.5-coder:3b"
 
 # 副タスク用モデルスロット(M3 以降)。未設定なら主対話モデルを使用
 auxiliary:
@@ -49,8 +59,15 @@ permissions:
       - "rm -rf"
     max_timeout_ms: 600000
   files:
-    bounds: cwd            # cwd | unrestricted(write/edit の範囲・制限)
-
+    bounds: cwd            # cwd | unrestricted(write/edit の系団・制限)
+  webfetch:                # M2
+    allow_domains: []      # ワイルドカード可(*)
+    deny_domains:          # 既定で内部アドレスを拒否(SSRF 対策)
+      - localhost
+      - 127.*.N.1          # 実装は 127.* / ::1 / 10.* / 192.168.* / 172.16-31.* / 169.254.* を包含
+  websearch:               # M2
+    provider: searxng
+    base_url: ""           # 例: http://127.0.0.1:8080 (未設定なら websearch ツールはエラー+ヒント)
 context:
   token_soft_limit: 81920  # 推定(chars/4)超過で compaction ガード発動
   keep_last: 10            # compaction で残す直近メッセージ数

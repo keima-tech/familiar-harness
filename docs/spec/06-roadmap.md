@@ -5,12 +5,19 @@
 | Phase | 内容 | 状態 |
 |---|---|---|
 | M0 | spec fix / リポジトリ初期化 | 完了 |
-| **M1** | **agent loop + 基本ツール(read/write/edit/glob/grep/bash) + SQLite セッション + CLI(run -p / chat / serve / sessions / model list / init / doctor) + mock provider スモーク** | **実装中** |
-| M2 | provider 拡張(Google)・fallback 連鎖・plan モード・権限ゲート強化(動的承認 RPC)・CLI→サーバ自動接続・worktree 対応・webfetch/websearch/todo/task | 未着手 |
+| M1 | agent loop + 基本ツール(read/write/edit/glob/grep/bash) + SQLite セッション + CLI(run -p / chat / serve / sessions / model list / init / doctor) + mock provider スモーク | 完了 |
+| **M2** | **Google provider・fallback 連鎖・plan モード・動的承認 RPC(permission.request/respond + CLI リモートモード)・webfetch/websearch/todo/task・worktree コマンド** | **実装中** |
 | M3 | memory + skills + background self-review + write_approval(自己改善ループ第1版)・compaction 要約(aux) | 未着手 |
-| M4 | curator(自動遷移 + opt-in consolidation) + Desktop α(Electron・承認 Inbox・ツール diff 表示) | 未着手 |
-| M5 | MCP / LSP / hooks・プラグイン / cron・定期実行 | 未着手 |
-| M6 | v1.0: プロファイル(SOUL.md 多段)、配布(npm/バイナリ)、テスト拡充(e2e)、docs | 未着手 |
+| M4 | curator(自動遷移 + opt-in consolidation) + **Desktop α(Electron) + Web UI(`familiar serve` が同一ポート 46210 で静的配信)** | 未着手 |
+| M5 | MCP / LSP / hooks・プラグイン / cron・定期実行・task 並列化 | 未着手 |
+| M6 | v1.0: プロファイル(SOUL.md 多段)、**配布: electron-builder によるインストーラ(Windows: NSIS / Linux: deb・AppImage)**、テスト拡充(e2e)、docs | 未着手 |
+
+## デスクトップ配布の正式要件(2026-10-17 ユーザー確定)
+
+- 最終形は **インストーラ形式のデスクトップアプリ**(Windows / Linux 双対応)。
+- パッケージング: electron-builder(Windows: NSIS、Linux: deb / AppImage)。コード署名は未定。
+- Desktop は薄クライアント(`familiar serve` RPC)以免責のため InProcess で `familiar serve` をサイレント起動して接続(全自動)。
+- Web UI は Desktop と同一の型を流用した SPA(`familiar serve` から配信、port 46210)。
 
 ## M1 の完了条件(DoD)
 

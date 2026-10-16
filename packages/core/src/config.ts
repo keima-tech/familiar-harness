@@ -38,9 +38,22 @@ export interface BashPermissionConfig {
   max_timeout_ms: number;
 }
 
+export interface DomainPermissionConfig {
+  allow_domains: string[];
+  deny_domains: string[];
+}
+
+export interface WebSearchConfig {
+  provider: "searxng";
+  /** e.g. http://127.0.0.1:8080 — unset means the tool errors with a hint */
+  base_url: string;
+}
+
 export interface PermissionsConfig {
   bash: BashPermissionConfig;
   files: { bounds: "cwd" | "unrestricted" };
+  webfetch: DomainPermissionConfig;
+  websearch: WebSearchConfig;
 }
 
 export interface AuxiliarySlot {
@@ -53,6 +66,8 @@ export interface ResolvedConfig {
   default_provider: string;
   default_model?: string;
   providers: Record<string, ProviderConfig>;
+  /** M2: failover chain as "provider" or "provider/model" */
+  fallback: string[];
   auxiliary: Record<string, AuxiliarySlot>;
   profiles: Record<string, { system_prompt_file?: string }>;
   permissions: PermissionsConfig;
@@ -74,6 +89,13 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
       auth: { env: "OPENAI_API_KEY" },
       default_model: "gpt-5.2",
     },
+    google: {
+      kind: "openai_compatible",
+      base_url: "https://generativelanguage.googleapis.com/v1beta/openai",
+      auth: { env: "GEMINI_API_KEY" },
+      default_model: "gemini-2.5-flash",
+      models: ["gemini-2.5-flash", "gemini-2.5-pro"],
+    },
     anthropic: {
       kind: "anthropic",
       base_url: "https://api.anthropic.com/v1",
@@ -93,12 +115,13 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
     },
     mock: { kind: "mock" },
   },
+  fallback: [],
   auxiliary: {},
   profiles: {},
   permissions: {
     bash: {
       allow: [
-        "^git (status|diff|log|show|branch|remote|tag|rev-parse|shortlog)( .*)?$",
+        "^git (status|diff|log|show|branch|remote|tag|rev-parse|shortlog|worktree)( .*)?$",
         "^node --version$",
         "^npm --version$",
         "^python3 --version$",
@@ -107,6 +130,11 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
       max_timeout_ms: 600_000,
     },
     files: { bounds: "cwd" },
+    webfetch: {
+      allow_domains: [],
+      deny_domains: ["localhost", "127.*", "::1", "10.*", "192.168.*", "172.16.*", "172.17.*", "172.18.*", "172.19.*", "172.20.*", "172.21.*", "172.22.*", "172.23.*", "172.24.*", "172.25.*", "172.26.*", "172.27.*", "172.28.*", "172.29.*", "172.30.*", "172.31.*", "169.254.*", "0.0.0.0", "*.local"],
+    },
+    websearch: { provider: "searxng", base_url: "" },
   },
   context: { token_soft_limit: 81_920, keep_last: 10 },
   server: { port: 46_210, bind: "127.0.0.1" },
@@ -116,6 +144,7 @@ const KNOWN_TOP_LEVEL = new Set([
   "version",
   "default_provider",
   "default_model",
+  "fallback",
   "providers",
   "auxiliary",
   "profiles",
@@ -267,6 +296,12 @@ providers:
     base_url: https://api.openai.com/v1
     auth: { env: OPENAI_API_KEY }
     default_model: gpt-5.2
+  google:
+    kind: openai_compatible
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
+    auth: { env: GEMINI_API_KEY }
+    default_model: gemini-2.5-flash
+    models: [gemini-2.5-flash, gemini-2.5-pro]
   anthropic:
     kind: anthropic
     base_url: https://api.anthropic.com/v1
@@ -283,14 +318,25 @@ providers:
   mock:
     kind: mock
 
+# Rendered as "provider" or "provider/model"; tried in order when the primary
+# provider fails BEFORE streaming starts.
+# fallback:
+#   - "ollama/qwen2.5-coder:3b"
+
 permissions:
   bash:
     allow:
-      - "^git (status|diff|log|show|branch|remote|tag|rev-parse|shortlog)( .*)?$"
+      - "^git (status|diff|log|show|branch|remote|tag|rev-parse|shortlog|worktree)( .*)?$"
     deny:
       - "^sudo\\\\b"
       - "\\\\brm\\\\s+(-[a-z]+\\\\s+)*-[rf]r?f?"
     max_timeout_ms: 600000
+  webfetch:
+    allow_domains: []
+    # internal addresses are denied by default (SSRF protection)
+  websearch:
+    provider: searxng
+    base_url: ""    # e.g. http://127.0.0.1:8080
 
 context:
   token_soft_limit: 81920

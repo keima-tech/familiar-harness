@@ -8,6 +8,15 @@ export interface ToolContext {
   yolo: boolean;
   config: ResolvedConfig;
   approval: ApprovalAdapter;
+  /** M2: session todo store (absent in bare CLI contexts / subagents without one) */
+  todos?: import("@familiar/protocol").TodoStore;
+  /** M2: run a subagent task and return its final text (server-injected) */
+  taskRunner?: (args: {
+    description: string;
+    prompt: string;
+    sessionId: string;
+    yolo: boolean;
+  }) => Promise<string>;
 }
 
 export interface ToolOutput {
@@ -19,6 +28,8 @@ export interface Tool {
   name: string;
   description: string;
   parameters: ToolSchema["parameters"];
+  /** Read-only tools are available in plan mode (M2). */
+  read_only?: boolean;
   /** All approval logic lives inside execute() (single approval path per tool). */
   execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolOutput>;
 }

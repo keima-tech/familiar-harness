@@ -5,16 +5,18 @@ import {
   type ChatResult,
   type Provider,
   type ProviderChunk,
-  createToolCallAccumulator,
+  ProviderError,
 } from "./base.js";
 
 /**
  * Deterministic scripted provider for tests and offline smoke runs.
  *
  * Behaviour (stateless — decided from the tail of the transcript):
- * - last message is user, contains `@read <path>`  → tool call: read
- * - last message is user, otherwise                → streams back `mock: <echo>`
- * - last message is a tool result                  → final summary of that result
+ * - last is user, text contains `@fail`            → throws ProviderError 503 (fallback tests)
+ * - last is user text contains `@write <path>`     → tool call: write
+ * - last is user, contains `@read <path>`          → tool call: read
+ * - last is user, otherwise                        → streams back `mock: <echo>`
+ * - last is a tool result                          → final summary of that result
  */
 export class MockProvider implements Provider {
   readonly id: string;
@@ -38,6 +40,52 @@ export class MockProvider implements Provider {
     }
 
     const userText = last?.role === "user" ? last.content : "";
+    // `@fail` or `@fail-<providerId>`: simulate a pre-stream failure.
+    // With the provider form, only that provider fails (fallback tests).
+    const failMatch = userText.match(/@fail(?:-([a-z0-9_.-]+))?\b/);
+    if (failMatch && (failMatch[1] === undefined || failMatch[1] === this.id)) {
+      throw new ProviderError("simulated provider failure", 503, this.id);
+    }
+    const writeMatch = userText.match(/@write\s+(\S+)/);
+    if (writeMatch) {
+      onChunk({ type: "tool_call_start", index: 0, id: "call_mock_w", name: "write" });
+      onChunk({
+        type: "tool_call_delta",
+        index: 0,
+        argumentsDelta: JSON.stringify({
+          path: writeMatch[1] ?? "missing.txt",
+          content: "mock content from Familiar",
+        }),
+      });
+      onChunk({ type: "stop", finishReason: "tool_calls" });
+      return { stopReason: "tool_calls" };
+    }
+    const bashMatch = userText.match(/@bash\s+([^\n]+)/);
+    if (bashMatch) {
+      onChunk({ type: "tool_call_start", index: 0, id: "call_mock_b", name: "bash" });
+      onChunk({
+        type: "tool_call_delta",
+        index: 0,
+        argumentsDelta: JSON.stringify({ command: (bashMatch[1] ?? "").trim() }),
+      });
+      onChunk({ type: "stop", finishReason: "tool_calls" });
+      return { stopReason: "tool_calls" };
+    }
+    const taskMatch = userText.match(/@task\s+([^\n]+)/);
+    if (taskMatch) {
+      const label = (taskMatch[1] ?? "").trim();
+      onChunk({ type: "tool_call_start", index: 0, id: "call_mock_t", name: "task" });
+      onChunk({
+        type: "tool_call_delta",
+        index: 0,
+        argumentsDelta: JSON.stringify({
+          description: label,
+          prompt: `research ${label} and summarize the outcome`,
+        }),
+      });
+      onChunk({ type: "stop", finishReason: "tool_calls" });
+      return { stopReason: "tool_calls" };
+    }
     const readMatch = userText.match(/@read\s+(\S+)/);
     if (readMatch) {
       // Simulate a tool call (arguments arrive as one complete JSON payload).

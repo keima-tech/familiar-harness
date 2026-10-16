@@ -2,7 +2,6 @@ import crypto from "node:crypto";
 import type {
   AgentEvent,
   ChatMessage,
-  JsonSchemaObject,
   ToolCall,
   Usage,
 } from "@familiar/protocol";
@@ -15,10 +14,11 @@ import {
   defaultToolRegistry,
   validateToolArgs,
   type ToolRegistry,
+  type Tool,
   type ToolContext,
 } from "../tools/index.js";
 import { DenyApprovalAdapter, type ApprovalAdapter } from "../tools/permissions.js";
-import { buildSystemPrompt } from "./prompts.js";
+import { buildSystemPrompt, todoSection } from "./prompts.js";
 
 export interface RunTurnOptions {
   sessionId: string;
@@ -28,6 +28,10 @@ export interface RunTurnOptions {
   profile?: string;
   yolo?: boolean;
   maxSteps?: number;
+  /** M2: plan mode — read-only toolset only */
+  plan?: boolean;
+  /** M2: injected prompt sections (todo state, memory later) */
+  extraSystem?: string[];
   onEvent: (event: AgentEvent) => void;
   signal?: AbortSignal;
 }
@@ -51,13 +55,34 @@ export class AgentRunner {
     private readonly cfg: ResolvedConfig,
     private readonly providers: ProviderRegistry,
     private readonly store: SessionStore,
-    opts: { tools?: ToolRegistry; approval?: ApprovalAdapter } = {},
+    opts: {
+      tools?: ToolRegistry;
+      approval?: ApprovalAdapter;
+      /** M2: session todo store, injected into tool contexts and the prompt */
+      todos?: import("@familiar/protocol").TodoStore;
+      /** M2: subagent launcher for the task tool */
+      taskRunner?: (args: {
+        description: string;
+        prompt: string;
+        sessionId: string;
+        yolo: boolean;
+      }) => Promise<string>;
+    } = {},
   ) {
     this.tools = opts.tools ?? defaultToolRegistry();
     this.approval = opts.approval ?? new DenyApprovalAdapter();
+    this.todos = opts.todos;
+    this.taskRunner = opts.taskRunner;
   }
 
   private approval: ApprovalAdapter;
+  private readonly todos?: import("@familiar/protocol").TodoStore;
+  private readonly taskRunner?: (args: {
+    description: string;
+    prompt: string;
+    sessionId: string;
+    yolo: boolean;
+  }) => Promise<string>;
 
   async runTurn(opts: RunTurnOptions): Promise<RunTurnResult> {
     const session = this.store.getSession(opts.sessionId);
@@ -89,15 +114,32 @@ export class AgentRunner {
 
     opts.onEvent({ type: "turn.start", turnId });
 
+    // Plan mode (M2): only read-only tools are advertised and executable.
+    const plan = opts.plan === true;
+    const effectiveTools: Tool[] = plan
+      ? this.tools.list().filter((t) => t.read_only === true)
+      : this.tools.list();
+
     try {
       for (let stepIndex = 0; stepIndex < maxSteps; stepIndex++) {
         steps += 1;
         opts.onEvent({ type: "step.start", turnId, index: stepIndex });
 
+        // Build injected prompt sections: todos first, then caller extras (M3 memory).
+        const extra: string[] = [];
+        if (this.todos) {
+          const todoItems = this.todos.get(session.id);
+          const section = todoSection(todoItems);
+          if (section !== "") extra.push(section);
+        }
+        for (const part of opts.extraSystem ?? []) extra.push(part);
+
         const system = buildSystemPrompt(this.cfg, {
           cwd: session.cwd,
           profile,
-          toolNames: this.tools.list().map((t) => t.name),
+          toolNames: effectiveTools.map((t) => t.name),
+          plan,
+          extraSystem: extra,
         });
 
         let history = this.store.getMessages(session.id);
@@ -117,7 +159,11 @@ export class AgentRunner {
             model,
             messages: history,
             system,
-            tools: this.tools.schemas(),
+            tools: effectiveTools.map((t) => ({
+              name: t.name,
+              description: t.description,
+              parameters: t.parameters,
+            })),
             signal: opts.signal,
           },
           (chunk) => {
@@ -146,9 +192,9 @@ export class AgentRunner {
         const assistantText = textParts.join("");
 
         // Small local models sometimes emit tool calls as fenced JSON text.
-        // Salvage when no native tool_calls arrived.
+        // Salvage when no native tool_calls arrived (only for advertised tools).
         if (stepToolCalls.length === 0) {
-          const salvaged = salvageTextToolCall(assistantText, this.tools.list().map((t) => t.name));
+          const salvaged = salvageTextToolCall(assistantText, effectiveTools.map((t) => t.name));
           if (salvaged) {
             log.debug(`salvaged tool call from text: ${salvaged.name}`);
             stepToolCalls = [salvaged];
@@ -187,11 +233,13 @@ export class AgentRunner {
           yolo,
           config: this.cfg,
           approval: this.approval,
+          todos: this.todos,
+          taskRunner: this.taskRunner,
         };
         for (const call of stepToolCalls) {
           opts.onEvent({ type: "tool.call", messageId: assistantId, toolCall: call });
           const startedAt = Date.now();
-          const output = await this.executeToolCall(call, toolCtx);
+          const output = await this.executeToolCall(call, toolCtx, plan, effectiveTools);
           const durationMs = Date.now() - startedAt;
           const isError = output.isError === true;
           const resultMsg: ChatMessage = {
@@ -234,11 +282,16 @@ export class AgentRunner {
   private async executeToolCall(
     call: ToolCall,
     ctx: ToolContext,
+    plan: boolean,
+    effectiveTools: Tool[],
   ): Promise<{ content: string; isError?: boolean }> {
-    const tool = this.tools.get(call.name);
+    const tool = effectiveTools.find((t) => t.name === call.name);
     if (!tool) {
+      const available = effectiveTools.map((t) => t.name).join(", ");
       return {
-        content: `unknown tool: ${call.name} (available: ${this.tools.list().map((t) => t.name).join(", ")})`,
+        content: plan
+          ? `not available in plan mode: ${call.name} (plan mode allows only: ${available})`
+          : `unknown tool: ${call.name} (available: ${available})`,
         isError: true,
       };
     }

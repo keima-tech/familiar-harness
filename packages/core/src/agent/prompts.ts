@@ -77,7 +77,15 @@ export function profileSystemPrompt(cfg: ResolvedConfig, profile?: string): stri
 /** Assemble the full system prompt for a turn. */
 export function buildSystemPrompt(
   cfg: ResolvedConfig,
-  opts: { cwd: string; profile?: string; toolNames: string[] },
+  opts: {
+    cwd: string;
+    profile?: string;
+    toolNames: string[];
+    /** M2: plan mode guidance */
+    plan?: boolean;
+    /** M2: injected sections (todo state; memory in M3) */
+    extraSystem?: string[];
+  },
 ): string {
   const parts: string[] = [basePersona()];
 
@@ -88,6 +96,20 @@ export function buildSystemPrompt(
     parts.push(`# Project instructions (${agents.file})\n\n${agents.content}`);
   }
 
+  if (opts.plan) {
+    parts.push(
+      "# Plan mode active\n" +
+        "You are in PLAN MODE: research and design only.\n" +
+        "- Allowed tools: read-only ones (read / glob / grep / webfetch / websearch). No file edits, no commands.\n" +
+        "- Produce a concrete, step-by-step implementation plan (files to touch, approach, risks) and wait for the user to approve execution.\n" +
+        "- If information is missing, ask focused questions instead of guessing.",
+    );
+  }
+
+  for (const extra of opts.extraSystem ?? []) {
+    if (extra.trim() !== "") parts.push(extra);
+  }
+
   parts.push(
     `# Guidelines\n` +
       `- cwd: ${opts.cwd}\n` +
@@ -95,4 +117,15 @@ export function buildSystemPrompt(
       `- keep responses concise; markdown allowed.`,
   );
   return parts.join("\n\n---\n\n");
+}
+
+/** Serialize the session todo list for prompt injection (M2). */
+export function todoSection(items: { id: string; title: string; status: string }[]): string {
+  if (items.length === 0) return "";
+  const lines = items.map((t) => `- (#${t.id}, ${t.status}) ${t.title}`);
+  return (
+    "# Current todo state\n" +
+    lines.join("\n") +
+    "\nKeep this list current with the todo tool as you work."
+  );
 }

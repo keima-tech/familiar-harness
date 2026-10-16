@@ -6,7 +6,7 @@
 |---|---|---|
 | M0 | spec fix / リポジトリ初期化 | 完了 |
 | M1 | agent loop + 基本ツール(read/write/edit/glob/grep/bash) + SQLite セッション + CLI(run -p / chat / serve / sessions / model list / init / doctor) + mock provider スモーク | 完了 |
-| **M2** | **Google provider・fallback 連鎖・plan モード・動的承認 RPC(permission.request/respond + CLI リモートモード)・webfetch/websearch/todo/task・worktree コマンド** | **実装中** |
+| **M2** | **Google provider・fallback 連鎖・plan モード・動的承認 RPC(permission.request/respond + CLI リモートモード)・webfetch/websearch/todo/task・worktree コマンド** | **完了 ✅** |
 | M3 | memory + skills + background self-review + write_approval(自己改善ループ第1版)・compaction 要約(aux) | 未着手 |
 | M4 | curator(自動遷移 + opt-in consolidation) + **Desktop α(Electron) + Web UI(`familiar serve` が同一ポート 46210 で静的配信)** | 未着手 |
 | M5 | MCP / LSP / hooks・プラグイン / cron・定期実行・task 並列化 | 未着手 |

@@ -172,9 +172,58 @@ needsApproval → required でない → 実行
 
 - `familiar worktree list | add <name>| remove <name>`(開発リポジトリ自体への git worktree 操作、実装は `git worktree` の薄いラッパ)。
 
-## 5. 実装上の追加予定
+## 5. M3 ツール(自己改善)と実装上の追加予定
+
+### memory_manage
+
+| param | 型 | 説明 |
+|---|---|---|
+| `action` | enum: create / patch / remove / list | |
+| `content` / `id` / `tags` | string / string / string[] | 対象エントリ操作 |
+
+- 承認 ON(既定)時は **staging への書込のみ**を行い "staged for approval (#id, kind)" を返す。OFF なら直接反映。
+- `list` は既存エントリ + 未承認件数の短いレポート。
+- plan モードでは memory_manage 自体を広告しない(list も非 read_only 扱い)。
+
+### skill_view(read_only)
+
+| param | 型 | 説明 |
+|---|---|---|
+| `name` | string | カタログの skill 名 |
+
+- SKILL.md 全文を返し、usage(`.usage.json`: use_count / last_used_ms)を 1 加算。 archived 内は不可。
+- plan モードでも使用可(read_only)。
+
+### skill_manage
+
+| param | 型 | 説明 |
+|---|---|---|
+| `action` | enum: create / edit / write_file / remove_file / delete / list | M3 |
+| `name` / `description` / `body` / `path` / `content` | string | create は name+description 必須(body 未指定は scaffold) |
+
+- name は slug 化(z-a0-9_-)して `~/.familiar/skills/<name>/` に `SKILL.md` + frontmatter。
+- write_approval ON 時は staging。approve 時にスナップショット(body hash)照合の CAS。
+- リンタ(warn のみ・書込ブロックなし): `incident-log-shape` / `oversized-body(>24k)` / `references-sprawl(>60)`。
+
+### M3 実装細部(spec 04 の補足)
+
+- 承認 on/off の永続先は `~/.familiar/settings.json`(`{ "memory_write_approval": bool, "skills_write_approval": bool }`)。config.yaml の値を既定として settings が優先。CLI `familiar memory approval on|off` はここを書く。
+- reviewer(background self-review)は `auxiliary.reviewer` スロット、未設定なら**当該セッションの provider/model**。1 回の chat(ツールなし)で JSON 提案配列を取得、fence/前置きがあっても本文中の最初の `{...}` を復元(text-salvage 方式)。**取得失敗・JSON 不正時は無かったものとして静かにスキップ**(対話に影響しない)。
+- 提案 JSON 形:
+  ```json
+  {"proposals": [
+    {"kind":"memory.create","content":"...","tags":["x"],"reason":"..."},
+    {"kind":"memory.patch","target":"<id>","content":"...","reason":"..."},
+    {"kind":"memory.remove","target":"<id>","reason":"..."},
+    {"kind":"skill.create","name":"kebab-name","description":"...","body":"..."},
+    {"kind":"skill.patch","target":"<skill-name>","body":"...","reason":"..."}
+  ]}
+  ```
+- staging ファイル: `pending/memory/<uuid>.json`、`pending/skills/<name>.json`。approve 時に CAS(対象の現在値が snapshot と整合しなければ適用を拒否)。
+- イベント: `improvement.staged {memoryCount, skillCount}`(turn 直後に session-scoped で発火)、`memory.truncation {dropped}`(注入の上限超過時)。
+- pipeline: 転写(直近 turn の user→tool→assistant、~10k 文字上限)→ reviewer → 提案 → staging → return {staged count}。この await の間ユーザーへの応答は返らない(境界は send() 完了時)。
 
 | ツール | Phase |
 |---|---|
-| memory_manage / skill_view / skill_manage | M3 |
+| memory_manage / skill_view / skill_manage | ✅ M3 |
 | MCP 動的ツール | M5 |

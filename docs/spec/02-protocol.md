@@ -44,6 +44,16 @@ POST /rpc
 | `session.send` | `{ id, text, provider?, model?, maxSteps?, yolo?, plan? }` | `{ turnId, steps, toolCalls, usage }`(イベントは WS / onEvent で流れる) |
 | `session.abort`(M2) | `{ id }` | — |
 | `permission.respond`(M2) | `{ requestId, approved }` | `{ resolved: true }` — serve モードの動的承認 |
+| `memory.list`(M3) | `{}` | `{ memories: MemoryEntry[], pendingCount }` |
+| `memory.pending`(M3) | `{}` | `{ items: PendingItem[] }` |
+| `memory.approve`(M3) | `{ id }` | `{ approved: true }`(id は 8 文字 prefix 可) |
+| `memory.reject`(M3) | `{ id }` | `{ rejected: true }` |
+| `memory.approval`(M3) | `{ set?: "on"\|"off" }` | `{ memoryWriteApproval, skillsWriteApproval }` |
+| `skills.list`(M3) | `{}` | `{ skills: SkillCatalogEntry[], pendingCount }` |
+| `skills.view`(M3) | `{ name }` | `{ body, warnings }` |
+| `skills.pending`(M3) | `{}` | `{ items: PendingItem[] }` |
+| `skills.approve`(M3) | `{ prefix?, all?: true }` | `{ approved: n, failed?: [..CAS 拒否..] }` |
+| `skills.reject`(M3) | `{ prefix }` | `{ rejected: n }` |
 | `config.get` に含まれるサニタイズ項目は 05 を参照 | | |
 
 `ModelInfo = { id: string; provider: string; contextTokens?: number }`
@@ -68,7 +78,10 @@ type AgentEvent =
   | { type: "compaction";    dropped: number; kept: number }
   // M2: dynamic approval (serve mode)
   | { type: "permission.request";  requestId: string; tool: string; summary: string; detail?: string }
-  | { type: "permission.resolved"; requestId: string; approved: boolean };
+  | { type: "permission.resolved"; requestId: string; approved: boolean }
+  // M3: self-improvement
+  | { type: "improvement.staged"; memoryCount: number; skillCount: number }
+  | { type: "memory.truncation"; dropped: number };
 Usage = { promptTokens?: number; completionTokens?: number };
 ToolCall = { id: string; name: string; arguments: string /* JSON text */ };
 ```

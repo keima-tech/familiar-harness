@@ -46,6 +46,16 @@ auxiliary:
   # curator:   { provider: openrouter, model: google/gemini-3-flash }
   # reviewer:  { provider: ollama, model: lfm2.5:latest }
 
+# M3: 自己改善
+memory:
+  write_approval: true      # false で memory_manage が直接反映
+  max_prompt_chars: 4000    # 注入合計上限(超過は新しめ順カット + memory.truncation)
+skills:
+  write_approval: true
+self_review:
+  enabled: true             # turn 完了後に reviewer(aux) を起動して staging 提案
+
+
 profiles: {}               # name → { system_prompt_file } (M2)
 
 permissions:

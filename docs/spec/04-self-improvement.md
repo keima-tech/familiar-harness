@@ -30,6 +30,7 @@ Hermes Agent の実装を参考に、以下の 5 部品で構成する。**memor
 - system prompt に毎ターン注入(合計文字数上限あり、超過は新しめ順でカットし `turn` イベント通知)
 - 操作: `memory_manage` ツール(create / patch / remove / list)
 - ユーザー側: `familiar memory pending|approve <id>|reject <id>|approval on|off`
+- 設定: `memory: { write_approval: true(既定), max_prompt_chars: 4000 }`。承認 on/off の実行時上書きは `~/.familiar/settings.json`。
 
 ## 2. skills(遅延ロード手続き)
 

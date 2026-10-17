@@ -1,6 +1,6 @@
 {
   "name": "@familiar/cli",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "familiar command line (headless run, chat REPL, serve)",
   "type": "module",
   "main": "dist/familiar.js",

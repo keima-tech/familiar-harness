@@ -128,6 +128,18 @@ cron:
     # - { name: daily-report, every_minutes: 1440, prompt: "…" }
 #   every_minutes: 0 は起動時に 1 回実行 / cron の risky 操作は即時 deny
 
+# --- M6 ---
+# SOUL.md 多段ペルソナ(設定キーではなくファイル群・読める順にすべて注入):
+#   1. ~/.familiar/SOUL.md                       … 全セッション共通(最も弱い)
+#   2. profiles.<p>.system_prompt_file
+#      | ~/.familiar/profiles/<p>/SOUL.md        … プロファイル個別(--profile で選択)
+#   3. <cwd>/.familiar/SOUL.md                   … プロジェクト固有(最も強い)
+# 注入見出しは順に "# Persona instructions" / "# Profile instructions" / "# Project persona"。
+lsp:
+  servers:
+    # typescript: { command: typescript-language-server, args: ["--stdio"], extensions: [ts, tsx, js, jsx] }
+    # mock:       { command: node, args: ["mock-lsp-server.mjs"], extensions: [txt], timeout_ms: 5000 }
+
 # 実行時上書き(優先: settings.json > config.yaml)
 #   ~/.familiar/settings.json: { "memory_write_approval": bool, "skills_write_approval": bool }
 ```

@@ -11,7 +11,7 @@
 | M3 | memory + skills + background self-review + write_approval(自己改善ループ第1版) ✅ |
 | M4 | compaction 要約(aux)・curator(Phase1 自動遷移 + opt-in 統合 + ledger/snapshot + scheduler)・Web UI(`familiar serve` が同一ポートで静的配信)・**Desktop α(Electron シェル: serve を spawn/検出して Web UI を読み込む)** ✅(electron-builder によるインストーラは M6) |
 | M5 | **MCP(stdio 動的ツール・依存ゼロ実装)・hooks(session_start / pre|post_tool_use / turn_complete)・cron 定期実行(serve 内スケジューラ・boot 実行も可)・task 並列化(同一メッセージ内の複数 task を同時実行)** ✅ — LSP と独立プラグイン API は M6 へ繰り越し(v1 製品スコープで hooks + MCP が実用プラグイン面を担う) |
-| M6 | v1.0: プロファイル(SOUL.md 多段)、**配布: electron-builder によるインストーラ(Windows: NSIS / Linux: deb・AppImage)**、テスト拡充(e2e)、docs | 未着手 |
+| M6 | v1.0: **プロファイル(SOUL.md 多段: global / profile / project)** ✅・**LSP `lsp_diagnostics`(依存ゼロ stdio クライアント)** ✅・**Web UI v1.0(session 削除・provider/model/profile ピッカー・curator/MCP/cron ステータスドロワー)** ✅・**配布: electron-builder によるインストーラ** ✅(deb・AppImage は本機でビルド実証 / NSIS 設定込み・Windows でのビルド検証は要 Windows 製機)・テスト拡充(smoke N: SOUL 多段 / O: LSP / session.delete e2e) ✅・docs ✅ | **完了 ✅(独立プラグイン API のみ継続課題)** |
 
 ## デスクトップ配布の正式要件(2026-10-17 ユーザー確定)
 
@@ -35,3 +35,19 @@
 | SSE パース差異(openai/anthropic/ollama) | プロバイダ単位のテスト fixture + mock provider |
 | node-pty 未使用(M1) | bash 工具はコマンド完了型のみ。PTY 必要な用途は M2 検討 |
 | Desktop の Linux IME | Electron 選定で回避(Tauri 可否は M4 再評価) |
+
+## M6 の実装メモ(2026-10-17)
+
+- **SOUL.md 多段**: 設定キーではなく 3 層のファイル(`~/.familiar/SOUL.md` →
+  `~/.familiar/profiles/<p>/SOUL.md`(or `profiles.<p>.system_prompt_file`)→ `<cwd>/.familiar/SOUL.md`)。
+  CLI `--profile` フラグは v1.0 で実装済み(run / chat の session.create に渡る)。smoke N で担保。
+- **LSP**: 依存ゼロの stdio LSP クライアント(Content-Length JSON-RPC)。
+  publishDiagnostics 待ち方式のため、pull 型のみのサーバ(未対応)は future work。
+  規模の大きい tsserver 等での長時間安定性は実運用での観察対象。
+- **electron-builder**: Linux deb + AppImage は実環境でビルド成功(アーティファクト
+  `packages/desktop/release/familiar-1.0.0-linux-{amd64,x86_64}`)。**NSIS は設定のみ** —
+  ビルド自体は Windows 製機で `npm run -w packages/desktop pack:win` を実行する必要がある。
+  electron のバージョンは electron-builder が厳密指定を要求するため **固定** (`38.8.6`)。
+  extraResources は electron-builder の既定フィルタがルート直下の `node_modules` を
+  除外するため、packages と node_modules を 2 つの FileSet に分けて投入している。
+- **継続課題**: 独立プラグイン API(hooks + MCP 以外の拡張点)は v1.1 以降の課題として残す。

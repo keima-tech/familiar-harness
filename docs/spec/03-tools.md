@@ -227,7 +227,20 @@ needsApproval → required でない → 実行
 |---|---|
 | memory_manage / skill_view / skill_manage | ✅ M3 |
 | MCP 動的ツール(`mcp__<server>__<tool>`) | ✅ M5 |
-| LSP(`lsp_diagnostics`) | M6(言語サーバ探索と実運用の検証を伴うため繰り越し) |
+| LSP(`lsp_diagnostics`) | ✅ M6 |
+
+### lsp_diagnostics(M6 実装)
+
+- 設定: `lsp.servers.<name>: { command, args?, extensions: [...], timeout_ms?, disabled? }`。
+  `extensions`(裸の拡張子, 例 `[ts, tsx]`)でファイル→サーバを振り分ける(先に一致した設定が勝つ)。
+- 依存ゼロ実装: stdio + **Content-Length フレームの JSON-RPC**。言語ごとに子プロセスを 1 つ
+  遅延起動し、`initialize → notifications/initialized → didOpen|didChange → publishDiagnostics 待ち`。
+- 挙動: `lsp_diagnostics(path)` は 1 ファイルを開き(or 再オープン時 didChange で全文差し替え)、
+  publishDiagnostics を `timeout_ms`(既定 5000)だけ待つ。タイムアウトで「診断なし」を返す
+  (クリーンか遅延かは区別して注記)。結果は `<file>:<line>:<col> [severity] message (code)` 整形。
+- `read_only: true` → plan モードでも使用可・承認不要。子プロセスは unref 済みで
+  CLI 終了を阻害せず、serve の dispose で明示停止。ルート rootUri は v1 では `file:///` 固定。
+  diagnostics 以外(prompts / hover / completion など)は未対応。
 
 ### MCP 動的ツール(M5 実装)
 

@@ -67,9 +67,11 @@ docs/spec/    詳細仕様
 | M2 | Google provider・fallback 連鎖・plan モード・動的承認 RPC・CLI リモート接続・webfetch/websearch/todo/task・worktree ✅ |
 | M3 | memory + skills + background self-review + write_approval ✅ |
 | M4 | compaction 要約・curator・Web UI(`familiar serve` 静的配信)・Desktop α(Electron) ✅ |
-| M5 (現在) | MCP(stdio 動的ツール)・hooks・cron 定期実行・task 並列化 ✅(LSP・プラグイン API は M6 へ) |
-| M5 | MCP / LSP / hooks・プラグイン / cron |
-| M6 | v1.0(配布: electron-builder によるインストーラ。Windows: NSIS / Linux: deb・AppImage) |
+| M5 | MCP(stdio 動的ツール)・hooks・cron 定期実行・task 並列化 ✅ |
+| M6 (**v1.0**) | SOUL.md 多段プロファイル・LSP `lsp_diagnostics`・Web UI v1.0(セッション削除・provider/model/profile ピッカー・ステータスドロワー)・electron-builder インストーラ(deb / AppImage 実装済み・NSIS 設定込み)・smoke N/O ✅ |
+
+デスクトップのインストーラは `npm run -w packages/desktop pack:linux`(deb + AppImage) /
+`pack:win`(NSIS・Windows 製機で実行)でビルドできます。
 
 詳細は `docs/spec/` を参照。
 

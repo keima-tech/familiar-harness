@@ -96,6 +96,13 @@ export class MockProvider implements Provider {
       streamText(present ? "MEMORY-PRESENT" : "MEMORY-ABSENT", onChunk);
       return { stopReason: "end_turn", usage: { promptTokens: 1, completionTokens: 2 } };
     }
+    if (userText.includes("@dump-prompt-soul")) {
+      const sys = params.system ?? "";
+      const target = userText.match(/@dump-prompt-soul\s+(.+)/)?.[1]?.trim();
+      const present = target ? sys.includes(target) : sys.includes("# Persona instructions");
+      streamText(present ? "SOUL-PRESENT" : "SOUL-ABSENT", onChunk);
+      return { stopReason: "end_turn", usage: { promptTokens: 1, completionTokens: 2 } };
+    }
     if (userText.includes("@dump-prompt-skill")) {
       const sys = params.system ?? "";
       const target = userText.match(/@dump-prompt-skill\s+(.+)/)?.[1]?.trim();
@@ -200,6 +207,18 @@ export class MockProvider implements Provider {
         type: "tool_call_delta",
         index: 0,
         argumentsDelta: JSON.stringify({ path: readMatch[1] ?? "missing.txt" }),
+      });
+      onChunk({ type: "stop", finishReason: "tool_calls" });
+      return { stopReason: "tool_calls" };
+    }
+    // M6: run the lsp_diagnostics tool on the given file.
+    const lspMatch = userText.match(/@lsp\s+(\S+)/);
+    if (lspMatch) {
+      onChunk({ type: "tool_call_start", index: 0, id: "call_mock_lsp", name: "lsp_diagnostics" });
+      onChunk({
+        type: "tool_call_delta",
+        index: 0,
+        argumentsDelta: JSON.stringify({ path: (lspMatch[1] ?? "missing.txt").trim() }),
       });
       onChunk({ type: "stop", finishReason: "tool_calls" });
       return { stopReason: "tool_calls" };

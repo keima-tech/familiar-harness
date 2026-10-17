@@ -7,6 +7,7 @@ export * from "./providers/base.js";
 export * from "./providers/index.js";
 export * from "./session/store.js";
 export * from "./tools/index.js";
+export * from "./lsp/index.js";
 export * from "./selfimprove/context.js";
 export * from "./selfimprove/settings.js";
 export * from "./selfimprove/memory/store.js";

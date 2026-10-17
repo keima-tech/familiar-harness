@@ -112,6 +112,21 @@ export interface CronConfig {
   jobs: CronJob[];
 }
 
+/** M6: language servers driven from the `lsp_diagnostics` tool (stdio). */
+export interface LspServerConfig {
+  command: string;
+  args?: string[];
+  /** file extensions (bare, no dot) routed to this server, e.g. ["ts", "tsx"] */
+  extensions: string[];
+  /** diagnostics wait per request; default 5000 */
+  timeout_ms?: number;
+  disabled?: boolean;
+}
+
+export interface LspConfig {
+  servers: Record<string, LspServerConfig>;
+}
+
 export interface PermissionsConfig {
   bash: BashPermissionConfig;
   files: { bounds: "cwd" | "unrestricted" };
@@ -150,6 +165,8 @@ export interface ResolvedConfig {
   hooks: HooksConfig;
   /** M5: scheduled prompts */
   cron: CronConfig;
+  /** M6: language servers for the lsp_diagnostics tool */
+  lsp: LspConfig;
   context: { token_soft_limit: number; keep_last: number; compaction: CompactionConfig };
   server: { port: number; bind: string; auth_token_file?: string };
 }
@@ -229,6 +246,7 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
   mcp: { servers: {} },
   hooks: {},
   cron: { jobs: [] },
+  lsp: { servers: {} },
   context: { token_soft_limit: 81_920, keep_last: 10, compaction: { mode: "summarize" } },
   server: { port: 46_210, bind: "127.0.0.1" },
 };
@@ -249,6 +267,7 @@ const KNOWN_TOP_LEVEL = new Set([
   "mcp",
   "hooks",
   "cron",
+  "lsp",
   "context",
   "server",
 ]);
@@ -475,6 +494,20 @@ curator:
 #     - name: daily-report
 #       every_minutes: 1440
 #       prompt: "昨日のセッションから学びを memory へ蓄積して"
+
+# M6: LSP 診断(lsp_diagnostics ツール)。拡張子で言語サーバへ振り分け
+# lsp:
+#   servers:
+#     typescript:
+#       command: typescript-language-server
+#       args: ["--stdio"]
+#       extensions: [ts, tsx, js, jsx]
+
+# M6: SOUL.md 多段ペルソナ(設定キーではなく以下のファイル群)
+#   1. ~/.familiar/SOUL.md              … 全セッション共通(最も弱い)
+#   2. ~/.familiar/profiles/<p>/SOUL.md … プロファイル個別
+#   3. <cwd>/.familiar/SOUL.md          … プロジェクト固有(最も強い)
+# 3つすべてが読める順に注入される(profiles.<p>.system_prompt_file で上書き可)。
 
 context:
   token_soft_limit: 81920

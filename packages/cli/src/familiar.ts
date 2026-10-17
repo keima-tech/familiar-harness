@@ -302,6 +302,7 @@ async function cmdRun(flags: Record<string, string | boolean>, positionals: stri
       model: modelId(flags),
       cwd,
       title: flag(flags, "title"),
+      profile: flag(flags, "profile"),
     })) as SessionRecord;
     sessionId = created.id;
   }
@@ -373,6 +374,7 @@ async function cmdChat(flags: Record<string, string | boolean>): Promise<void> {
       provider: providerId(flags),
       model: modelId(flags),
       cwd,
+      profile: flag(flags, "profile"),
     })) as SessionRecord;
     session = created;
     process.stdout.write(

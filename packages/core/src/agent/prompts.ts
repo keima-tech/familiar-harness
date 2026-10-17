@@ -56,7 +56,36 @@ export function projectAgentsFiles(cwd: string): { file: string; content: string
   return out;
 }
 
-/** Optional profile persona file (M2 feature; reading it already works). */
+/** Read a trimmed persona file; null when missing/empty/unreadable. */
+function readPersonaFile(p: string): string | null {
+  try {
+    if (fs.statSync(p).isFile()) {
+      const text = fs.readFileSync(p, "utf8").trim();
+      return text === "" ? null : text;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+/**
+ * M6: global persona layer — `<familiarHome>/SOUL.md`, applied to every session
+ * regardless of profile. Lowest precedence soul file.
+ */
+export function globalSoulPrompt(cfg: ResolvedConfig): string | null {
+  return readPersonaFile(path.join(cfg.homeDir, "SOUL.md"));
+}
+
+/**
+ * M6: project persona layer — `<cwd>/.familiar/SOUL.md`, applied when running in
+ * that project. Higher precedence than the global layer.
+ */
+export function projectSoulPrompt(cwd: string): string | null {
+  return readPersonaFile(path.join(cwd, ".familiar", "SOUL.md"));
+}
+
+/** Optional profile persona (M2): explicit system_prompt_file or a per-profile SOUL.md. */
 export function profileSystemPrompt(cfg: ResolvedConfig, profile?: string): string | null {
   if (!profile) return null;
   const explicitPath = cfg.profiles[profile]?.system_prompt_file;
@@ -65,11 +94,8 @@ export function profileSystemPrompt(cfg: ResolvedConfig, profile?: string): stri
     path.join(cfg.homeDir, "profiles", profile, "SOUL.md"),
   ].filter((p): p is string => !!p);
   for (const c of candidates) {
-    try {
-      if (fs.statSync(c).isFile()) return fs.readFileSync(c, "utf8").trim();
-    } catch {
-      /* ignore */
-    }
+    const content = readPersonaFile(c);
+    if (content !== null) return content;
   }
   return null;
 }
@@ -89,8 +115,15 @@ export function buildSystemPrompt(
 ): string {
   const parts: string[] = [basePersona()];
 
+  // M6: layered persona (SOUL.md) — global → profile → project, in that order.
+  const globalSoul = globalSoulPrompt(cfg);
+  if (globalSoul) parts.push(`# Persona instructions\n\n${globalSoul}`);
+
   const soul = profileSystemPrompt(cfg, opts.profile);
   if (soul) parts.push(`# Profile instructions\n\n${soul}`);
+
+  const projectSoul = projectSoulPrompt(opts.cwd);
+  if (projectSoul) parts.push(`# Project persona\n\n${projectSoul}`);
 
   for (const agents of projectAgentsFiles(opts.cwd)) {
     parts.push(`# Project instructions (${agents.file})\n\n${agents.content}`);

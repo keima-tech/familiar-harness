@@ -35,6 +35,7 @@ import {
   HookRunner,
   CronScheduler,
   DenyApprovalAdapter,
+  disposeLspHub,
   type ApprovalAdapter,
   type CronJob,
   type CuratorScheduler,
@@ -192,6 +193,7 @@ export class AgentServer {
   dispose(): void {
     this.mcp?.stopAll();
     this.cronScheduler?.stop();
+    disposeLspHub();
   }
 
   private async runCronJob(job: CronJob): Promise<void> {

@@ -42,6 +42,7 @@ Usage:
   familiar memory [list] | pending | approve <id> | reject <id> | approval on|off
   familiar skills [list] | view <name> | pending | approve <id|all> | reject <id>
   familiar curator status | run [--dry-run] [--consolidate] | pause | resume
+  familiar mcp                       # MCP server status + exposed tool names
            | pin/unpin <skill> | restore <skill> | list-archived | backup
            | rollback <id> | prune --days N | ledger [--skill]
   familiar worktree list | add <name> | remove <name> | prune   (git worktree wrapper)
@@ -461,11 +462,23 @@ async function cmdServe(flags: Record<string, string | boolean>): Promise<void> 
   const port = toNumber(flag(flags, "port")) ?? cfg.server.port;
   const server = new AgentServer({ config: cfg, rpcApprovals: true });
   const transport = await startHttpTransport(server, { port, bind: cfg.server.bind });
+  await server.mcpReady();
   server.startCuratorScheduler();
+  server.startCronScheduler();
   process.stdout.write(cyan(`familiar server listening on ${transport.url}\n`));
-  process.stdout.write(dim(`  rpc:   POST ${transport.url}/rpc\n  events: WS ${transport.url}/ws\n`));
+  process.stdout.write(dim(`  rpc:   POST ${transport.url}/rpc\n  events: WS ${transport.url}/ws\n  ui:    GET ${transport.url}/\n`));
+  const mcpServers = server.mcp?.status() ?? [];
+  if (mcpServers.length > 0) {
+    const ready = mcpServers.filter((s) => s.state === "ok").length;
+    process.stdout.write(dim(`  mcp:   ${ready}/${mcpServers.length} server(s) up, ${mcpServers.reduce((n, s) => n + s.tools.length, 0)} tool(s)\n`));
+  }
+  const cronJobs = server.cronScheduler?.status().jobs.length ?? 0;
+  if (cronJobs > 0) {
+    process.stdout.write(dim(`  cron:  ${cronJobs} job(s) scheduled\n`));
+  }
   process.stdout.write(dim("  press Ctrl+C to stop\n"));
   const shutdown = (): void => {
+    server.dispose();
     void transport.close().then(() => process.exit(0));
     setTimeout(() => process.exit(1), 3000).unref();
   };
@@ -658,6 +671,30 @@ async function cmdSkills(flags: Record<string, string | boolean>, positionals: s
     return;
   }
   fail(`unknown skills subcommand: ${sub} (list | view <name> | pending | approve <id|all> | reject <id>)`);
+}
+
+// ---------------------------------------------------------------------------
+// mcp diagnostics (M5)
+// ---------------------------------------------------------------------------
+
+async function cmdMcp(flags: Record<string, string | boolean>): Promise<void> {
+  const server = openLocalServer(flags);
+  await server.mcpReady();
+  const res = (await server.dispatch("mcp.status", {})) as {
+    servers: { name: string; state: string; tools: string[]; error?: string }[];
+  };
+  const servers = res.servers ?? [];
+  if (servers.length === 0) {
+    process.stdout.write(dim("no MCP servers configured (config: mcp.servers)\n"));
+    return;
+  }
+  for (const s of servers) {
+    const stateMark =
+      s.state === "ok" ? green("ready") : s.state === "error" ? red("error") : dim("stopped");
+    process.stdout.write(
+      `${stateMark}  ${cyan(s.name)}  tools: ${s.tools.map((t) => `mcp__${s.name}__${t}`).join(", ") || dim("(none)")}${s.error ? `  ${dim(s.error.slice(0, 120))}` : ""}\n`,
+    );
+  }
 }
 
 function approvalStateOr(server: AgentServer): { memoryWriteApproval: boolean; skillsWriteApproval: boolean } {
@@ -923,6 +960,9 @@ async function main(): Promise<void> {
         break;
       case "curator":
         await cmdCurator(flags, rest);
+        break;
+      case "mcp":
+        await cmdMcp(flags);
         break;
       case "worktree":
         await cmdWorktree(flags, rest, resolveCwd(flags));

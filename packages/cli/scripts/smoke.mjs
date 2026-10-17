@@ -465,6 +465,155 @@ console.log("— scenario I: web ui transport —");
   await new Promise((r) => setTimeout(r, 300));
 }
 
+// ---------------------------------------------------------------------------
+// Scenario J: MCP dynamic tools (stdio server → mcp__mock__echo_text)
+// ---------------------------------------------------------------------------
+console.log("— scenario J: mcp —");
+{
+  const homeJ = path.join(tmpBase, "home-mcp");
+  fs.mkdirSync(homeJ, { recursive: true });
+  fs.writeFileSync(
+    path.join(homeJ, "config.yaml"),
+    BASE_CONFIG.replace(
+      "server:",
+      `mcp:\n  servers:\n    mock:\n      command: node\n      args: ["${repoRoot}/packages/cli/scripts/mock-mcp-server.mjs"]\n      read_only: true\n\nserver:`,
+    ),
+  );
+
+  const j1 = await run(["mcp"], project, homeJ);
+  assert(
+    j1.stdout.includes("ready") && j1.stdout.includes("mcp__mock__echo_text"),
+    "familiar mcp shows the discovered tool",
+    j1.stdout.slice(0, 200) + j1.stderr.slice(0, 200),
+  );
+  const j2 = await run(["run", "-p", "@mcp hello world"], project, homeJ);
+  assert(
+    j2.stdout.includes("mcp-echo: HELLO WORLD"),
+    "MCP tool executed inside the turn loop",
+    j2.stdout.slice(-300) + j2.stderr.slice(-200),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Scenario K: lifecycle hooks (post_tool_use / turn_complete JSON on stdin)
+// ---------------------------------------------------------------------------
+console.log("— scenario K: hooks —");
+{
+  const homeK = path.join(tmpBase, "home-hooks");
+  fs.mkdirSync(homeK, { recursive: true });
+  fs.writeFileSync(
+    path.join(homeK, "hook.js"),
+    `import fs from "node:fs";\nlet c = "";\nprocess.stdin.on("data", (d) => (c += d));\nprocess.stdin.on("end", () => {\n  const e = JSON.parse(c);\n  fs.appendFileSync(\n    ${JSON.stringify(path.join(homeK, "hook.log"))},\n    e.event + ":" + (e.tool ?? "") + "\\n",\n  );\n});\n`,
+  );
+  fs.writeFileSync(
+    path.join(homeK, "config.yaml"),
+    BASE_CONFIG.replace(
+      "server:",
+      `hooks:\n  post_tool_use:\n    - node "${path.join(homeK, "hook.js")}"\n  turn_complete:\n    - node "${path.join(homeK, "hook.js")}"\n\nserver:`,
+    ),
+  );
+  await run(["run", "-p", "@read planets.txt"], project, homeK);
+  await new Promise((r) => setTimeout(r, 300));
+  const hookLog = fs.existsSync(path.join(homeK, "hook.log"))
+    ? fs.readFileSync(path.join(homeK, "hook.log"), "utf8")
+    : "";
+  assert(hookLog.includes("post_tool_use:read"), "post_tool_use hook fired", hookLog.slice(0, 120));
+  assert(hookLog.includes("turn_complete"), "turn_complete hook fired", hookLog.slice(0, 160));
+}
+
+// ---------------------------------------------------------------------------
+// Scenario L: cron once-at-boot job on familiar serve
+// ---------------------------------------------------------------------------
+console.log("— scenario L: cron —");
+{
+  const { spawn } = await import("node:child_process");
+  const homeL = path.join(tmpBase, "home-cron");
+  fs.mkdirSync(homeL, { recursive: true });
+  fs.writeFileSync(
+    path.join(homeL, "config.yaml"),
+    BASE_CONFIG.replace(
+      "server:",
+      `cron:\n  jobs:\n    - name: boot-digest\n      every_minutes: 0\n      prompt: "cron nightly digest for the boot probe"\n\nserver:`,
+    ),
+  );
+  const serveL = spawn(process.execPath, [familiarBin, "serve", "--port", "46232"], {
+    cwd: project,
+    env: env(homeL),
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let serveLLog = "";
+  serveL.stdout.on("data", (d) => (serveLLog += d));
+  serveL.stderr.on("data", (d) => (serveLLog += d));
+
+  let cronSession = null;
+  for (let i = 0; i < 60 && !cronSession; i++) {
+    await new Promise((r) => setTimeout(r, 250));
+    try {
+      const list = await fetch("http://127.0.0.1:46232/rpc", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "session.list" }),
+      }).then((r) => r.json());
+      const s = (list.result ?? []).find((x) => x.title.startsWith("cron: boot-digest"));
+      if (s) cronSession = s;
+    } catch {
+      /* serve not up yet */
+    }
+  }
+  assert(!!cronSession, "cron job created its session at boot", serveLLog.slice(0, 240));
+
+  const status = await fetch("http://127.0.0.1:46232/rpc", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "cron.status" }),
+  }).then((r) => r.json());
+  const job = status.result?.jobs?.[0];
+  assert(
+    status.result?.started === true && job?.ranOnce === true && job?.lastStatus === "ok",
+    "cron.status shows the completed boot run",
+    JSON.stringify(status.result ?? status.error).slice(0, 200),
+  );
+  serveL.kill("SIGTERM");
+  await new Promise((r) => setTimeout(r, 300));
+}
+
+// ---------------------------------------------------------------------------
+// Scenario M: parallel subagents (@task-pair emits two task calls in one step)
+// ---------------------------------------------------------------------------
+console.log("— scenario M: task parallelization —");
+{
+  const m1 = await run(["run", "-p", "@task-pair alpha beta", "--json"], project, familiarHome);
+  let taskCalls = 0;
+  let sawAlpha = false;
+  let sawBeta = false;
+  for (const line of m1.stdout.split("\n")) {
+    let parsed;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (parsed.event?.type === "tool.call" && parsed.event.toolCall?.name === "task") {
+      taskCalls += 1;
+    }
+    if (parsed.event?.type === "tool.result") {
+      const content = parsed.event.content ?? "";
+      if (content.includes("research alpha")) sawAlpha = true;
+      if (content.includes("research beta")) sawBeta = true;
+    }
+  }
+  assert(
+    taskCalls >= 2,
+    "two task calls executed from one assistant step",
+    JSON.stringify(taskCalls),
+  );
+  assert(
+    sawAlpha && sawBeta,
+    "both subagent final texts came back as tool results",
+    `alpha=${String(sawAlpha)} beta=${String(sawBeta)}`,
+  );
+}
+
 console.log(
   failures === 0 ? "\nsmoke: all checks passed" : `\nsmoke: ${failures} failure(s)`,
 );

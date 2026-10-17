@@ -47,6 +47,44 @@ node packages/cli/dist/familiar.js worktree add my-feature
 
 M2 で利用できる周辺機能: `webfetch` / `websearch`(要 SearXNG 設定)/ セッション todo / `task`(サブエージェント委任)。`familiar serve` では承認要求が `permission.request` イベントとして WS に流れ、クライアントの `permission.respond` で続行/拒否する。
 
+## サーバの再起動(変更を反映するには)
+
+`familiar serve` はビルド済み `packages/*/dist` を常駐実行するため、**コア・サーバ側のコード変更(git pull 含む)は再起動するまで反映されない**。UI の静的ファイル(`packages/server/public/` の HTML/CSS/JS)だけの変更は、ブラウザ(またはデスクトップ)の**再読み込みのみ**で反映され、再起動は不要です。
+
+反映の手順:
+
+```bash
+npm run build          # tsc -b で packages/*/dist を更新
+```
+
+**`familiar serve` を手動起動している場合**
+
+```bash
+# 起動中ターミナルで Ctrl+C してから、または:
+pkill -f "familiar.js serve"
+node packages/cli/dist/familiar.js serve --port 46210
+```
+
+**デスクトップ(Electron)を利用している場合**
+
+デスクトップは起動時に生存中のサーバ(ポート 46210〜46212)を**再利用**するため、アプリの再起動だけでは古い serve プロセスを使い続けてしまう点に注意。`unknown method: ...` のようなエラーは、たいていこの「古い serve が残っている」状態が原因。
+
+1. デスクトップアプリを完全に終了
+2. 残っている serve プロセスを確認・停止:
+   ```bash
+   pgrep -af "familiar.js serve"      # 一覧
+   pkill -f "familiar.js serve"       # 残っていれば停止
+   ```
+3. デスクトップを再起動(新しい `dist` で serve が spawn される)
+
+Windows の PowerShell では `pkill` の代わりに次で該当プロセスを停止できる(またはタスクマネージャで `node` / `electron` を終了):
+
+```powershell
+Get-CimInstance Win32_Process |
+  Where-Object { $_.CommandLine -like '*familiar.js serve*' } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId }
+```
+
 ## 構成
 
 ```

@@ -19,9 +19,20 @@ import {
   sanitizeConfigForApi,
   ProviderRegistry,
   SqliteSessionStore,
+  MemoryStore,
+  PendingMemoryStore,
+  SkillStore,
+  PendingSkillStore,
+  Settings,
+  postTurnReview,
+  approveStagedMemory,
+  rejectStagedMemory,
+  approveStagedSkill,
+  rejectStagedSkill,
   type ApprovalAdapter,
   type ResolvedConfig,
   type SessionStore,
+  type SelfImproveContext,
   type ToolRegistry,
 } from "@familiar/core";
 import { log } from "@familiar/core";
@@ -37,6 +48,7 @@ export class AgentServer {
   readonly store: SessionStore;
   readonly providers: ProviderRegistry;
   readonly todos: SessionTodoStore;
+  readonly selfImprove: SelfImproveContext;
   private readonly runner: AgentRunner;
   private rpcApproval?: RpcApprovalAdapter;
   private broadcastHook?: (event: unknown) => void;
@@ -50,12 +62,28 @@ export class AgentServer {
       /** M2: install the RPC approval bridge (serve mode) */
       rpcApprovals?: boolean;
       rpcApprovalTimeoutMs?: number;
+      /** M3: override the self-improvement context (tests) */
+      selfImprove?: SelfImproveContext;
+      /** M3: run background self-review after turns (default true) */
+      disableReview?: boolean;
     } = {},
   ) {
     this.cfg = opts.config ?? loadConfig();
     this.store = opts.store ?? new SqliteSessionStore(familiarPaths.stateDb());
     this.providers = new ProviderRegistry(this.cfg);
     this.todos = new SessionTodoStore();
+    this.selfImprove =
+      opts.selfImprove ??
+      (() => {
+        const home = this.cfg.homeDir || familiarPaths.home();
+        return {
+          memories: new MemoryStore(home),
+          pendingMemories: new PendingMemoryStore(home),
+          skills: new SkillStore(home),
+          pendingSkills: new PendingSkillStore(home),
+          settings: new Settings(home),
+        };
+      })();
     if (opts.rpcApprovals) {
       this.rpcApproval = new RpcApprovalAdapter(
         (event) => this.broadcastHook?.(event),
@@ -68,6 +96,7 @@ export class AgentServer {
       tools: opts.tools,
       approval,
       todos: this.todos,
+      selfImprove: this.selfImprove,
       taskRunner: (args) =>
         this.runSubagentTask({
           sessionId: args.sessionId,
@@ -76,9 +105,11 @@ export class AgentServer {
           yolo: args.yolo,
         }),
     });
+    this.disableReview = opts.disableReview === true;
   }
 
   private approval?: ApprovalAdapter;
+  private disableReview: boolean;
 
   /** Hook installed by the HTTP transport; permission events go to all clients. */
   attachBroadcast(broadcast: (event: unknown) => void): void {
@@ -160,6 +191,26 @@ export class AgentServer {
         this.broadcastHook?.({ type: "permission.resolved", requestId, approved });
         return { resolved: true };
       }
+      case "memory.list":
+        return this.memoryList();
+      case "memory.pending":
+        return this.memoryPending();
+      case "memory.approve":
+        return this.memoryApprove(params);
+      case "memory.reject":
+        return this.memoryReject(params);
+      case "memory.approval":
+        return this.memoryApproval(params);
+      case "skills.list":
+        return this.skillsList();
+      case "skills.view":
+        return this.skillsView(params);
+      case "skills.pending":
+        return this.skillsPending();
+      case "skills.approve":
+        return this.skillsApprove(params);
+      case "skills.reject":
+        return this.skillsReject(params);
       default:
         throw new RpcError(RPC_ERROR_METHOD_NOT_FOUND, `unknown method: ${method}`);
     }
@@ -211,8 +262,9 @@ export class AgentServer {
     if (!sessionId || text === undefined || text === null || text === "") {
       throw new RpcError(RPC_ERROR_INVALID_PARAMS, "params 'id' and 'text' are required");
     }
-    this.requireSession(sessionId);
+    const session = this.requireSession(sessionId);
     const events = (event: unknown): void => ctx.onEvent?.(sessionId, event);
+    const msgCountBefore = this.store.getMessages(sessionId).length;
     try {
       const res = await this.runner.runTurn({
         sessionId,
@@ -225,12 +277,149 @@ export class AgentServer {
         maxSteps: num(params, "maxSteps"),
         onEvent: events,
       });
+      // M3: background self-review of this turn (stage-only; never blocks long)
+      if (!this.disableReview) {
+        await this.reviewTurn({ sessionId, session, msgCountBefore, ctx });
+      }
       return res;
     } catch (err) {
       // Include the failure in the response as well (events already carried it).
       log.error(`turn failed: ${err instanceof Error ? err.message : String(err)}`);
       throw err;
     }
+  }
+
+  /** Spec 04 §3: extract lessons from the just-finished turn and STAGE them. */
+  private async reviewTurn(args: {
+    sessionId: string;
+    session: SessionRecord;
+    msgCountBefore: number;
+    ctx: RpcContext;
+  }): Promise<void> {
+    try {
+      const all = this.store.getMessages(args.sessionId);
+      const slice = all.slice(args.msgCountBefore);
+      if (slice.length === 0) return;
+      const transcript = slice
+        .map((m) => {
+          const head = m.content.split("\n").slice(0, 6).join(" ⏎ ").slice(0, 600);
+          const calls = m.toolCalls?.map((c) => `[tool ${c.name}(${c.arguments.slice(0, 200)})]`).join(" ") ?? "";
+          return `${m.role}: ${head}${calls ? ` ${calls}` : ""}`;
+        })
+        .join("\n");
+      const outcome = await postTurnReview(this.cfg, this.providers, this.selfImprove, {
+        sessionId: args.sessionId,
+        provider: args.session.provider,
+        model: args.session.model,
+        transcript,
+        onStaged: (memoryCount, skillCount) => {
+          args.ctx.onEvent?.(args.sessionId, { type: "improvement.staged", memoryCount, skillCount });
+        },
+      });
+      if (outcome.memoryCount + outcome.skillCount > 0) {
+        log.info(
+          `self-review staged ${outcome.memoryCount} memory, ${outcome.skillCount} skill proposals (${args.sessionId.slice(0, 8)})`,
+        );
+      }
+    } catch (err) {
+      // The review pipeline must never break the main conversation.
+      log.debug(`self-review error (ignored): ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // M3 RPC: memory + skills
+  // -------------------------------------------------------------------------
+
+  private memoryList(): Record<string, unknown> {
+    return {
+      memories: this.selfImprove.memories.list(),
+      pendingCount: this.selfImprove.pendingMemories.count(),
+    };
+  }
+
+  private memoryPending(): Record<string, unknown> {
+    return { items: this.selfImprove.pendingMemories.toApi(this.selfImprove.pendingMemories.list()) };
+  }
+
+  private memoryApprove(params: Record<string, unknown>): Record<string, unknown> {
+    const prefix = str(params, "id");
+    if (!prefix) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "id is required");
+    const res = approveStagedMemory(this.selfImprove.pendingMemories, this.selfImprove.memories, prefix);
+    if (!res.approved) throw new RpcError(RPC_ERROR_INVALID_PARAMS, res.message);
+    return { approved: true, message: res.message };
+  }
+
+  private memoryReject(params: Record<string, unknown>): Record<string, unknown> {
+    const prefix = str(params, "id");
+    if (!prefix) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "id is required");
+    const res = rejectStagedMemory(this.selfImprove.pendingMemories, prefix);
+    if (!res.rejected) throw new RpcError(RPC_ERROR_INVALID_PARAMS, res.message);
+    return { rejected: true, message: res.message };
+  }
+
+  private memoryApproval(params: Record<string, unknown>): Record<string, unknown> {
+    const set = str(params, "set");
+    if (set) {
+      if (set !== "on" && set !== "off") {
+        throw new RpcError(RPC_ERROR_INVALID_PARAMS, "set must be on|off");
+      }
+      this.selfImprove.settings.set("memory_write_approval", set === "on");
+    }
+    return this.approvalState();
+  }
+
+  private approvalState(): Record<string, unknown> {
+    const si = this.selfImprove;
+    const memOn = si.settings.get("memory_write_approval") ?? this.cfg.memory.write_approval !== false;
+    const skillOn = si.settings.get("skills_write_approval") ?? this.cfg.skills.write_approval !== false;
+    return { memoryWriteApproval: memOn, skillsWriteApproval: skillOn };
+  }
+
+  private skillsList(): Record<string, unknown> {
+    return {
+      skills: this.selfImprove.skills.list(),
+      pendingCount: this.selfImprove.pendingSkills.count(),
+    };
+  }
+
+  private skillsView(params: Record<string, unknown>): Record<string, unknown> {
+    const name = str(params, "name");
+    if (!name) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "name is required");
+    const view = this.selfImprove.skills.view(name);
+    if (!view) throw new RpcError(RPC_ERROR_INVALID_PARAMS, `skill not found: ${name}`);
+    return { body: view.body, warnings: view.warnings };
+  }
+
+  private skillsPending(): Record<string, unknown> {
+    return { items: this.selfImprove.pendingSkills.toApi(this.selfImprove.pendingSkills.list()) };
+  }
+
+  private skillsApprove(params: Record<string, unknown>): Record<string, unknown> {
+    const si = this.selfImprove;
+    if (params["all"] === true) {
+      const items = si.pendingSkills.list();
+      const approved: string[] = [];
+      const failed: string[] = [];
+      for (const item of items) {
+        const res = approveStagedSkill(si.pendingSkills, si.skills, item.id);
+        (res.approved ? approved : failed).push(`${item.id}: ${res.message}`);
+      }
+      return { approved: approved.length, messages: approved, failed };
+    }
+    const prefix = str(params, "prefix");
+    if (!prefix) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "prefix or all is required");
+    const res = approveStagedSkill(si.pendingSkills, si.skills, prefix);
+    if (!res.approved) throw new RpcError(RPC_ERROR_INVALID_PARAMS, res.message);
+    return { approved: 1, message: res.message };
+  }
+
+  private skillsReject(params: Record<string, unknown>): Record<string, unknown> {
+    const prefix = str(params, "prefix");
+    if (!prefix) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "prefix is required");
+    const res = rejectStagedSkill(this.selfImprove.pendingSkills, prefix);
+    if (!res.rejected) throw new RpcError(RPC_ERROR_INVALID_PARAMS, res.message);
+    return { rejected: 1, message: res.message };
   }
 
   private requireSession(id: string | undefined): SessionRecord {

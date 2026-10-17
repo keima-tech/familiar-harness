@@ -3,6 +3,10 @@ dist/
 *.tsbuildinfo
 *.tsbuildinfo/
 
+# Desktop packaging (electron-builder staging + installers)
+packages/desktop/stage/
+packages/desktop/release/
+
 # Dependencies
 node_modules/
 

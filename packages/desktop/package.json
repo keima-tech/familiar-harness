@@ -1,13 +1,55 @@
 {
   "name": "@familiar/desktop",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
-  "description": "Familiar desktop shell (Electron) — M4 alpha: wraps the familiar-server web UI",
+  "description": "Familiar desktop shell (Electron) — client for familiar-server; packaged via electron-builder (M6)",
   "main": "main.js",
+  "author": "Familiar contributors",
+  "homepage": "https://example.invalid/familiar",
+  "license": "UNLICENSED",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "stage": "node scripts/stage.mjs",
+    "pack:linux": "npm run stage && electron-builder --linux deb AppImage",
+    "pack:win": "npm run stage && electron-builder --win nsis"
   },
   "devDependencies": {
-    "electron": "^38.0.0"
+    "electron": "38.8.6",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "dev.familiar.harness",
+    "productName": "Familiar",
+    "directories": { "output": "release" },
+  "artifactName": "familiar-${version}-${os}-${arch}.${ext}",
+    "files": [
+      "main.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "stage/familiar/packages",
+        "to": "familiar/packages",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "stage/familiar/node_modules",
+        "to": "familiar/node_modules",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "target": ["deb", "AppImage"],
+      "category": "Development",
+      "executableName": "familiar",
+      "maintainer": "Familiar contributors <familiar@example.invalid>"
+    }
   }
 }

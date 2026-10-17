@@ -65,6 +65,11 @@ function resolveFamiliarCli() {
   // repo layout: packages/desktop/main.js -> ../cli/dist/familiar.js
   const sibling = path.resolve(__dirname, "..", "cli", "dist", "familiar.js");
   if (fs.existsSync(sibling)) return sibling;
+  // packaged layout (electron-builder extraResources): <resources>/familiar/packages/cli/dist/familiar.js
+  if (process.resourcesPath) {
+    const packed = path.join(process.resourcesPath, "familiar", "packages", "cli", "dist", "familiar.js");
+    if (fs.existsSync(packed)) return packed;
+  }
   return "familiar"; // assume installed globally (familiar / familiar.cmd on PATH)
 }
 

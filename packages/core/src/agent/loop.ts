@@ -19,6 +19,9 @@ import {
 } from "../tools/index.js";
 import { DenyApprovalAdapter, type ApprovalAdapter } from "../tools/permissions.js";
 import { buildSystemPrompt, todoSection } from "./prompts.js";
+import type { SelfImproveContext } from "../selfimprove/context.js";
+import { memorySection, skillsSection } from "../selfimprove/memory/inject.js";
+import { SELF_IMPROVE_TOOLS } from "../tools/index.js";
 
 export interface RunTurnOptions {
   sessionId: string;
@@ -67,12 +70,15 @@ export class AgentRunner {
         sessionId: string;
         yolo: boolean;
       }) => Promise<string>;
+      /** M3: self-improvement stores (absent → memory/skill tools hidden) */
+      selfImprove?: SelfImproveContext;
     } = {},
   ) {
     this.tools = opts.tools ?? defaultToolRegistry();
     this.approval = opts.approval ?? new DenyApprovalAdapter();
     this.todos = opts.todos;
     this.taskRunner = opts.taskRunner;
+    this.selfImprove = opts.selfImprove;
   }
 
   private approval: ApprovalAdapter;
@@ -83,6 +89,7 @@ export class AgentRunner {
     sessionId: string;
     yolo: boolean;
   }) => Promise<string>;
+  private readonly selfImprove?: SelfImproveContext;
 
   async runTurn(opts: RunTurnOptions): Promise<RunTurnResult> {
     const session = this.store.getSession(opts.sessionId);
@@ -116,17 +123,32 @@ export class AgentRunner {
 
     // Plan mode (M2): only read-only tools are advertised and executable.
     const plan = opts.plan === true;
-    const effectiveTools: Tool[] = plan
+    const baseTools: Tool[] = plan
       ? this.tools.list().filter((t) => t.read_only === true)
       : this.tools.list();
+    // M3: memory/skill tools only when the self-improvement context is wired.
+    const effectiveTools: Tool[] = this.selfImprove
+      ? baseTools
+      : baseTools.filter((t) => !SELF_IMPROVE_TOOLS.includes(t.name as "memory_manage"));
 
     try {
       for (let stepIndex = 0; stepIndex < maxSteps; stepIndex++) {
         steps += 1;
         opts.onEvent({ type: "step.start", turnId, index: stepIndex });
 
-        // Build injected prompt sections: todos first, then caller extras (M3 memory).
+        // Build injected prompt sections: memory + skills catalog (M3),
+        // todos first, then caller extras (later phases).
         const extra: string[] = [];
+        if (this.selfImprove) {
+          const memoryCap = this.cfg.memory?.max_prompt_chars ?? 4000;
+          const mem = memorySection(this.selfImprove.memories.list(), memoryCap);
+          if (mem.text !== "") extra.push(mem.text);
+          if (mem.dropped > 0) {
+            opts.onEvent({ type: "memory.truncation", dropped: mem.dropped });
+          }
+          const sk = skillsSection(this.selfImprove.skills.list());
+          if (sk !== "") extra.push(sk);
+        }
         if (this.todos) {
           const todoItems = this.todos.get(session.id);
           const section = todoSection(todoItems);
@@ -235,6 +257,7 @@ export class AgentRunner {
           approval: this.approval,
           todos: this.todos,
           taskRunner: this.taskRunner,
+          selfImprove: this.selfImprove,
         };
         for (const call of stepToolCalls) {
           opts.onEvent({ type: "tool.call", messageId: assistantId, toolCall: call });

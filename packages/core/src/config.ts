@@ -49,6 +49,19 @@ export interface WebSearchConfig {
   base_url: string;
 }
 
+export interface MemoryConfig {
+  write_approval: boolean;
+  max_prompt_chars: number;
+}
+
+export interface SkillsConfig {
+  write_approval: boolean;
+}
+
+export interface SelfReviewConfig {
+  enabled: boolean;
+}
+
 export interface PermissionsConfig {
   bash: BashPermissionConfig;
   files: { bounds: "cwd" | "unrestricted" };
@@ -71,6 +84,10 @@ export interface ResolvedConfig {
   auxiliary: Record<string, AuxiliarySlot>;
   profiles: Record<string, { system_prompt_file?: string }>;
   permissions: PermissionsConfig;
+  /** M3: self-improvement */
+  memory: MemoryConfig;
+  skills: SkillsConfig;
+  self_review: SelfReviewConfig;
   context: { token_soft_limit: number; keep_last: number };
   server: { port: number; bind: string; auth_token_file?: string };
 }
@@ -136,6 +153,9 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
     },
     websearch: { provider: "searxng", base_url: "" },
   },
+  memory: { write_approval: true, max_prompt_chars: 4000 },
+  skills: { write_approval: true },
+  self_review: { enabled: true },
   context: { token_soft_limit: 81_920, keep_last: 10 },
   server: { port: 46_210, bind: "127.0.0.1" },
 };
@@ -149,6 +169,9 @@ const KNOWN_TOP_LEVEL = new Set([
   "auxiliary",
   "profiles",
   "permissions",
+  "memory",
+  "skills",
+  "self_review",
   "context",
   "server",
 ]);
@@ -337,6 +360,15 @@ permissions:
   websearch:
     provider: searxng
     base_url: ""    # e.g. http://127.0.0.1:8080
+
+# M3: 自己改善
+memory:
+  write_approval: true      # false で memory_manage / self-review が直接反映
+  max_prompt_chars: 4000    # 注入合計上限(超過分は新しめ順カット)
+skills:
+  write_approval: true
+self_review:
+  enabled: true             # turn 完了後に reviewer を起動して staging 提案
 
 context:
   token_soft_limit: 81920

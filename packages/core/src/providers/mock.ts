@@ -40,11 +40,59 @@ export class MockProvider implements Provider {
     }
 
     const userText = last?.role === "user" ? last.content : "";
+    // Background self-review prompt (M3): if the review prompt contains the
+    // marker "@make-lesson <text>", emit a deterministic memory.create proposal.
+    if (userText.includes("# LAST TURN (transcript)")) {
+      const lesson = userText.match(/@make-lesson\s+([^\n]+)/);
+      const proposals = lesson
+        ? [
+            {
+              kind: "memory.create",
+              content: `Lesson: ${lesson[1]?.trim() ?? "flagged correction"}`,
+              tags: ["review"],
+              reason: "user-flagged correction from the turn",
+            },
+          ]
+        : [];
+      streamText(JSON.stringify({ proposals }), onChunk);
+      return { stopReason: "end_turn", usage: { promptTokens: 1, completionTokens: 2 } };
+    }
     // `@fail` or `@fail-<providerId>`: simulate a pre-stream failure.
     // With the provider form, only that provider fails (fallback tests).
     const failMatch = userText.match(/@fail(?:-([a-z0-9_.-]+))?\b/);
     if (failMatch && (failMatch[1] === undefined || failMatch[1] === this.id)) {
       throw new ProviderError("simulated provider failure", 503, this.id);
+    }
+    if (userText.includes("@dump-prompt-memory")) {
+      const sys = params.system ?? "";
+      const target = userText.match(/@dump-prompt-memory\s+(.+)/)?.[1]?.trim();
+      const present = target ? sys.includes(target) : sys.includes("# Long-term memory");
+      streamText(present ? "MEMORY-PRESENT" : "MEMORY-ABSENT", onChunk);
+      return { stopReason: "end_turn", usage: { promptTokens: 1, completionTokens: 2 } };
+    }
+    if (userText.includes("@dump-prompt-skill")) {
+      const sys = params.system ?? "";
+      const target = userText.match(/@dump-prompt-skill\s+(.+)/)?.[1]?.trim();
+      const present = target ? sys.includes(target) : sys.includes("# Skills");
+      streamText(present ? "SKILLS-PRESENT" : "SKILLS-ABSENT", onChunk);
+      return { stopReason: "end_turn", usage: { promptTokens: 1, completionTokens: 2 } };
+    }
+    const skillCreate = userText.match(/@skill-create\s+([^\n]+)/);
+    if (skillCreate) {
+      const name = (skillCreate[1] ?? "").trim();
+      onChunk({ type: "tool_call_start", index: 0, id: "call_mock_s", name: "skill_manage" });
+      onChunk({
+        type: "tool_call_delta",
+        index: 0,
+        argumentsDelta: JSON.stringify({
+          action: "create",
+          name,
+          description: `test skill ${name}`,
+          body: `# ${name}\n\nWhen: smoke tests ask about ${name}\nProcedure: 1. do it\nWhy it works: deterministic`,
+        }),
+      });
+      onChunk({ type: "stop", finishReason: "tool_calls" });
+      return { stopReason: "tool_calls" };
     }
     const writeMatch = userText.match(/@write\s+(\S+)/);
     if (writeMatch) {

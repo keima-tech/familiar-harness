@@ -17,6 +17,8 @@ export interface ToolContext {
     sessionId: string;
     yolo: boolean;
   }) => Promise<string>;
+  /** M3: self-improvement stores; absent → memory/skill tools self-disable */
+  selfImprove?: import("../selfimprove/context.js").SelfImproveContext;
 }
 
 export interface ToolOutput {

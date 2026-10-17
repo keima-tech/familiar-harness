@@ -1,4 +1,7 @@
 import { createServer, type Server } from "node:http";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
 import type { AgentEvent, RpcContext, RpcRequest, RpcResponse } from "@familiar/protocol";
 import { RPC_ERROR_INTERNAL, RPC_ERROR_METHOD_NOT_FOUND, RPC_ERROR_INVALID_PARAMS } from "@familiar/protocol";
@@ -9,8 +12,8 @@ import { log } from "@familiar/core";
  * HTTP + WebSocket transport for AgentServer.
  * - POST /rpc        JSON-RPC request/response (final results only)
  * - GET  /ws         event stream; AgentEvents are pushed to every client
- *
- * M1 is single-user localhost; auth token arrives in M2.
+ * - GET  /           M4: single-page web UI (packages/server/public)
+ * - GET  /healthz    liveness probe
  */
 export interface HttpTransportOptions {
   port: number;
@@ -20,6 +23,19 @@ export interface HttpTransportOptions {
 export interface HttpTransport {
   url: string;
   close(): Promise<void>;
+}
+
+// Whitelisted static assets only (no directory traversal surface).
+const STATIC_FILES: Record<string, { file: string; type: string }> = {
+  "/": { file: "index.html", type: "text/html; charset=utf-8" },
+  "/index.html": { file: "index.html", type: "text/html; charset=utf-8" },
+  "/app.js": { file: "app.js", type: "text/javascript; charset=utf-8" },
+  "/app.css": { file: "app.css", type: "text/css; charset=utf-8" },
+};
+
+function publicDir(): string {
+  // dist/http-transport.js -> ../public
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
 }
 
 export function startHttpTransport(
@@ -36,7 +52,32 @@ export function startHttpTransport(
   };
 
   const httpServer: Server = createServer(async (req, res) => {
-    const url = (req.url ?? "").split("?")[0];
+    const url = ((req.url ?? "").split("?")[0]) ?? "";
+    if (req.method === "GET" || req.method === "HEAD") {
+      if (url === "/healthz") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true, protocol: "familiar/1" }));
+        return;
+      }
+      const asset = STATIC_FILES[url];
+      if (asset) {
+        const file = path.join(publicDir(), asset.file);
+        if (fs.existsSync(file)) {
+          res.writeHead(200, { "Content-Type": asset.type });
+          res.end(req.method === "HEAD" ? undefined : fs.readFileSync(file));
+          return;
+        }
+      }
+      if (url === "/") {
+        // UI not shipped → fall back to a plain hint page.
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(
+          "<!doctype html><title>familiar</title><p>familiar server is running. " +
+            "UI assets not found (packages/server/public). RPC: POST /rpc, WS: /ws, probe: /healthz.</p>",
+        );
+        return;
+      }
+    }
     if (req.method !== "POST" || url !== "/rpc") {
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "not found" }));

@@ -116,6 +116,18 @@ auxiliary:
   # compactor: { provider: ollama, model: lfm2.5:latest }
   # curator:   { provider: openrouter, model: google/gemini-3-flash }
 
+# --- M5 ---
+mcp:
+  servers:
+    # fs: { command: npx, args: ["-y", "@modelcontextprotocol/server-filesystem", /data], read_only: true }
+hooks:
+  # post_tool_use:
+  #   - node ~/.familiar/hooks/audit.js
+cron:
+  jobs:
+    # - { name: daily-report, every_minutes: 1440, prompt: "…" }
+#   every_minutes: 0 は起動時に 1 回実行 / cron の risky 操作は即時 deny
+
 # 実行時上書き(優先: settings.json > config.yaml)
 #   ~/.familiar/settings.json: { "memory_write_approval": bool, "skills_write_approval": bool }
 ```

@@ -10,7 +10,7 @@
 | **M3** | **memory + skills + background self-review + write_approval(自己改善ループ第1版)** — staging/CAS・usage 統計・lint・`familiar memory|skills` コマンド・`improvement.staged`/`memory.truncation` イベント ✅(compaction 要約(aux)は簡易 drop 版のまま、要約版は M4 へ繰り越し) | **完了 ✅** |
 | M3 | memory + skills + background self-review + write_approval(自己改善ループ第1版) ✅ |
 | M4 | compaction 要約(aux)・curator(Phase1 自動遷移 + opt-in 統合 + ledger/snapshot + scheduler)・Web UI(`familiar serve` が同一ポートで静的配信)・**Desktop α(Electron シェル: serve を spawn/検出して Web UI を読み込む)** ✅(electron-builder によるインストーラは M6) |
-| M5 | MCP / LSP / hooks・プラグイン / cron・定期実行・task 並列化 | 未着手 |
+| M5 | **MCP(stdio 動的ツール・依存ゼロ実装)・hooks(session_start / pre|post_tool_use / turn_complete)・cron 定期実行(serve 内スケジューラ・boot 実行も可)・task 並列化(同一メッセージ内の複数 task を同時実行)** ✅ — LSP と独立プラグイン API は M6 へ繰り越し(v1 製品スコープで hooks + MCP が実用プラグイン面を担う) |
 | M6 | v1.0: プロファイル(SOUL.md 多段)、**配布: electron-builder によるインストーラ(Windows: NSIS / Linux: deb・AppImage)**、テスト拡充(e2e)、docs | 未着手 |
 
 ## デスクトップ配布の正式要件(2026-10-17 ユーザー確定)

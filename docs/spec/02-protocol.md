@@ -56,6 +56,8 @@ POST /rpc
 | `skills.reject`(M3) | `{ prefix }` | `{ rejected: n }` |
 | `curator.status`(M4) | `{}` | `{ curator: { enabled, paused, consolidate, lastRunAt?, nextDueAt?, stale[], archived[], snapshots } }` |
 | `curator.run`(M4) | `{ dryRun?, consolidate? }` | `{ phase1, consolidation? }` — phase-1 遷移 + (opt-in) 統合提案の staging |
+| `mcp.status`(M5) | `{}` | `{ servers: [{ name, state, tools[], error? }] }` — 各 MCP サーバの接続状態とツール一覧 |
+| `cron.status`(M5) | `{}` | `{ started, jobs: [{ name, everyMinutes, prompt, lastRunAt?, lastStatus?, nextRunAt?, onceAtBoot, ranOnce }] }` |
 
 ### serve の静的配信(M4)
 
@@ -89,7 +91,9 @@ type AgentEvent =
   | { type: "permission.resolved"; requestId: string; approved: boolean }
   // M3: self-improvement
   | { type: "improvement.staged"; memoryCount: number; skillCount: number }
-  | { type: "memory.truncation"; dropped: number };
+  | { type: "memory.truncation"; dropped: number }
+  // M5: scheduled prompts (serve)
+  | { type: "cron.run"; name: string; status: "ok" | "error"; durationMs: number };
 Usage = { promptTokens?: number; completionTokens?: number };
 ToolCall = { id: string; name: string; arguments: string /* JSON text */ };
 ```

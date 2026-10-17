@@ -13,7 +13,7 @@
                         │
      ┌──────────────────┼────────────────────┐
   AgentRunner        SessionStore          Integrations
-  (agent loop)       (node:sqlite)         (ツール実行・将来: MCP/LSP)
+  (agent loop)       (node:sqlite)         (ツール実行・MCP クライアント(M5)・LSP は M6)
      │
   Provider 層(openai_compatible / anthropic / mock / …)
 ```
@@ -104,4 +104,5 @@ packages/
   server/public/{index.html, app.js, app.css}   # M4: familiar serve 同梱 Web UI
   cli/src/{familiar.ts, ui/display.ts}
   desktop/  # M4 α: Electron シェル(main.js — serve spawn/probe + BrowserWindow)
+  # core 追加(M5): mcp/(stdio クライアント)・hooks/(Lifecycles)・cron/(スケジューラ)
 ```

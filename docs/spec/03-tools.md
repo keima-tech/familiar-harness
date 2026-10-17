@@ -226,4 +226,41 @@ needsApproval → required でない → 実行
 | ツール | Phase |
 |---|---|
 | memory_manage / skill_view / skill_manage | ✅ M3 |
-| MCP 動的ツール | M5 |
+| MCP 動的ツール(`mcp__<server>__<tool>`) | ✅ M5 |
+| LSP(`lsp_diagnostics`) | M6(言語サーバ探索と実運用の検証を伴うため繰り越し) |
+
+### MCP 動的ツール(M5 実装)
+
+- 設定: `mcp.servers.<name>: { command, args?, env?, cwd?, timeout_ms?, read_only?, disabled? }`。
+  1 サーバ = 1 子プロセス(stdio・改行区切り JSON-RPC 2.0 / 純 Node 実装・依存追加なし)。
+- 起動で `initialize` → `notifications/initialized` → `tools/list`。ツールは `mcp__<server>__<tool>`
+  名前空間で通常ツールと同様にシステムプロンプトへ列挙され、provider から呼び出せる。
+- `read_only: true` のサーバツールは plan モードでも使用可・承認を省略。既定(false)では
+  bash と同様に `ctx.approval` を経由(serve モードでは動的承認イベント、headless は deny)。
+- 失敗時の挙動: サーバ接続 error は `mcp.status` で可視化。discover 失敗のサーバのみ
+  ツールが不在になり、他サーバ・対話には影響しない。
+- 未対応: MCP の resources / prompts / サンプリング。tools のみ(v1)。
+- 子プロセスの寿命: serve は shutdown で dispose、CLI run/chat は exit 時クリーンアップ。
+- subagent(task)実行では MCP ツールを広告しない(親セッションのみ・M5 ポリシー)。
+
+### ライフサイクルフック(M5)
+
+- 設定: `hooks.<event>: [command, ...]`(イベント: `session_start` / `pre_tool_use` / `post_tool_use` / `turn_complete`)。
+- 実行: コマンド標準入力に `{event, sessionId, cwd, timestamp, tool?, args?, isError?, durationMs?}` を渡す。
+  `resolveShellCommand()` 経由(bash/PowerShell)、タイムアウト 10s、**失敗はログのみで対話を壊さない**。
+- cron 実行の turn も同様にフックされる。
+
+### task 並列化(M5)
+
+- 1 つの assistant メッセージに `task` 呼び出しが複数ある場合のみ並列実行(Promise.all)。
+  task 以外(ファイル系など副作用系ツール)は従来どおり直列で実行し、ファイル効果の順序を保証する。
+- 結果は各 call id 単位で永続化・イベント化(完了順に `tool.result` 発火、id で紐付く)。
+
+### cron 定期実行(M5)
+
+- 設定: `cron.jobs: [{ name?, every_minutes, prompt, enabled? }]`。**serve プロセス内**のスケジューラ
+  (OS の crontab ではない)。`every_minutes: 0` は起動時に 1 回実行。
+- 実行: 専用セッション(タイトル `cron: <name>`)で無人 turn。**未承認のリスク操作は
+  即時 deny**(無人時に RPC 承認待ちで 300 秒停止しないため)。
+- イベント: `cron.run { name, status, durationMs }`(そのセッションに対して発火)。
+- RPC: `cron.status` / `mcp.status`(診断・Web UI 表示用)。

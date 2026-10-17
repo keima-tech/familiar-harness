@@ -126,6 +126,19 @@ console.log("— scenario A: run + tool round-trip —");
   assert(lastText.includes("MOCK-OK:"), "final assistant text after tool result", lastText.slice(0, 120));
   assert(parsedA.some((e) => e?.type === "turn.end"), "turn.end event seen");
 
+  // edit tool round-trip: the result must carry a colored diff
+  const aEdit = await run(
+    ["run", "-p", "fix the typo @edit planets.txt Mars is the fourth. => Mars is the 4th planet.", "--cwd", project, "--json", "--yolo"],
+    project,
+    familiarHome,
+  );
+  const editRes = aEdit.parsed.find((e) => e?.type === "tool.result" && e.name === "edit");
+  assert(
+    !!editRes && typeof editRes.diff === "string" && editRes.diff.includes("-Mars is the fourth.") && editRes.diff.includes("+Mars is the 4th planet."),
+    "edit tool.result carries a unified diff",
+    JSON.stringify(editRes).slice(0, 200),
+  );
+
   // persistence
   const listChild = spawn(process.execPath, [familiarBin, "sessions", "list", "--json"], { env: env(familiarHome) });
   let listOut = "";
@@ -492,6 +505,33 @@ console.log("— scenario I: web ui transport —");
     body: JSON.stringify({ jsonrpc: "2.0", id: 31, method: "fs.dirs", params: { path: "/no/such/dir-xyz" } }),
   }).then((r) => r.json());
   assert(!!dirsBad.error, "fs.dirs errors on a non-existent directory", JSON.stringify(dirsBad).slice(0, 140));
+  // v1.1: fs.suggest (@file completion) + todo.list (task panel)
+  const sug = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 32,
+      method: "fs.suggest",
+      params: { prefix: "/tm", cwd: "/tmp" },
+    }),
+  }).then((r) => r.json());
+  assert(
+    Array.isArray(sug.result?.items) && sug.result.items.length > 0 && sug.result.items[0]?.path.startsWith("/"),
+    "fs.suggest returns matching paths",
+    JSON.stringify(sug).slice(0, 140),
+  );
+  const todos = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 33,
+      method: "todo.list",
+      params: { id: created.result.id },
+    }),
+  }).then((r) => r.json());
+  assert(Array.isArray(todos.result?.items), "todo.list returns the task list", JSON.stringify(todos).slice(0, 120));
   // v1.1: config.provider.set (settings GUI writes kind / endpoint / key)
   const provSet = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
     method: "POST",

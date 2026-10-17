@@ -294,3 +294,20 @@
   ~/.familiar/skills/<名前>/SKILL.md 手動で追加できる。
 - 比較で残る今後候補: ツール行の diff 表示、todo パネル(todo.list RPC 未実装)、
   @ ファイル補完、メッセージ時刻表示。
+## v1.1 の実装メモ⑰(2026-10-18、提案改善の実装:diff・todo・@補完・時刻)
+
+- **ツール行の diff 表示(edit / write)**: `ToolOutput` に `diff?` を追加し、edit は
+  置換前後の unified diff(LCS・コンテキスト 3 行・最大 120 行で打ち切り、
+  巨大入力は -old/+new ペアに劣化)、write は既存内容との差分(新規なら全 + 行)を
+  生成(`tools/diff.ts`)。diff は tool.result イベントとツールメッセージの
+  `meta.diff` の両方に載り、UI は緑/赤の色分けブロック(`.tc-diff`)で描画。
+  smoke は mock の `@edit <path> <old> => <new>` ディレクティブで e2e 検証。
+- **todo パネル**: 新 RPC `todo.list {id}`(SessionTodoStore)。トップバーに
+  ☑ ボタン + 進行中バッジ、専用ドロワー(○/◐/● と打ち消し線)。turn 終了時に
+  バッジ更新。
+- **@ ファイル補完**: 新 RPC `fs.suggest {prefix, cwd}`(ディレクトリ優先・20 件・
+  `~` 展開・cwd 相対対応)。composer の末尾 @ トークンで候補表示、**Tab または
+  クリックで確定**(Enter は通常どおり送信)。スラッシュコマンドと同ポップを使い
+  分け。
+- **メッセージ時刻**: assistant フッターの末尾に hh:mm(ライブは turn 完了時刻、
+  永続メッセージは createdAt)。

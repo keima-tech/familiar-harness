@@ -199,6 +199,22 @@ export class MockProvider implements Provider {
       onChunk({ type: "stop", finishReason: "tool_calls" });
       return { stopReason: "tool_calls" };
     }
+    // `@edit <path> <old> => <new>`: simulate an edit tool call (diff smoke).
+    const editMatch = userText.match(/@edit\s+(\S+)\s+(.+?)\s*=>\s*([^\n]+)/);
+    if (editMatch) {
+      onChunk({ type: "tool_call_start", index: 0, id: "call_mock_e", name: "edit" });
+      onChunk({
+        type: "tool_call_delta",
+        index: 0,
+        argumentsDelta: JSON.stringify({
+          path: editMatch[1] ?? "missing.txt",
+          old_string: (editMatch[2] ?? "").trim(),
+          new_string: (editMatch[3] ?? "").trim(),
+        }),
+      });
+      onChunk({ type: "stop", finishReason: "tool_calls" });
+      return { stopReason: "tool_calls" };
+    }
     const readMatch = userText.match(/@read\s+(\S+)/);
     if (readMatch) {
       // Simulate a tool call (arguments arrive as one complete JSON payload).

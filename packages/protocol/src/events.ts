@@ -20,6 +20,8 @@ export type AgentEvent =
       content: string;
       isError: boolean;
       durationMs: number;
+      /** unified-diff text for edit/write results (GUI colored diff) */
+      diff?: string;
     }
   | { type: "turn.end"; turnId: string; usage?: Usage }
   | { type: "turn.error"; turnId: string; error: string; recoverable: boolean }

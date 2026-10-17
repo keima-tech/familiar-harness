@@ -7,6 +7,7 @@ import type {
   ModelInfo,
   RpcContext,
   SessionRecord,
+  TodoItem,
   ToolCall,
   Usage,
 } from "@familiar/protocol";
@@ -317,6 +318,10 @@ export class AgentServer {
         return this.modelsProbe(params);
       case "fs.dirs":
         return this.fsDirs(params);
+      case "fs.suggest":
+        return this.fsSuggest(params);
+      case "todo.list":
+        return this.todoList(params);
       case "session.create":
         return this.createSession(params);
       case "session.list":
@@ -506,13 +511,20 @@ export class AgentServer {
    * GUI). Read-only; the server already exposes full filesystem access through
    * the agent tools, so this adds no new capability. Empty path = home dir.
    */
+  /** ~ expansion + resolve for the fs.* helpers. */
+  private resolveFsPath(raw: string, cwd?: string): string {
+    if (raw === "" || raw === "~") return os.homedir();
+    if (raw.startsWith("~/") || raw.startsWith("~\\"))
+      return path.join(os.homedir(), raw.slice(2));
+    if (cwd && cwd !== "" && !path.isAbsolute(raw) && !/^[a-zA-Z]:[\\/]/.test(raw)) {
+      return path.resolve(cwd, raw);
+    }
+    return path.resolve(raw);
+  }
+
   private fsDirs(params: Record<string, unknown>): { dirs: string[]; home: string } {
     const raw = (str(params, "path") ?? "").trim();
-    let target: string;
-    if (raw === "" || raw === "~") target = os.homedir();
-    else if (raw.startsWith("~/") || raw.startsWith("~\\"))
-      target = path.join(os.homedir(), raw.slice(2));
-    else target = path.resolve(raw);
+    const target = this.resolveFsPath(raw);
     let dirs: string[];
     try {
       dirs = fs
@@ -524,6 +536,53 @@ export class AgentServer {
       throw new RpcError(RPC_ERROR_INVALID_PARAMS, `cannot list directory: ${target}`);
     }
     return { dirs, home: os.homedir() };
+  }
+
+  /**
+   * Path suggestions for the composer's "@" token: lists dirs AND files whose
+   * name starts with the typed prefix (directories first, capped at 20).
+   */
+  private fsSuggest(params: Record<string, unknown>): { items: Array<{ path: string; dir: boolean }> } {
+    const prefix = (str(params, "prefix") ?? "").trim();
+    if (prefix === "") return { items: [] };
+    const lastSep = Math.max(prefix.lastIndexOf("/"), prefix.lastIndexOf("\\"));
+    const dirPart = lastSep >= 0 ? prefix.slice(0, lastSep + 1) : "";
+    const namePrefix = lastSep >= 0 ? prefix.slice(lastSep + 1) : prefix;
+    const cwd = str(params, "cwd");
+    let target: string;
+    if (dirPart === "") {
+      target = cwd && cwd !== "" ? path.resolve(cwd) : os.homedir();
+    } else if (
+      dirPart.startsWith("/") ||
+      dirPart.startsWith("~") ||
+      /^[a-zA-Z]:[\\/]/.test(dirPart)
+    ) {
+      target = this.resolveFsPath(dirPart);
+    } else {
+      target = this.resolveFsPath(dirPart, cwd && cwd !== "" ? cwd : process.cwd());
+    }
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = fs.readdirSync(target, { withFileTypes: true });
+    } catch {
+      return { items: [] };
+    }
+    const q = namePrefix.toLowerCase();
+    const matched = entries.filter((e) => e.name.toLowerCase().startsWith(q));
+    matched.sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name));
+    const items = matched.slice(0, 20).map((e) => ({
+      path: path.join(target, e.name),
+      dir: e.isDirectory(),
+    }));
+    return { items };
+  }
+
+  /** Session-scoped task list (the `todo` tool) for the GUI panel. */
+  private todoList(params: Record<string, unknown>): { items: TodoItem[] } {
+    const id = str(params, "id");
+    if (!id) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "session id is required");
+    this.requireSession(id);
+    return { items: this.todos.get(id) };
   }
 
   private async createSession(params: Record<string, unknown>): Promise<SessionRecord> {

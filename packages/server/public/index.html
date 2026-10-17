@@ -46,6 +46,7 @@
             </svg>
           </button>
           <button id="toggle-inbox" class="iconbtn" title="承認インボックス" data-i18n-title="top.inbox">✎<span id="inbox-count" class="badge">0</span></button>
+          <button id="toggle-todo" class="iconbtn" title="タスク" data-i18n-title="top.todo">☑<span id="todo-count" class="badge">0</span></button>
           <button id="toggle-status" class="iconbtn" title="ステータス" data-i18n-title="top.status">ⓘ</button>
           <button id="search-toggle" class="iconbtn" title="トランスクリプト内検索 (Ctrl+F)" data-i18n-title="top.search">⌕</button>
           <div class="menu-wrap">
@@ -113,6 +114,14 @@
         <button id="close-inbox" class="ghost">✕</button>
       </div>
       <div id="inbox-body"></div>
+    </aside>
+
+    <aside id="todo" hidden>
+      <div class="drawer-head">
+        <b data-i18n="drawer.todo">タスク (todo)</b>
+        <button id="close-todo" class="ghost">✕</button>
+      </div>
+      <div id="todo-body"></div>
     </aside>
 
     <aside id="status" hidden>

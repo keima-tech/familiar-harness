@@ -272,6 +272,13 @@ const STR = {
     "cmd.retry": "直前のターンを再実行",
     "cmd.settings": "設定を開く",
     "cmd.search": "トランスクリプト内検索",
+    "top.todo": "タスク (todo)",
+    "drawer.todo": "タスク (todo)",
+    "todo.empty": "タスクはありません。エージェントに「TODO: ...」形式で依頼するとここに表示されます",
+    "todo.pending": "未着手",
+    "todo.in_progress": "進行中",
+    "todo.done": "完了",
+    "tool.diff": "変更差分",
     "toast.cwdSet": "作業フォルダー: {0}",
     "toast.cwdFailed": "フォルダーを変更できませんでした: {0}",
     "prov.badUrl": "エンドポイントは http:// か https:// で始めてください",
@@ -503,6 +510,13 @@ const STR = {
     "cmd.retry": "retry the last turn",
     "cmd.settings": "open settings",
     "cmd.search": "search the transcript",
+    "top.todo": "tasks (todo)",
+    "drawer.todo": "tasks (todo)",
+    "todo.empty": "no tasks yet — ask the agent with a \"TODO: …\" list and it shows up here",
+    "todo.pending": "pending",
+    "todo.in_progress": "in progress",
+    "todo.done": "done",
+    "tool.diff": "changes",
     "toast.cwdSet": "working folder: {0}",
     "toast.cwdFailed": "could not change folder: {0}",
     "prov.badUrl": "endpoint must start with http:// or https://",
@@ -1060,6 +1074,7 @@ async function openSession(id) {
   $("#session-meta").textContent = bits.join(" · ");
   renderSessionCwd(s);
   renderModelChip();
+  void refreshTodo();
   updateContextGauge();
   closeAllPops();
   renderTranscript(data.messages ?? []);
@@ -1211,9 +1226,12 @@ function renderTranscript(messages) {
     if (m.role === "user") {
       appendMessage("user", m.content, null);
     } else if (m.role === "assistant") {
+      const footBits = modelBits ? [modelBits] : [];
+      const clock = m.createdAt ? fmtClock(m.createdAt) : "";
+      if (clock) footBits.push(clock);
       appendMessage("assistant", m.content, null, {
         reasoning: typeof m.meta?.reasoning === "string" ? m.meta.reasoning : undefined,
-        footBits: modelBits ? [modelBits] : [],
+        footBits,
       });
     } else {
       const call = Array.isArray(m.toolCalls) ? m.toolCalls[0] : undefined;
@@ -1223,7 +1241,11 @@ function renderTranscript(messages) {
         call?.arguments ?? "",
         m.content ?? "",
         m.meta?.isError === true ? "err" : "done",
-        { resultLabel: t("tool.result"), durationMs: duration },
+        {
+          resultLabel: t("tool.result"),
+          durationMs: duration,
+          ...(typeof m.meta?.diff === "string" ? { diff: m.meta.diff } : {}),
+        },
       );
     }
   }
@@ -1268,6 +1290,13 @@ function appendMessage(role, content, toolCalls, opts = {}) {
   tr.appendChild(div);
   scrollBottom();
   return bubble;
+}
+
+function fmtClock(ts) {
+  const d = new Date(ts);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
 }
 
 /** Footer under an assistant bubble: copy button + meta bits (mode · model · time · tok/s). */
@@ -1361,6 +1390,74 @@ const COMMANDS = [
   { cmd: "/settings", key: "cmd.settings", run: () => openSettingsModal() },
   { cmd: "/search", key: "cmd.search", run: () => toggleSearch() },
 ];
+
+/** The trailing "@" token of the composer value, or null when absent. */
+function fileToken(value) {
+  const at = value.lastIndexOf("@");
+  if (at === -1) return null;
+  const rest = value.slice(at + 1);
+  if (/\s/.test(rest)) return null;
+  return rest;
+}
+
+let cmdMode = ""; // "" | "cmd" | "file" — what the composer pop currently lists
+
+async function refreshFilePop(token) {
+  const list = $("#cmd-list");
+  let res;
+  try {
+    res = await rpc("fs.suggest", { prefix: token, cwd: state.currentSession?.cwd ?? "" });
+  } catch {
+    $("#cmd-pop").hidden = true;
+    return;
+  }
+  const items = res.items ?? [];
+  list.innerHTML = "";
+  $("#cmd-pop").hidden = items.length === 0;
+  for (const it of items) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "mp-row";
+    row.dataset.path = it.path;
+    const base = (it.path ?? "").split(/[\\/]/).pop() ?? "";
+    row.innerHTML =
+      `<span class="mp-name"><span class="cmd-syntax">${esc(it.dir ? "📁" : "📄")} ${esc(base)}</span>` +
+      `<span class="cmd-desc">${esc(it.path)}</span></span>`;
+    row.addEventListener("click", () => insertFileToken(it.path));
+    list.appendChild(row);
+  }
+}
+
+/** Replace the trailing @token with the chosen path. */
+function insertFileToken(p) {
+  const input = $("#input");
+  const v = input.value;
+  const at = v.lastIndexOf("@");
+  if (at === -1) return;
+  input.value = `${v.slice(0, at)}@${p} `;
+  $("#cmd-pop").hidden = true;
+  autoSize(input);
+  input.focus();
+}
+
+function insertFirstFile() {
+  const first = $("#cmd-list .mp-row");
+  if (!first) return;
+  insertFileToken(first.dataset.path ?? "");
+}
+
+/** Single entry point for the composer pop: slash commands or @file paths. */
+async function updateComposerPop() {
+  const v = $("#input").value;
+  const token = fileToken(v);
+  if (token !== null) {
+    cmdMode = "file";
+    await refreshFilePop(token);
+    return;
+  }
+  cmdMode = v.startsWith("/") ? "cmd" : "";
+  refreshCmdPop();
+}
 
 function matchingCommands(value) {
   const v = value.trim().toLowerCase();
@@ -1502,6 +1599,21 @@ async function exportMarkdown(targetId = state.sessionId) {
  * OpenCode-style inline tool row: "1  read  planets.txt  ✓ 0.3s" — click the
  * row to expand the full arguments + result. Live rows wait for their paired
  * tool.result event (matched by tool name). */
+/** Colored diff block (edit/write results) rendered inside a tool card. */
+function diffHtml(diff) {
+  if (!diff) return "";
+  const lines = String(diff).split("\n");
+  const out = [];
+  for (const ln of lines) {
+    if (ln.startsWith("+") && !ln.startsWith("++")) out.push(`<span class="dl-add">${esc(ln)}</span>`);
+    else if (ln.startsWith("-") && !ln.startsWith("--")) out.push(`<span class="dl-del">${esc(ln)}</span>`);
+    else out.push(`<span class="dl-ctx">${esc(ln)}</span>`);
+  }
+  return (
+    `<div class="tc-section tc-diff"><h5>${esc(t("tool.diff"))}</h5><pre>${out.join("\n")}</pre></div>`
+  );
+}
+
 function appendToolCard(name, args, resultContent, status, opts = {}) {
   const t = $("#transcript");
   const wrap = document.createElement("div");
@@ -1521,6 +1633,7 @@ function appendToolCard(name, args, resultContent, status, opts = {}) {
   const duration = opts.durationMs !== undefined ? (opts.durationMs / 1000).toFixed(1) : "";
   const expanded = prefs.toolsExpanded === true && status !== "run";
   const bodyHtml = `
+      ${opts.diff ? diffHtml(opts.diff) : ""}
       ${argsText !== "" ? `<div class="tc-section"><h5>${esc(t("tool.args"))}</h5><pre>${esc(truncate(argsBlock, ARGS_CAP))}</pre></div>` : ""}
       <div class="tc-section tc-result"><h5>${opts.resultLabel ?? t("tool.result")}</h5><pre>${status === "run" ? `<span class="dim">${esc(t("tool.running"))}</span>` : esc(truncate(resultContent, RESULT_CAP))}</pre></div>`;
   wrap.innerHTML = `
@@ -1544,6 +1657,7 @@ function appendToolCard(name, args, resultContent, status, opts = {}) {
   const entry = {
     name,
     card: wrap,
+    bodyEl: wrap.querySelector(".tc-body"),
     startedAt: status === "run" ? Date.now() : undefined,
     statusEl: wrap.querySelector(".tc-status"),
     resultEl: wrap.querySelector(".tc-result pre"),
@@ -1571,8 +1685,11 @@ function firstArgPreview(argsText) {
   return argsText.replace(/\s+/g, " ").trim().slice(0, 72);
 }
 
-function completeToolCard(entry, content, isError) {
+function completeToolCard(entry, content, isError, diff) {
   if (!entry || !entry.resultEl) return;
+  if (diff && entry.bodyEl && !entry.bodyEl.querySelector(".tc-diff")) {
+    entry.bodyEl.insertAdjacentHTML("afterbegin", diffHtml(diff));
+  }
   entry.resultFull = String(content ?? "");
   entry.labelEl.textContent = t(isError ? "tool.error" : "tool.result");
   entry.resultEl.textContent = truncate(content, RESULT_CAP);
@@ -1742,7 +1859,7 @@ function onEvent(sessionId, e) {
       if (idx < 0) idx = state.pendingToolCards.length > 0 ? 0 : -1;
       const entry = idx >= 0 ? state.pendingToolCards.splice(idx, 1)[0] : null;
       if (entry) {
-        completeToolCard(entry, e.content ?? "", e.isError === true);
+        completeToolCard(entry, e.content ?? "", e.isError === true, e.diff);
       }
       break;
     }
@@ -1775,9 +1892,11 @@ function onEvent(sessionId, e) {
         if (modelBits) bits.push(modelBits);
         if (secs > 0) bits.push(`${secs.toFixed(1)}s`);
         if (tps) bits.push(`${tps} tok/s`);
+        bits.push(fmtClock(Date.now()));
         addMsgFooter(lastBubble.bubble, lastBubble.text, bits);
       }
       state.turnBubbles = [];
+      void refreshTodo();
       updateContextGauge();
       maybeNotify();
       state.pendingEvents.delete(sessionId);
@@ -1898,12 +2017,13 @@ function proposalNode(kind, item, act) {
 // status drawer (curator / MCP / cron)
 // ---------------------------------------------------------------------------
 function openDrawer(which) {
-  const drawers = ["inbox", "status", "session-info"];
+  const drawers = ["inbox", "status", "session-info", "todo"];
   for (const id of drawers) {
     $(`#${id}`).hidden = id !== which;
   }
   if (which === "inbox") void loadInbox();
   if (which === "status") void loadStatus();
+  if (which === "todo") void loadTodo();
   if (which === "session-info") void loadSessionInfo();
 }
 
@@ -1926,6 +2046,64 @@ function sectionError(title, err) {
   card.className = "card";
   card.innerHTML = `<h4>${esc(title)}</h4><div class="status-err">${esc(err.message)}</div>`;
   return card;
+}
+
+const TODO_STATUS = {
+  pending: { icon: "○", label: "todo.pending", cls: "td-pending" },
+  in_progress: { icon: "◐", label: "todo.in_progress", cls: "td-active" },
+  done: { icon: "●", label: "todo.done", cls: "td-done" },
+};
+
+async function loadTodo() {
+  const body = $("#todo-body");
+  body.innerHTML = "";
+  if (!state.sessionId) {
+    body.innerHTML = `<div class="mp-note">${esc(t("home.noSession"))}</div>`;
+    updateTodoBadge([]);
+    return;
+  }
+  try {
+    const res = await rpc("todo.list", { id: state.sessionId });
+    const items = res.items ?? [];
+    updateTodoBadge(items);
+    if (items.length === 0) {
+      body.innerHTML = `<div class="mp-note">${esc(t("todo.empty"))}</div>`;
+      return;
+    }
+    for (const it of items) {
+      const meta = TODO_STATUS[it.status] ?? { icon: "○", label: "todo.pending", cls: "td-pending" };
+      const row = document.createElement("div");
+      row.className = `todo-row ${meta.cls}`;
+      row.innerHTML =
+        `<span class="td-icon">${esc(meta.icon)}</span>` +
+        `<span class="td-text">${esc(it.title ?? "")}</span>` +
+        `<span class="td-status">${esc(t(meta.label))}</span>`;
+      body.appendChild(row);
+    }
+  } catch (err) {
+    body.innerHTML = `<div class="mp-note">${esc(err.message)}</div>`;
+  }
+}
+
+/** Top-bar badge = number of in-progress tasks. */
+function updateTodoBadge(items) {
+  const n = (items ?? []).filter((x) => x && x.status === "in_progress").length;
+  $("#todo-count").textContent = n > 0 ? String(n) : "";
+}
+
+/** Refresh the badge (cheap); reload the drawer body only when it is open. */
+async function refreshTodo() {
+  if (!state.sessionId) {
+    updateTodoBadge([]);
+    return;
+  }
+  try {
+    const res = await rpc("todo.list", { id: state.sessionId });
+    updateTodoBadge(res.items ?? []);
+    if (!$("#todo").hidden) void loadTodo();
+  } catch {
+    /* session dropped */
+  }
 }
 
 async function loadStatus() {
@@ -3100,12 +3278,21 @@ function boot() {
   });
   const input = $("#input");
   input.addEventListener("keydown", (ev) => {
-    // slash command pop takes priority: Enter runs, Escape dismisses
-    if (!$("#cmd-pop").hidden && (ev.key === "Enter" || ev.key === "Escape")) {
+    if (!$("#cmd-pop").hidden && ev.key === "Escape") {
       ev.preventDefault();
       ev.stopPropagation();
-      if (ev.key === "Escape") $("#cmd-pop").hidden = true;
-      else runFirstCommand();
+      $("#cmd-pop").hidden = true;
+      return;
+    }
+    if (!$("#cmd-pop").hidden && cmdMode === "cmd" && ev.key === "Enter") {
+      ev.preventDefault();
+      ev.stopPropagation();
+      runFirstCommand();
+      return;
+    }
+    if (!$("#cmd-pop").hidden && cmdMode === "file" && ev.key === "Tab") {
+      ev.preventDefault();
+      insertFirstFile();
       return;
     }
     if (!$("#cmd-pop").hidden && ev.key === "Tab") $("#cmd-pop").hidden = true;
@@ -3119,12 +3306,16 @@ function boot() {
   });
   input.addEventListener("input", () => {
     autoSize(input);
-    refreshCmdPop();
+    void updateComposerPop();
   });
 
   $("#toggle-inbox").addEventListener("click", () => openDrawer("inbox"));
   $("#close-inbox").addEventListener("click", () => {
     $("#inbox").hidden = true;
+  });
+  $("#toggle-todo").addEventListener("click", () => openDrawer("todo"));
+  $("#close-todo").addEventListener("click", () => {
+    $("#todo").hidden = true;
   });
   $("#toggle-status").addEventListener("click", () => openDrawer("status"));
   $("#close-status").addEventListener("click", () => {

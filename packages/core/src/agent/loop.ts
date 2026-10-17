@@ -19,6 +19,7 @@ import {
   type ToolContext,
 } from "../tools/index.js";
 import { DenyApprovalAdapter, type ApprovalAdapter } from "../tools/permissions.js";
+import type { ToolOutput } from "../tools/registry.js";
 import { buildSystemPrompt, todoSection } from "./prompts.js";
 import type { SelfImproveContext } from "../selfimprove/context.js";
 import { memorySection, skillsSection } from "../selfimprove/memory/inject.js";
@@ -293,6 +294,7 @@ export class AgentRunner {
           const output = await this.executeToolCall(call, toolCtx, plan, effectiveTools);
           const durationMs = Date.now() - startedAt;
           const isError = output.isError === true;
+          const diff = output.diff && output.diff !== "" ? output.diff : undefined;
           await this.hooks?.run("post_tool_use", {
             event: "post_tool_use",
             sessionId: session.id,
@@ -303,6 +305,7 @@ export class AgentRunner {
             args: safeArgs(call.arguments),
             isError,
             durationMs,
+            ...(diff ? { diff } : {}),
           });
           const resultMsg: ChatMessage = {
             id: crypto.randomUUID(),
@@ -311,7 +314,7 @@ export class AgentRunner {
             toolCallId: call.id,
             content: output.content,
             createdAt: Date.now(),
-            meta: { isError, durationMs },
+            meta: { isError, durationMs, ...(diff ? { diff } : {}) },
           };
           this.store.appendMessage(session.id, resultMsg);
           opts.onEvent({
@@ -321,6 +324,7 @@ export class AgentRunner {
             content: output.content,
             isError,
             durationMs,
+            ...(diff ? { diff } : {}),
           });
         };
         // M5: subagent parallelization — one assistant message with several
@@ -363,7 +367,7 @@ export class AgentRunner {
     ctx: ToolContext,
     plan: boolean,
     effectiveTools: Tool[],
-  ): Promise<{ content: string; isError?: boolean }> {
+  ): Promise<ToolOutput> {
     const tool = effectiveTools.find((t) => t.name === call.name);
     if (!tool) {
       const available = effectiveTools.map((t) => t.name).join(", ");

@@ -24,6 +24,8 @@ export interface ToolContext {
 export interface ToolOutput {
   content: string;
   isError?: boolean;
+  /** Optional unified-diff text (edit/write) shown as a colored block in the GUI. */
+  diff?: string;
 }
 
 export interface Tool {

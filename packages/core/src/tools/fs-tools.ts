@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { unifiedDiff } from "./diff.js";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import type { Tool } from "./registry.js";
@@ -201,8 +202,20 @@ export function createWriteTool(): Tool {
       }
       try {
         await fsp.mkdir(path.dirname(absolute), { recursive: true });
+        let before = "";
+        try {
+          const prev = await fsp.readFile(absolute);
+          if (!isBinary(prev)) before = prev.toString("utf8");
+        } catch {
+          /* new file */
+        }
         await fsp.writeFile(absolute, content, "utf8");
-        return { content: `wrote ${absolute} (${Buffer.byteLength(content, "utf8")} bytes)`, isError: false };
+        const diff = isBinary(Buffer.from(content, "utf8")) ? "" : unifiedDiff(before, content);
+        return {
+          content: `wrote ${absolute} (${Buffer.byteLength(content, "utf8")} bytes)`,
+          isError: false,
+          ...(diff ? { diff } : {}),
+        };
       } catch (err) {
         return { content: `cannot write ${absolute}: ${describeErr(err)}`, isError: true };
       }
@@ -275,7 +288,11 @@ export function createEditTool(): Tool {
           ? text.split(oldString).join(newString)
           : text.replace(oldString, newString);
         await fsp.writeFile(absolute, updated, "utf8");
-        return { content: `edited ${absolute} (${count} replacement${count === 1 ? "" : "s"})`, isError: false };
+        return {
+          content: `edited ${absolute} (${count} replacement${count === 1 ? "" : "s"})`,
+          isError: false,
+          diff: unifiedDiff(text, updated),
+        };
       } catch (err) {
         return { content: `cannot edit ${absolute}: ${describeErr(err)}`, isError: true };
       }

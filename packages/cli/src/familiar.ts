@@ -41,6 +41,9 @@ Usage:
   familiar model list [provider]
   familiar memory [list] | pending | approve <id> | reject <id> | approval on|off
   familiar skills [list] | view <name> | pending | approve <id|all> | reject <id>
+  familiar curator status | run [--dry-run] [--consolidate] | pause | resume
+           | pin/unpin <skill> | restore <skill> | list-archived | backup
+           | rollback <id> | prune --days N | ledger [--skill]
   familiar worktree list | add <name> | remove <name> | prune   (git worktree wrapper)
   familiar init
   familiar doctor
@@ -75,6 +78,8 @@ const STRING_FLAGS = new Set([
   "--root",
   "-p",
   "--prompt",
+  "--days",
+  "--reason",
 ]);
 const BOOL_FLAGS = new Set([
   "-y",
@@ -87,6 +92,8 @@ const BOOL_FLAGS = new Set([
   "--plan",
   "--local",
   "--force",
+  "--consolidate",
+  "--dry-run",
 ]);
 
 export interface ParsedArgs {
@@ -454,6 +461,7 @@ async function cmdServe(flags: Record<string, string | boolean>): Promise<void> 
   const port = toNumber(flag(flags, "port")) ?? cfg.server.port;
   const server = new AgentServer({ config: cfg, rpcApprovals: true });
   const transport = await startHttpTransport(server, { port, bind: cfg.server.bind });
+  server.startCuratorScheduler();
   process.stdout.write(cyan(`familiar server listening on ${transport.url}\n`));
   process.stdout.write(dim(`  rpc:   POST ${transport.url}/rpc\n  events: WS ${transport.url}/ws\n`));
   process.stdout.write(dim("  press Ctrl+C to stop\n"));
@@ -659,6 +667,128 @@ function approvalStateOr(server: AgentServer): { memoryWriteApproval: boolean; s
   return { memoryWriteApproval: memOn, skillsWriteApproval: skillOn };
 }
 
+// ---------------------------------------------------------------------------
+// curator commands (M4)
+// ---------------------------------------------------------------------------
+
+async function cmdCurator(flags: Record<string, string | boolean>, positionals: string[]): Promise<void> {
+  const server = openLocalServer(flags);
+  const cur = server.curator;
+  const sub = positionals[0] ?? "status";
+
+  if (sub === "status") {
+    const st = cur.status();
+    process.stdout.write(
+      `${cyan("curator")}  enabled: ${st.enabled ? green("yes") : red("no")}  paused: ${st.paused ? red("yes") : "no"}  consolidation: ${st.consolidate ? green("opt-in ON") : dim("off")}\n`,
+    );
+    const last = st.lastRunAt ? new Date(st.lastRunAt).toISOString().slice(0, 16).replace("T", " ") : "(never)";
+    const due = st.nextDueAt ? new Date(st.nextDueAt).toISOString().slice(0, 16).replace("T", " ") : dim("(first run pending)");
+    process.stdout.write(`  lastRun: ${dim(last)}  nextDue: ${dim(due)}\n`);
+    process.stdout.write(`  stale (${st.stale.length}): ${st.stale.join(", ") || dim("none")}\n`);
+    process.stdout.write(`  archived (${st.archived.length}): ${st.archived.join(", ") || dim("none")}\n`);
+    process.stdout.write(`  snapshots: ${st.snapshots} ${dim("(familiar curator ledger for history)")}\n`);
+    return;
+  }
+
+  if (sub === "run") {
+    const dryRun = flags["dry-run"] === true;
+    const p1 = cur.runPhase1({ dryRun });
+    process.stdout.write(
+      `phase-1 ${dryRun ? dim("(dry-run)") : ""}: staled ${cyan(String(p1.staled.length))}, archived ${cyan(String(p1.archived.length))}, unstaled ${String(p1.unstaled.length)}${p1.snapshotId ? dim(` · snapshot ${p1.snapshotId.slice(0, 16)}`) : ""}\n`,
+    );
+    for (const m of p1.staled) process.stdout.write(green(`was stale  ${m}\n`));
+    for (const m of p1.archived) process.stdout.write(green(`was archived  ${m}\n`));
+    if (flags["consolidate"] === true || server.cfg.curator.consolidate === true) {
+      const res = await cur.runConsolidation({ dryRun });
+      if (res.skipped) {
+        process.stdout.write(dim(`consolidation: ${res.note ?? "skipped"}\n`));
+      } else {
+        process.stdout.write(`consolidation: ${cyan(String(res.staged))} staged proposal(s)\n`);
+        for (const p of res.proposals) {
+          process.stdout.write(green(`${p.kind}  ${p.name}  ${dim(p.reason.slice(0, 100))}\n`));
+        }
+      }
+    }
+    return;
+  }
+
+  if (sub === "pause" || sub === "resume") {
+    if (sub === "pause") cur.pause();
+    else cur.resume();
+    process.stdout.write(green(`curator ${sub}d\n`));
+    return;
+  }
+
+  if (sub === "pin" || sub === "unpin") {
+    const name = positionals[1];
+    if (!name) fail(`usage: familiar curator ${sub} <skill>`);
+    const res = cur.pin(name, sub === "pin");
+    if (!res.ok) fail(res.message);
+    process.stdout.write(green(`${res.message}\n`));
+    return;
+  }
+
+  if (sub === "restore") {
+    const name = positionals[1];
+    if (!name) fail("usage: familiar curator restore <skill>");
+    const res = cur.restore(name);
+    if (!res.ok) fail(res.message);
+    process.stdout.write(green(`${res.message}\n`));
+    return;
+  }
+
+  if (sub === "list-archived") {
+    const all = cur.status().archived;
+    if (all.length === 0) process.stdout.write(dim("(no archived skills)\n"));
+    for (const s of all) process.stdout.write(`${s}\n`);
+    return;
+  }
+
+  if (sub === "backup") {
+    const id = cur.backup(flags["reason"] ? String(flags["reason"]) : "manual backup");
+    if (!id) fail("no skills to back up");
+    process.stdout.write(green(`snapshot ${id}\n`));
+    return;
+  }
+
+  if (sub === "rollback") {
+    const id = positionals[1];
+    if (!id) fail("usage: familiar curator rollback <snapshot-id-prefix>  (see ~/.familiar/snapshots/)");
+    const res = cur.rollback(id);
+    if (!res.ok) fail(res.message);
+    process.stdout.write(green(`${res.message}\n`));
+    return;
+  }
+
+  if (sub === "prune") {
+    const days = toNumber(flag(flags, "days")) ?? 30;
+    const removed = cur.pruneSnapshots(days);
+    process.stdout.write(green(`pruned ${removed} snapshot(s) older than ${days}d\n`));
+    return;
+  }
+
+  if (sub === "ledger") {
+    const entries = cur.ledger.list({ skill: positionals[1] ?? undefined, limit: 40 });
+    if (entries.length === 0) {
+      process.stdout.write(dim("(no ledger entries yet)\n"));
+      return;
+    }
+    for (const e of entries) {
+      const when = new Date(e.ts).toISOString().slice(0, 16).replace("T", " ");
+      const skill = e.skill ? cyan(e.skill) : dim("-");
+      const detail = e.detail ? dim(`  ${e.detail.slice(0, 90)}`) : "";
+      process.stdout.write(`${dim(when)}  ${e.actor}  ${e.action}  ${skill}${detail}\n`);
+    }
+    return;
+  }
+
+  fail(
+    "unknown curator subcommand: " +
+      sub +
+      " (status | run [--dry-run] [--consolidate] | pause | resume | pin/unpin <skill> | restore <skill> | list-archived | backup | rollback <id> | prune --days N | ledger [--skill])",
+  );
+}
+
 
 async function cmdDoctor(): Promise<void> {
   let failures = 0;
@@ -790,6 +920,9 @@ async function main(): Promise<void> {
         break;
       case "skills":
         await cmdSkills(flags, rest);
+        break;
+      case "curator":
+        await cmdCurator(flags, rest);
         break;
       case "worktree":
         await cmdWorktree(flags, rest, resolveCwd(flags));

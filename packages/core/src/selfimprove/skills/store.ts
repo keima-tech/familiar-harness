@@ -10,6 +10,8 @@ export interface SkillUsage {
   lastUsedMs?: number;
   createdMs?: number;
   pinned?: boolean;
+  /** curator phase-1 marker: ms timestamp when the entry became stale */
+  staleAt?: number;
 }
 
 export interface SkillView {
@@ -134,8 +136,45 @@ export class SkillStore {
   bumpUsage(name: string): void {
     const usage = this.readUsage();
     const u = usage[name] ?? { useCount: 0 };
-    usage[name] = { ...u, useCount: (u.useCount ?? 0) + 1, lastUsedMs: Date.now() };
+    usage[name] = { ...u, useCount: (u.useCount ?? 0) + 1, lastUsedMs: Date.now(), staleAt: undefined };
     this.writeUsage(usage);
+  }
+
+  /** curator helpers: stale marker + pin flag persist in .usage.json */
+  markStale(name: string): void {
+    const usage = this.readUsage();
+    const u = usage[name] ?? { useCount: 0, createdMs: Date.now() };
+    usage[name] = { ...u, staleAt: Date.now() };
+    this.writeUsage(usage);
+  }
+
+  clearStale(name: string): void {
+    const usage = this.readUsage();
+    const u = usage[name];
+    if (!u) return;
+    const { staleAt: _dropped, ...rest } = u;
+    usage[name] = { ...rest };
+    this.writeUsage(usage);
+  }
+
+  setPinned(name: string, pinned: boolean): void {
+    const usage = this.readUsage();
+    const u = usage[name] ?? { useCount: 0, createdMs: Date.now() };
+    usage[name] = { ...u, pinned };
+    this.writeUsage(usage);
+  }
+
+  isPinned(name: string): boolean {
+    return this.readUsage()[name]?.pinned === true;
+  }
+
+  listArchived(): string[] {
+    const dir = path.join(this.root, ".archive");
+    if (!fs.existsSync(dir)) return [];
+    return fs
+      .readdirSync(dir)
+      .filter((n) => !n.startsWith(".") && fs.statSync(path.join(dir, n)).isDirectory())
+      .sort();
   }
 }
 

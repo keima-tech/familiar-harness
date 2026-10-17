@@ -62,6 +62,18 @@ export interface SelfReviewConfig {
   enabled: boolean;
 }
 
+export interface CuratorConfig {
+  enabled: boolean;
+  /** hours between automatic Phase-1 runs on serve/desktop */
+  interval_hours: number;
+  /** idle time required before a run starts */
+  min_idle_hours: number;
+  stale_after_days: number;
+  archive_after_days: number;
+  /** opt-in Phase-2 LLM consolidation */
+  consolidate: boolean;
+}
+
 export interface PermissionsConfig {
   bash: BashPermissionConfig;
   files: { bounds: "cwd" | "unrestricted" };
@@ -93,6 +105,7 @@ export interface ResolvedConfig {
   memory: MemoryConfig;
   skills: SkillsConfig;
   self_review: SelfReviewConfig;
+  curator: CuratorConfig;
   context: { token_soft_limit: number; keep_last: number; compaction: CompactionConfig };
   server: { port: number; bind: string; auth_token_file?: string };
 }
@@ -161,6 +174,14 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
   memory: { write_approval: true, max_prompt_chars: 4000 },
   skills: { write_approval: true },
   self_review: { enabled: true },
+  curator: {
+    enabled: true,
+    interval_hours: 168,
+    min_idle_hours: 2,
+    stale_after_days: 14,
+    archive_after_days: 30,
+    consolidate: false,
+  },
   context: { token_soft_limit: 81_920, keep_last: 10, compaction: { mode: "summarize" } },
   server: { port: 46_210, bind: "127.0.0.1" },
 };
@@ -177,6 +198,7 @@ const KNOWN_TOP_LEVEL = new Set([
   "memory",
   "skills",
   "self_review",
+  "curator",
   "context",
   "server",
 ]);
@@ -374,6 +396,15 @@ skills:
   write_approval: true
 self_review:
   enabled: true             # turn 完了後に reviewer を起動して staging 提案
+
+# M4: curator(スキル園芸・serve 起動時の maintenance)
+curator:
+  enabled: true
+  interval_hours: 168       # 前回実行からこの期間経過したら
+  min_idle_hours: 2         # かつ少なくともこれだけアイドル
+  stale_after_days: 14      # 未使用 → stale(表示のみ・復帰可)
+  archive_after_days: 30    # 未使用 → .archive/ へ(削除しない・snapshot あり)
+  consolidate: false        # opt-in: Phase-2 LLM 統合(提案は staging 経由)
 
 context:
   token_soft_limit: 81920

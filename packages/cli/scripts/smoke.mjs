@@ -318,6 +318,82 @@ console.log("— scenario F: injection into the system prompt —");
   );
 }
 
+// ---------------------------------------------------------------------------
+// Scenario H: curator garden cycle (phase-1 archive + consolidation staging)
+// ---------------------------------------------------------------------------
+console.log("— scenario H: curator —");
+{
+  // craft a 40-day-idle skill and a fresh one directly in the familiar home
+  const skillsRoot = path.join(familiarHome, "skills");
+  fs.mkdirSync(path.join(skillsRoot, "old-checklist"), { recursive: true });
+  fs.mkdirSync(path.join(skillsRoot, "fresh-note"), { recursive: true });
+  fs.writeFileSync(
+    path.join(skillsRoot, "old-checklist", "SKILL.md"),
+    "---\nname: old-checklist\ndescription: shipping steps\n---\n\nProcedure: 1. lint 2. test 3. ship\n",
+  );
+  fs.writeFileSync(
+    path.join(skillsRoot, "fresh-note", "SKILL.md"),
+    "---\nname: fresh-note\ndescription: scratch notes\n---\n\nMade today.\n",
+  );
+  const now = Date.now();
+  const day = 86_400_000;
+  fs.writeFileSync(
+    path.join(skillsRoot, ".usage.json"),
+    JSON.stringify(
+      {
+        "old-checklist": { useCount: 2, createdMs: now - 60 * day, lastUsedMs: now - 40 * day },
+        "fresh-note": { useCount: 0, createdMs: now },
+      },
+      null,
+      2,
+    ),
+  );
+
+  const h1 = await run(["curator", "run"], project, familiarHome);
+  assert(
+    h1.stdout.includes("archived 1"),
+    "curator archives skill idle >= 30d",
+    h1.stdout.slice(0, 240) + h1.stderr.slice(0, 240),
+  );
+  const hLedger = await run(["curator", "ledger"], project, familiarHome);
+  assert(
+    hLedger.stdout.includes("archive") && hLedger.stdout.includes("old-checklist"),
+    "ledger records the archival",
+    hLedger.stdout.slice(0, 240),
+  );
+  const h2 = await run(["curator", "list-archived"], project, familiarHome);
+  assert(h2.stdout.includes("old-checklist"), "list-archived shows it", h2.stdout.slice(0, 200));
+
+  // phase-2 consolidation (mock aux): deterministic umbrella staged as pending
+  const h3 = await run(["curator", "run", "--consolidate"], project, familiarHome);
+  assert(
+    h3.stdout.includes("consolidation:") && h3.stdout.includes("1 staged"),
+    "consolidation staged an umbrella proposal",
+    h3.stdout.slice(0, 300) + h3.stderr.slice(0, 200),
+  );
+  const pend = await run(["skills", "pending"], project, familiarHome);
+  assert(
+    pend.stdout.includes("deploys-checklist"),
+    "umbrella lands in skills pending",
+    pend.stdout.slice(0, 240),
+  );
+  const sid2 = pend.stdout.match(/[0-9a-f]{8}/)?.[0] ?? "";
+  await run(["skills", "approve", sid2], project, familiarHome);
+  const cat = await run(["skills", "list"], project, familiarHome);
+  assert(
+    cat.stdout.includes("deploys-checklist"),
+    "approved umbrella is in the catalog",
+    cat.stdout.slice(0, 240),
+  );
+
+  const h4 = await run(["curator", "status"], project, familiarHome);
+  assert(
+    h4.stdout.includes("enabled: yes") && /snapshots: [1-9]/.test(h4.stdout),
+    "curator status reflects the cycle",
+    h4.stdout.slice(0, 260),
+  );
+}
+
 console.log(
   failures === 0 ? "\nsmoke: all checks passed" : `\nsmoke: ${failures} failure(s)`,
 );

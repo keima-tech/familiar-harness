@@ -40,6 +40,24 @@ export class MockProvider implements Provider {
     }
 
     const userText = last?.role === "user" ? last.content : "";
+    // Skill consolidation request (M4 curator): emit a deterministic umbrella.
+    if (userText.includes("# Skill consolidation request (familiar)")) {
+      streamText(
+        JSON.stringify({
+          proposals: [
+            {
+              kind: "umbrella",
+              targets: ["skill-a", "skill-b"],
+              name: "deploys-checklist",
+              description: "merged deploy checks (deterministic mock)",
+              body: "# deploys-checklist\n\nWhen: releasing\nProcedure: 1. lint 2. test 3. ship\nWhy: merged from overlapping skills",
+            },
+          ],
+        }),
+        onChunk,
+      );
+      return { stopReason: "end_turn", usage: { promptTokens: 1, completionTokens: 8 } };
+    }
     // Compaction summarization request (M4): echo a deterministic note.
     // MUST be matched before other directives — the prompt embeds an older
     // transcript that may itself contain "@..." markers.

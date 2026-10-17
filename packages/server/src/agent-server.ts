@@ -24,12 +24,15 @@ import {
   SkillStore,
   PendingSkillStore,
   Settings,
+  CuratorRunner,
   postTurnReview,
   approveStagedMemory,
   rejectStagedMemory,
   approveStagedSkill,
   rejectStagedSkill,
+  startCuratorScheduler,
   type ApprovalAdapter,
+  type CuratorScheduler,
   type ResolvedConfig,
   type SessionStore,
   type SelfImproveContext,
@@ -92,6 +95,7 @@ export class AgentServer {
     }
     const approval = opts.approval ?? this.rpcApproval;
     this.approval = approval;
+    this.curator = new CuratorRunner(this.cfg, this.providers, this.selfImprove);
     this.runner = new AgentRunner(this.cfg, this.providers, this.store, {
       tools: opts.tools,
       approval,
@@ -110,6 +114,21 @@ export class AgentServer {
 
   private approval?: ApprovalAdapter;
   private disableReview: boolean;
+  /** M4: skill gardening (curator) */
+  readonly curator: CuratorRunner;
+  private curatorScheduler?: CuratorScheduler;
+  /** M4: ms timestamp of the last turn activity (idle feed for the curator) */
+  private lastTurnAt = Date.now();
+
+  /** Serve mode: start the maintenance scheduler (curator). */
+  startCuratorScheduler(tickMinutes = 15): CuratorScheduler | undefined {
+    if (this.curatorScheduler) return this.curatorScheduler;
+    this.curatorScheduler = startCuratorScheduler(this.cfg, this.curator, {
+      intervalMs: tickMinutes,
+      idleSince: (): number => Date.now() - this.lastTurnAt,
+    });
+    return this.curatorScheduler;
+  }
 
   /** Hook installed by the HTTP transport; permission events go to all clients. */
   attachBroadcast(broadcast: (event: unknown) => void): void {
@@ -211,6 +230,16 @@ export class AgentServer {
         return this.skillsApprove(params);
       case "skills.reject":
         return this.skillsReject(params);
+      case "curator.status":
+        return { curator: this.curator.status() };
+      case "curator.run": {
+        const consolidate = params["consolidate"] === true || this.cfg.curator.consolidate === true;
+        const phase1 = this.curator.runPhase1({ dryRun: params["dryRun"] === true });
+        const outcome = consolidate
+          ? await this.curator.runConsolidation({ dryRun: params["dryRun"] === true })
+          : undefined;
+        return { phase1, consolidation: outcome };
+      }
       default:
         throw new RpcError(RPC_ERROR_METHOD_NOT_FOUND, `unknown method: ${method}`);
     }
@@ -281,6 +310,8 @@ export class AgentServer {
       if (!this.disableReview) {
         await this.reviewTurn({ sessionId, session, msgCountBefore, ctx });
       }
+      // M4: idle feed for the curator scheduler
+      this.lastTurnAt = Date.now();
       return res;
     } catch (err) {
       // Include the failure in the response as well (events already carried it).

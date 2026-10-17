@@ -74,6 +74,11 @@ export interface AuxiliarySlot {
   model: string;
 }
 
+export interface CompactionConfig {
+  /** drop: remove old messages / summarize: aux model writes a durable note */
+  mode: "drop" | "summarize";
+}
+
 export interface ResolvedConfig {
   homeDir: string;
   default_provider: string;
@@ -88,7 +93,7 @@ export interface ResolvedConfig {
   memory: MemoryConfig;
   skills: SkillsConfig;
   self_review: SelfReviewConfig;
-  context: { token_soft_limit: number; keep_last: number };
+  context: { token_soft_limit: number; keep_last: number; compaction: CompactionConfig };
   server: { port: number; bind: string; auth_token_file?: string };
 }
 
@@ -156,7 +161,7 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
   memory: { write_approval: true, max_prompt_chars: 4000 },
   skills: { write_approval: true },
   self_review: { enabled: true },
-  context: { token_soft_limit: 81_920, keep_last: 10 },
+  context: { token_soft_limit: 81_920, keep_last: 10, compaction: { mode: "summarize" } },
   server: { port: 46_210, bind: "127.0.0.1" },
 };
 
@@ -373,6 +378,8 @@ self_review:
 context:
   token_soft_limit: 81920
   keep_last: 10
+  compaction:  # M4: over the soft limit, ask the aux compactor to write a note (fall back to drop)
+    mode: summarize
 
 server:
   port: 46210

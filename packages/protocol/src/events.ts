@@ -21,7 +21,7 @@ export type AgentEvent =
     }
   | { type: "turn.end"; turnId: string; usage?: Usage }
   | { type: "turn.error"; turnId: string; error: string; recoverable: boolean }
-  | { type: "compaction"; dropped: number; kept: number }
+  | { type: "compaction"; dropped: number; kept: number; /** M4: true when an aux model wrote the summary note (false / absent = drop guard) */ summarized?: boolean }
   /** M2 dynamic approval (serve mode): broadcast, wait for permission.respond */
   | { type: "permission.request"; requestId: string; tool: string; summary: string; detail?: string }
   | { type: "permission.resolved"; requestId: string; approved: boolean }

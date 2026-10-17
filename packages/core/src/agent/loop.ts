@@ -8,6 +8,7 @@ import type {
 import type { ResolvedConfig } from "../config.js";
 import { log } from "../logger.js";
 import type { SessionStore } from "../session/store.js";
+import type { SessionRecord } from "@familiar/protocol";
 import type { ProviderRegistry } from "../providers/index.js";
 import { ProviderError } from "../providers/base.js";
 import {
@@ -165,7 +166,7 @@ export class AgentRunner {
         });
 
         let history = this.store.getMessages(session.id);
-        history = this.compactIfNeeded(history, opts);
+        history = await this.compactIfNeeded(history, session, opts);
 
         // ---- stream the assistant response ----
         const assistantId = crypto.randomUUID();
@@ -335,14 +336,16 @@ export class AgentRunner {
   }
 
   /**
-   * M1 compaction guard: character-based estimate; if over the soft limit,
-   * drop the oldest messages except the first user message and the last N.
-   * Ephemeral (not persisted); real summarisation arrives in M3.
+   * M1/M4 compaction guard: character-based estimate over the soft limit.
+   * mode "summarize" (default M4): ask the aux compactor (auxiliary.compactor
+   * slot, else the session model) for a durable note; any failure falls back
+   * to the M1 drop guard. Ephemeral either way (not persisted).
    */
-  private compactIfNeeded(
+  private async compactIfNeeded(
     history: ChatMessage[],
+    session: SessionRecord,
     opts: RunTurnOptions,
-  ): ChatMessage[] {
+  ): Promise<ChatMessage[]> {
     const limitChars = this.cfg.context.token_soft_limit * 4;
     let total = 0;
     for (const m of history) total += m.content.length + (m.toolCalls?.length ?? 0) * 128;
@@ -356,12 +359,22 @@ export class AgentRunner {
     const dropped = mid.length;
     if (dropped <= 0) return history;
 
+    let noteText: string | undefined;
+    let summarized = false;
+    if (this.cfg.context.compaction?.mode !== "drop") {
+      noteText = await this.summarizeCompaction(mid, session);
+      summarized = noteText !== undefined;
+    }
+
+    const note =
+      noteText ??
+      `[familiar: compaction guard: ${dropped} older messages were dropped from context]`;
     const compacted: ChatMessage[] = [];
     if (firstIdx >= 0) compacted.push(history[firstIdx]!);
     compacted.push({
       id: crypto.randomUUID(),
       role: "user",
-      content: `[familiar: compaction guard: ${dropped} older messages were dropped from context]`,
+      content: note,
       createdAt: Date.now(),
       meta: { ephemeral: true },
     });
@@ -369,9 +382,55 @@ export class AgentRunner {
 
     let kept = 0;
     for (const m of compacted) kept += m.content.length;
-    opts.onEvent({ type: "compaction", dropped, kept });
-    log.warn(`compaction: dropped ${dropped} messages (estimate ${total} chars > ${limitChars})`);
+    opts.onEvent({ type: "compaction", dropped, kept, summarized });
+    log.warn(
+      `compaction: ${summarized ? "summarized" : "dropped"} ${dropped} messages (estimate ${total} chars > ${limitChars})`,
+    );
     return compacted;
+  }
+
+  /** One-shot aux chat for the compaction note; undefined on any failure. */
+  private async summarizeCompaction(
+    mid: ChatMessage[],
+    session: SessionRecord,
+  ): Promise<string | undefined> {
+    try {
+      const slot = this.cfg.auxiliary?.["compactor"];
+      const providerId = slot?.provider ?? session.provider;
+      const model = slot?.model ?? session.model;
+
+      const transcript = mid
+        .map((m) => `${m.role}: ${m.content.slice(0, 1200)}`)
+        .join("\n")
+        .slice(-12_000);
+      const prompt =
+        "# Compaction summary request (familiar)\n" +
+        `CLIPPED=${mid.length}\n` +
+        "The following older messages will be removed from context. Write a compact durable note (state, decisions, open questions, file paths, lessons) that future turns can rely on. Output ONLY the note text, max ~1200 chars.\n\nTRANSCRIPT:\n" +
+        transcript;
+
+      const parts: string[] = [];
+      await this.providers
+        .get(providerId)
+        .chat(
+          {
+            model: model ?? "",
+            messages: [{ id: crypto.randomUUID(), role: "user", content: prompt, createdAt: Date.now() }],
+            tools: [],
+            signal: AbortSignal.timeout(45_000),
+          },
+          (chunk) => {
+            if (chunk.type === "text") parts.push(chunk.text);
+          },
+        );
+      const text = parts.join("").trim().slice(0, 2000);
+      return text.length > 0 ? text : undefined;
+    } catch (err) {
+      log.debug(
+        `compaction summarize failed (drop fallback): ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return undefined;
+    }
   }
 }
 

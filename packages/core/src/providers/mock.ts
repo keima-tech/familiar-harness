@@ -40,6 +40,14 @@ export class MockProvider implements Provider {
     }
 
     const userText = last?.role === "user" ? last.content : "";
+    // Compaction summarization request (M4): echo a deterministic note.
+    // MUST be matched before other directives — the prompt embeds an older
+    // transcript that may itself contain "@..." markers.
+    if (userText.includes("# Compaction summary request (familiar)")) {
+      const n = userText.match(/CLIPPED=(\d+)/)?.[1] ?? "0";
+      streamText(`mock summary: ${n} older messages condensed into this durable note`, onChunk);
+      return { stopReason: "end_turn", usage: { promptTokens: 1, completionTokens: 3 } };
+    }
     // Background self-review prompt (M3): if the review prompt contains the
     // marker "@make-lesson <text>", emit a deterministic memory.create proposal.
     if (userText.includes("# LAST TURN (transcript)")) {

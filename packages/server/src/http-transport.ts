@@ -23,6 +23,8 @@ export interface HttpTransportOptions {
 export interface HttpTransport {
   url: string;
   close(): Promise<void>;
+  /** M5: push any event for an arbitrary session (cron jobs, diagnostics). */
+  broadcast: (sessionId: string, event: unknown) => void;
 }
 
 // Whitelisted static assets only (no directory traversal surface).
@@ -95,8 +97,9 @@ export function startHttpTransport(
   });
 
   // Permission prompts must reach all clients even from POST-originated turns.
-  // Server-level events (no session) use an empty sessionId.
-  agent.attachBroadcast((event) => broadcast("", event));
+  // Server-level events (no session) use an empty sessionId; cron turns push
+  // through their own session id via the (sessionId, event) signature.
+  agent.attachBroadcast((sessionId, event) => broadcast(sessionId, event));
 
   const wss = new WebSocketServer({ noServer: true });
   httpServer.on("upgrade", (req, socket, head) => {
@@ -121,6 +124,7 @@ export function startHttpTransport(
         address && typeof address === "object" ? address.port : (opts.port ?? 0);
       resolve({
         url: `http://${opts.bind}:${port}`,
+        broadcast: (sessionId: string, event: unknown): void => broadcast(sessionId, event),
         close: () =>
           new Promise<void>((done) => {
             for (const ws of clients) ws.close();

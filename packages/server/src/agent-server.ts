@@ -31,7 +31,12 @@ import {
   approveStagedSkill,
   rejectStagedSkill,
   startCuratorScheduler,
+  McpHub,
+  HookRunner,
+  CronScheduler,
+  DenyApprovalAdapter,
   type ApprovalAdapter,
+  type CronJob,
   type CuratorScheduler,
   type ResolvedConfig,
   type SessionStore,
@@ -41,6 +46,21 @@ import {
 import { log } from "@familiar/core";
 import { SessionTodoStore } from "./todo-store.js";
 import { RpcApprovalAdapter } from "./rpc-approvals.js";
+
+/**
+ * M5: every AgentServer with configured MCP servers registers here so child
+ * processes are reaped on process exit (familiar run must not wedge on them).
+ */
+let mcpExitCleanupInstalled = false;
+const liveMcpHubs = new Set<McpHub>();
+function installMcpExitCleanup(hub: McpHub): void {
+  liveMcpHubs.add(hub);
+  if (mcpExitCleanupInstalled) return;
+  mcpExitCleanupInstalled = true;
+  process.on("exit", () => {
+    for (const h of liveMcpHubs) h.stopAll();
+  });
+}
 
 /**
  * Transport-independent agent service. HTTP/WS wrappers and the CLI's
@@ -54,10 +74,9 @@ export class AgentServer {
   readonly selfImprove: SelfImproveContext;
   private readonly runner: AgentRunner;
   private rpcApproval?: RpcApprovalAdapter;
-  private broadcastHook?: (event: unknown) => void;
+  private broadcastHook?: (sessionId: string, event: unknown) => void;
 
-  constructor(
-    opts: {
+  constructor(    opts: {
       config?: ResolvedConfig;
       store?: SessionStore;
       tools?: ToolRegistry;
@@ -69,6 +88,10 @@ export class AgentServer {
       selfImprove?: SelfImproveContext;
       /** M3: run background self-review after turns (default true) */
       disableReview?: boolean;
+      /** M5: skip MCP dynamic tools (tests) */
+      disableMcp?: boolean;
+      /** M5: skip lifecycle hooks (tests) */
+      disableHooks?: boolean;
     } = {},
   ) {
     this.cfg = opts.config ?? loadConfig();
@@ -89,18 +112,30 @@ export class AgentServer {
       })();
     if (opts.rpcApprovals) {
       this.rpcApproval = new RpcApprovalAdapter(
-        (event) => this.broadcastHook?.(event),
+        (event) => this.broadcastHook?.("", event),
         opts.rpcApprovalTimeoutMs,
       );
     }
     const approval = opts.approval ?? this.rpcApproval;
     this.approval = approval;
+    // M5: hooks must exist before the runner is built; MCP discovery runs in
+    // the background and registers dynamic tools when ready. Empty config ⇒
+    // nothing is spawned, so default construction stays inert.
+    this.hooks = opts.disableHooks === true ? undefined : new HookRunner(this.cfg);
+    if (opts.disableMcp !== true) {
+      this.mcp = new McpHub(this.cfg);
+      void this.mcpReady();
+      if (this.mcp.hasServers()) {
+        installMcpExitCleanup(this.mcp);
+      }
+    }
     this.curator = new CuratorRunner(this.cfg, this.providers, this.selfImprove);
     this.runner = new AgentRunner(this.cfg, this.providers, this.store, {
       tools: opts.tools,
       approval,
       todos: this.todos,
       selfImprove: this.selfImprove,
+      hooks: this.hooks,
       taskRunner: (args) =>
         this.runSubagentTask({
           sessionId: args.sessionId,
@@ -119,6 +154,91 @@ export class AgentServer {
   private curatorScheduler?: CuratorScheduler;
   /** M4: ms timestamp of the last turn activity (idle feed for the curator) */
   private lastTurnAt = Date.now();
+  /** M5: MCP dynamic tools */
+  readonly mcp?: McpHub;
+  private mcpDiscover?: Promise<void>;
+  /** M5: lifecycle hooks */
+  readonly hooks?: HookRunner;
+  /** M5: scheduled prompts (public for CLI/serve display) */
+  cronScheduler?: CronScheduler;
+
+  /** MCP discovery (memoized); resolves after dynamic tools are registered. */
+  mcpReady(): Promise<void> {
+    if (!this.mcp) return Promise.resolve();
+    this.mcpDiscover ??= this.mcp
+      .discover()
+      .then(() => {
+        this.runner.registerExtraTools(this.mcp!.tools());
+      })
+      .catch(() => {
+        /* every server failure is recorded inside the hub */
+      });
+    return this.mcpDiscover;
+  }
+
+  /** Serve mode: start scheduled prompts (config cron.jobs). */
+  startCronScheduler(): CronScheduler | undefined {
+    if (this.cronScheduler) return this.cronScheduler;
+    const jobs = (this.cfg.cron?.jobs ?? []).filter(
+      (j) => j.enabled !== false && typeof j.prompt === "string" && j.prompt.trim() !== "" && Number.isFinite(j.every_minutes),
+    );
+    if (jobs.length === 0) return undefined;
+    this.cronScheduler = new CronScheduler(jobs, (job) => this.runCronJob(job));
+    this.cronScheduler.start();
+    return this.cronScheduler;
+  }
+
+  /** Kill MCP servers / cron timers (serve shutdown, tests). */
+  dispose(): void {
+    this.mcp?.stopAll();
+    this.cronScheduler?.stop();
+  }
+
+  private async runCronJob(job: CronJob): Promise<void> {
+    const name = job.name ?? job.prompt.slice(0, 24);
+    const started = Date.now();
+    const session = await this.createSession({ title: `cron: ${name}` });
+    const emit = (event: unknown): void => {
+      try {
+        this.broadcastHook?.(session.id, event);
+      } catch {
+        /* event sink failures must not kill the job */
+      }
+    };
+    // Unattended execution: unapproved risky tools are denied immediately
+    // instead of stalling on the 300s RPC approval timeout.
+    const cronRunner = new AgentRunner(this.cfg, this.providers, this.store, {
+      approval: new DenyApprovalAdapter(),
+      todos: this.todos,
+      selfImprove: this.selfImprove,
+      taskRunner: (args) =>
+        this.runSubagentTask({
+          sessionId: args.sessionId,
+          description: args.description,
+          prompt: args.prompt,
+          yolo: args.yolo,
+        }),
+      hooks: this.hooks,
+    });
+    if (this.mcp) {
+      await this.mcpReady();
+      cronRunner.registerExtraTools(this.mcp.tools());
+    }
+    log.info(`cron: running "${name}" on session ${session.id.slice(0, 8)}`);
+    try {
+      await cronRunner.runTurn({
+        sessionId: session.id,
+        userText: job.prompt,
+        maxSteps: 25,
+        yolo: false,
+        onEvent: emit,
+      });
+      emit({ type: "cron.run", name, status: "ok", durationMs: Date.now() - started });
+    } catch (err) {
+      emit({ type: "cron.run", name, status: "error", durationMs: Date.now() - started });
+      throw err; // the scheduler records the failure; other jobs keep running
+    }
+  }
 
   /** Serve mode: start the maintenance scheduler (curator). */
   startCuratorScheduler(tickMinutes = 15): CuratorScheduler | undefined {
@@ -130,8 +250,8 @@ export class AgentServer {
     return this.curatorScheduler;
   }
 
-  /** Hook installed by the HTTP transport; permission events go to all clients. */
-  attachBroadcast(broadcast: (event: unknown) => void): void {
+  /** Hook installed by the HTTP transport; cron turns use their session id. */
+  attachBroadcast(broadcast: (sessionId: string, event: unknown) => void): void {
     this.broadcastHook = broadcast;
   }
 
@@ -207,7 +327,7 @@ export class AgentServer {
         if (!this.rpcApproval) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "rpc approvals not installed");
         const resolved = this.rpcApproval.respond(requestId, approved);
         if (!resolved) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "request not pending");
-        this.broadcastHook?.({ type: "permission.resolved", requestId, approved });
+        this.broadcastHook?.("", { type: "permission.resolved", requestId, approved });
         return { resolved: true };
       }
       case "memory.list":
@@ -240,6 +360,17 @@ export class AgentServer {
           : undefined;
         return { phase1, consolidation: outcome };
       }
+      case "mcp.status": {
+        await this.mcpReady();
+        return { servers: this.mcp?.status() ?? [] };
+      }
+      case "cron.status": {
+        const runtime = this.cronScheduler?.status();
+        return {
+          started: runtime?.started ?? false,
+          jobs: runtime?.jobs ?? (this.cfg.cron?.jobs ?? []),
+        };
+      }
       default:
         throw new RpcError(RPC_ERROR_METHOD_NOT_FOUND, `unknown method: ${method}`);
     }
@@ -260,7 +391,7 @@ export class AgentServer {
     }
   }
 
-  private createSession(params: Record<string, unknown>): SessionRecord {
+  private async createSession(params: Record<string, unknown>): Promise<SessionRecord> {
     const provider = str(params, "provider") ?? this.cfg.default_provider;
     const pc = this.cfg.providers[provider];
     if (!pc) throw new RpcError(RPC_ERROR_INVALID_PARAMS, `unknown provider: ${provider}`);
@@ -273,19 +404,34 @@ export class AgentServer {
       );
     }
     const cwd = path.resolve(str(params, "cwd") ?? process.cwd());
-    return this.store.createSession({
+    const created = this.store.createSession({
       title: str(params, "title") ?? "",
       provider,
       model,
       profile: str(params, "profile"),
       cwd,
     });
+    // M5: session_start lifecycle hook (awaited; hooks can never throw).
+    if (this.hooks) {
+      await this.hooks.run("session_start", {
+        event: "session_start",
+        sessionId: created.id,
+        cwd: created.cwd,
+        timestamp: Date.now(),
+        title: created.title,
+        provider: created.provider,
+        model: created.model,
+      });
+    }
+    return created;
   }
 
   private async send(
     params: Record<string, unknown>,
     ctx: RpcContext,
   ): Promise<{ turnId: string; steps: number; toolCalls: number; usage: Usage }> {
+    // M5: make dynamic MCP tools visible before the first tool advertisement.
+    await this.mcpReady();
     const sessionId = str(params, "id");
     const text = str(params, "text");
     if (!sessionId || text === undefined || text === null || text === "") {

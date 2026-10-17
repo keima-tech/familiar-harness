@@ -2,6 +2,10 @@
 
 ステータス: 設計確定(M3/M4 実装) / 最終更新: 2026-10-17
 
+> **M3 実装状況(2026-10-17)**: memory / skills / background self-review / write_approval は実装・検証済み。
+- 実測: mock による smoke(scenario D/E/F)+ 実モデル(lfm2.5:latest を `auxiliary.reviewer` に)で staging→approve→次ターン注入まで確認。
+- 実装上の補足: 承認 on/off は `~/.familiar/settings.json` オーバーライド / reviewer は `auxiliary.reviewer` 未設定ならメインモデル / skill 削除は `.archive/` へ退避(ハードデリートしない)/ CAS 失敗時は approve が拒否メッセージを返す(手動で出し直す)。
+
 Hermes Agent の実装を参考に、以下の 5 部品で構成する。**memory は「常時コンテキストに載る小さな事実」、skills は「関連時のみロードする手続き」**という役割分担が原則。
 
 ```

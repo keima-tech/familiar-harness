@@ -460,6 +460,26 @@ console.log("— scenario I: web ui transport —");
     "turn events streamed over WS",
     JSON.stringify(frames.map((f) => f.event.type)).slice(0, 160),
   );
+  const del = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "session.delete",
+      params: { id: created.result.id },
+    }),
+  }).then((r) => r.json());
+  assert(del.result?.deleted === true, "session.delete removes the session", JSON.stringify(del));
+  const after = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 4, method: "session.list", params: {} }),
+  }).then((r) => r.json());
+  assert(
+    !(after.result ?? []).some((s) => s.id === created.result.id),
+    "deleted session disappears from session.list",
+  );
   ws.close();
   serve.kill("SIGTERM");
   await new Promise((r) => setTimeout(r, 300));
@@ -611,6 +631,113 @@ console.log("— scenario M: task parallelization —");
     sawAlpha && sawBeta,
     "both subagent final texts came back as tool results",
     `alpha=${String(sawAlpha)} beta=${String(sawBeta)}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Scenario N: SOUL.md layered personas (M6: global → profile → project)
+// ---------------------------------------------------------------------------
+console.log("— scenario N: SOUL.md layering —");
+{
+  const homeN = path.join(tmpBase, "home-soul");
+  fs.mkdirSync(path.join(homeN, "profiles", "dev"), { recursive: true });
+  fs.writeFileSync(
+    path.join(homeN, "config.yaml"),
+    BASE_CONFIG,
+  );
+  fs.writeFileSync(
+    path.join(homeN, "SOUL.md"),
+    "# SOUL GLOBAL MARKER-n-global\nstay grounded and curious\n",
+  );
+  fs.writeFileSync(
+    path.join(homeN, "profiles", "dev", "SOUL.md"),
+    "# SOUL PROFILE MARKER-n-profile\ndev-mode persona\n",
+  );
+  const projN = path.join(tmpBase, "project-soul");
+  fs.mkdirSync(path.join(projN, ".familiar"), { recursive: true });
+  fs.writeFileSync(
+    path.join(projN, ".familiar", "SOUL.md"),
+    "# SOUL PROJECT MARKER-n-project\nkeep this repo tidy\n",
+  );
+
+  async function soulCheck(marker, extraArgs) {
+    const r = await run(
+      ["run", "-p", `@dump-prompt-soul ${marker}`, "--cwd", projN, "--json", "--yolo", ...extraArgs],
+      projN,
+      homeN,
+    );
+    const text = r.parsed
+      .filter((ev) => ev?.type === "text.delta")
+      .map((ev) => ev.text)
+      .join("");
+    return text;
+  }
+  assert(
+    (await soulCheck("MARKER-n-global", [])).includes("SOUL-PRESENT"),
+    "global ~/.familiar/SOUL.md is injected",
+  );
+  assert(
+    (await soulCheck("MARKER-n-project", [])).includes("SOUL-PRESENT"),
+    "project .familiar/SOUL.md is injected",
+  );
+  assert(
+    (await soulCheck("MARKER-n-profile", ["--profile", "dev"])).includes("SOUL-PRESENT"),
+    "profile SOUL.md is injected via --profile",
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Scenario O: LSP diagnostics (mock stdio language server)
+// ---------------------------------------------------------------------------
+console.log("— scenario O: lsp_diagnostics —");
+{
+  const homeO = path.join(tmpBase, "home-lsp");
+  fs.mkdirSync(homeO, { recursive: true });
+  fs.writeFileSync(
+    path.join(homeO, "config.yaml"),
+    BASE_CONFIG.replace(
+      "server:",
+      `lsp:\n  servers:\n    mock:\n      command: node\n      args: ["${repoRoot}/packages/cli/scripts/mock-lsp-server.mjs"]\n      extensions: [txt]\n\nserver:`,
+    ),
+  );
+  fs.writeFileSync(
+    path.join(project, "notes.txt"),
+    "first line\nFAIL: something bad here\nthird line\n",
+  );
+  fs.writeFileSync(path.join(project, "clean.txt"), "all fine\n");
+
+  const o1 = await run(["run", "-p", "@lsp notes.txt", "--json", "--yolo"], project, homeO);
+  const oText = o1.parsed
+    .filter((ev) => ev?.type === "tool.result")
+    .map((ev) => ev.content ?? "")
+    .join("\n");
+  assert(
+    oText.includes("MOCK001") && oText.includes("[error]"),
+    "lsp server reports the FAIL marker as an error",
+    JSON.stringify(oText.slice(0, 200)),
+  );
+  assert(o1.code === 0, "run with lsp tool exits cleanly (children reaped)", `code=${o1.code}`);
+
+  const o2 = await run(["run", "-p", "@lsp clean.txt", "--json", "--yolo"], project, homeO);
+  const o2Text = o2.parsed
+    .filter((ev) => ev?.type === "tool.result")
+    .map((ev) => ev.content ?? "")
+    .join("\n");
+  assert(
+    o2Text.includes("file is clean"),
+    "clean file reports zero diagnostics",
+    JSON.stringify(o2Text.slice(0, 200)),
+  );
+
+  const o3 = await run(["run", "-p", "@lsp no-server.rst", "--json", "--yolo"], project, homeO);
+  const o3Text = o3.parsed
+    .filter((ev) => ev?.type === "tool.result")
+    .map((ev) => ev.content ?? "")
+    .join("\n");
+  assert(
+    o3Text.includes("no language server configured"),
+    "uncovered extension fails with a hint, not a crash",
+    JSON.stringify(o3Text.slice(0, 200)),
   );
 }
 

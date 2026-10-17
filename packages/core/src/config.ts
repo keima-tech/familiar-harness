@@ -74,6 +74,44 @@ export interface CuratorConfig {
   consolidate: boolean;
 }
 
+/** M5: MCP stdio server connection (one child process per server). */
+export interface McpServerConfig {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+  /** per-request timeout (ms); default 30000 */
+  timeout_ms?: number;
+  /** read-only MCP tools stay usable in plan mode and skip approval */
+  read_only?: boolean;
+  disabled?: boolean;
+}
+
+export interface McpConfig {
+  servers: Record<string, McpServerConfig>;
+}
+
+/** M5: lifecycle shell hooks — JSON payload on stdin, 10s timeout, failures logged only. */
+export interface HooksConfig {
+  session_start?: string[];
+  pre_tool_use?: string[];
+  post_tool_use?: string[];
+  turn_complete?: string[];
+  [event: string]: string[] | undefined;
+}
+
+/** M5: scheduled prompts (serve process). every_minutes 0 = once at boot. */
+export interface CronJob {
+  name?: string;
+  every_minutes: number;
+  prompt: string;
+  enabled?: boolean;
+}
+
+export interface CronConfig {
+  jobs: CronJob[];
+}
+
 export interface PermissionsConfig {
   bash: BashPermissionConfig;
   files: { bounds: "cwd" | "unrestricted" };
@@ -106,6 +144,12 @@ export interface ResolvedConfig {
   skills: SkillsConfig;
   self_review: SelfReviewConfig;
   curator: CuratorConfig;
+  /** M5: MCP stdio servers exposing dynamic tools */
+  mcp: McpConfig;
+  /** M5: lifecycle shell hooks */
+  hooks: HooksConfig;
+  /** M5: scheduled prompts */
+  cron: CronConfig;
   context: { token_soft_limit: number; keep_last: number; compaction: CompactionConfig };
   server: { port: number; bind: string; auth_token_file?: string };
 }
@@ -182,6 +226,9 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
     archive_after_days: 30,
     consolidate: false,
   },
+  mcp: { servers: {} },
+  hooks: {},
+  cron: { jobs: [] },
   context: { token_soft_limit: 81_920, keep_last: 10, compaction: { mode: "summarize" } },
   server: { port: 46_210, bind: "127.0.0.1" },
 };
@@ -199,6 +246,9 @@ const KNOWN_TOP_LEVEL = new Set([
   "skills",
   "self_review",
   "curator",
+  "mcp",
+  "hooks",
+  "cron",
   "context",
   "server",
 ]);
@@ -405,6 +455,26 @@ curator:
   stale_after_days: 14      # 未使用 → stale(表示のみ・復帰可)
   archive_after_days: 30    # 未使用 → .archive/ へ(削除しない・snapshot あり)
   consolidate: false        # opt-in: Phase-2 LLM 統合(提案は staging 経由)
+
+# M5: MCP stdio サーバ(動的ツール mcp__<server>__<tool>)
+# mcp:
+#   servers:
+#     fs:
+#       command: npx
+#       args: ["-y", "@modelcontextprotocol/server-filesystem", /data]
+#       read_only: true     # plan モードでも使用可・承認省略
+
+# M5: ライフサイクルフック(shell コマンド・stdin に JSON・失敗は記録のみ)
+# hooks:
+#   post_tool_use:
+#     - node ~/.familiar/hooks/audit.js
+
+# M5: 定期実行(serve プロセス内・every_minutes 0 は起動時に 1 回)
+# cron:
+#   jobs:
+#     - name: daily-report
+#       every_minutes: 1440
+#       prompt: "昨日のセッションから学びを memory へ蓄積して"
 
 context:
   token_soft_limit: 81920

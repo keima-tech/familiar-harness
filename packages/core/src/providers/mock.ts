@@ -160,6 +160,38 @@ export class MockProvider implements Provider {
       onChunk({ type: "stop", finishReason: "tool_calls" });
       return { stopReason: "tool_calls" };
     }
+    // M5: two task calls in ONE message → exercises the parallel path.
+    const pairMatch = userText.match(/@task-pair\s+(\S+)\s+(\S+)/);
+    if (pairMatch) {
+      for (const [index, label] of [
+        [0, pairMatch[1] ?? "alpha"],
+        [1, pairMatch[2] ?? "beta"],
+      ] as const) {
+        onChunk({ type: "tool_call_start", index, id: `call_mock_p${index}`, name: "task" });
+        onChunk({
+          type: "tool_call_delta",
+          index,
+          argumentsDelta: JSON.stringify({
+            description: label,
+            prompt: `research ${label} and summarize the outcome`,
+          }),
+        });
+      }
+      onChunk({ type: "stop", finishReason: "tool_calls" });
+      return { stopReason: "tool_calls" };
+    }
+    // M5: call a dynamic MCP tool (fixed mock server name).
+    const mcpMatch = userText.match(/@mcp\s+([^\n]+)/);
+    if (mcpMatch) {
+      onChunk({ type: "tool_call_start", index: 0, id: "call_mock_mcp", name: "mcp__mock__echo_text" });
+      onChunk({
+        type: "tool_call_delta",
+        index: 0,
+        argumentsDelta: JSON.stringify({ text: (mcpMatch[1] ?? "").trim() }),
+      });
+      onChunk({ type: "stop", finishReason: "tool_calls" });
+      return { stopReason: "tool_calls" };
+    }
     const readMatch = userText.match(/@read\s+(\S+)/);
     if (readMatch) {
       // Simulate a tool call (arguments arrive as one complete JSON payload).

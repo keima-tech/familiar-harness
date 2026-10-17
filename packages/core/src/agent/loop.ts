@@ -54,6 +54,8 @@ export interface RunTurnResult {
  */
 export class AgentRunner {
   private readonly tools: ToolRegistry;
+  /** M5: lifecycle hooks (may be undefined) */
+  private readonly hooks?: import("../hooks/index.js").HookRunner;
 
   constructor(
     private readonly cfg: ResolvedConfig,
@@ -73,6 +75,8 @@ export class AgentRunner {
       }) => Promise<string>;
       /** M3: self-improvement stores (absent → memory/skill tools hidden) */
       selfImprove?: SelfImproveContext;
+      /** M5: lifecycle hooks (optional; failures never break a turn) */
+      hooks?: import("../hooks/index.js").HookRunner;
     } = {},
   ) {
     this.tools = opts.tools ?? defaultToolRegistry();
@@ -80,6 +84,15 @@ export class AgentRunner {
     this.todos = opts.todos;
     this.taskRunner = opts.taskRunner;
     this.selfImprove = opts.selfImprove;
+    this.hooks = opts.hooks;
+  }
+
+  /**
+   * M5: register dynamic tools discovered after construction (MCP annexes
+   * arrive asynchronously from child processes).
+   */
+  registerExtraTools(tools: Tool[]): void {
+    for (const tool of tools) this.tools.register(tool);
   }
 
   private approval: ApprovalAdapter;
@@ -260,12 +273,32 @@ export class AgentRunner {
           taskRunner: this.taskRunner,
           selfImprove: this.selfImprove,
         };
-        for (const call of stepToolCalls) {
+        const runOne = async (call: ToolCall): Promise<void> => {
           opts.onEvent({ type: "tool.call", messageId: assistantId, toolCall: call });
           const startedAt = Date.now();
+          await this.hooks?.run("pre_tool_use", {
+            event: "pre_tool_use",
+            sessionId: session.id,
+            cwd: session.cwd,
+            turnId,
+            timestamp: startedAt,
+            tool: call.name,
+            args: safeArgs(call.arguments),
+          });
           const output = await this.executeToolCall(call, toolCtx, plan, effectiveTools);
           const durationMs = Date.now() - startedAt;
           const isError = output.isError === true;
+          await this.hooks?.run("post_tool_use", {
+            event: "post_tool_use",
+            sessionId: session.id,
+            cwd: session.cwd,
+            turnId,
+            timestamp: Date.now(),
+            tool: call.name,
+            args: safeArgs(call.arguments),
+            isError,
+            durationMs,
+          });
           const resultMsg: ChatMessage = {
             id: crypto.randomUUID(),
             role: "tool",
@@ -284,11 +317,28 @@ export class AgentRunner {
             isError,
             durationMs,
           });
+        };
+        // M5: subagent parallelization — one assistant message with several
+        // task calls runs the subagents concurrently (other tools stay
+        // sequential for deterministic file effects); results persist per call.
+        const allTasks =
+          stepToolCalls.length > 1 && stepToolCalls.every((c) => c.name === "task");
+        if (allTasks) {
+          await Promise.all(stepToolCalls.map((call) => runOne(call)));
+        } else {
+          for (const call of stepToolCalls) await runOne(call);
         }
       }
 
       const finalUsage: Usage = usage.promptTokens || usage.completionTokens ? usage : {};
       opts.onEvent({ type: "turn.end", turnId, usage: finalUsage });
+      await this.hooks?.run("turn_complete", {
+        event: "turn_complete",
+        sessionId: session.id,
+        cwd: session.cwd,
+        turnId,
+        timestamp: Date.now(),
+      });
       return { turnId, steps, toolCalls: toolCallsTotal, usage: finalUsage };
     } catch (err) {
       const recoverable = err instanceof ProviderError && err.status !== undefined && err.status >= 500;
@@ -528,3 +578,12 @@ export function salvageTextToolCall(
 // ---------------------------------------------------------------------------
 // JSON-schema subset validation lives in tools/registry.ts (validateToolArgs).
 // ---------------------------------------------------------------------------
+
+/** Hook payloads carry whatever the model passed; tolerate non-JSON strings. */
+function safeArgs(json?: string): unknown {
+  try {
+    return json ? JSON.parse(json) : undefined;
+  } catch {
+    return json;
+  }
+}

@@ -28,7 +28,9 @@ export type AgentEvent =
   /** M3 self-improvement: staged proposals count after a reviewed turn */
   | { type: "improvement.staged"; memoryCount: number; skillCount: number }
   /** M3: memory entries dropped from the prompt injection due to the char cap */
-  | { type: "memory.truncation"; dropped: number };
+  | { type: "memory.truncation"; dropped: number }
+  /** M5: a cron job finished running its prompt on a dedicated session */
+  | { type: "cron.run"; name: string; status: "ok" | "error"; durationMs: number };
 
 export const isTerminalEvent = (e: AgentEvent): boolean =>
   e.type === "turn.end" || e.type === "turn.error";

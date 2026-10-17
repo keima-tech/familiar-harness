@@ -21,3 +21,6 @@ export * from "./selfimprove/curator/ledger.js";
 export * from "./selfimprove/curator/snapshot.js";
 export * from "./selfimprove/curator/runner.js";
 export * from "./selfimprove/curator/scheduler.js";
+export * from "./mcp/client.js";
+export * from "./hooks/index.js";
+export * from "./cron/scheduler.js";

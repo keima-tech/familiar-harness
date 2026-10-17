@@ -452,6 +452,39 @@ console.log("— scenario I: web ui transport —");
     }),
   }).then((r) => r.json());
   assert(upd.result?.title === "renamed by smoke", "session.update renames the session", JSON.stringify(upd));
+  // v1.1: config.provider.set (settings GUI writes kind / endpoint / key)
+  const provSet = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 22,
+      method: "config.provider.set",
+      params: { name: "smoke-local", kind: "openai_compatible", base_url: "http://127.0.0.1:9999/v1", api_key: "smoke-secret-123" },
+    }),
+  }).then((r) => r.json());
+  assert(provSet.result?.updated === true, "config.provider.set accepts a patch", JSON.stringify(provSet.error ?? {}).slice(0, 160));
+  const cfgAfter = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 23, method: "config.get", params: {} }),
+  }).then((r) => r.json());
+  const smokePc = cfgAfter.result?.providers?.["smoke-local"];
+  assert(!!smokePc, "provider appears in config.get after the patch", JSON.stringify(cfgAfter.result?.providers ?? {}).slice(0, 160));
+  assert(smokePc?.base_url === "http://127.0.0.1:9999/v1", "provider base_url persisted");
+  assert(smokePc?.auth?.source?.startsWith("file:"), "api key stored via api_key_file (never inline)", JSON.stringify(smokePc?.auth));
+  assert(JSON.stringify(cfgAfter.result).indexOf("smoke-secret-123") < 0, "secret value never exposed by config.get");
+  const provBad = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 24,
+      method: "config.provider.set",
+      params: { name: "bad!!", kind: "nope", base_url: "ftp://x" },
+    }),
+  }).then((r) => r.json());
+  assert(!!provBad.error, "config.provider.set rejects invalid input", JSON.stringify(provBad).slice(0, 160));
   const sent = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

@@ -29,6 +29,8 @@ client/server 型エージェントハーネス。コア(`packages/core`)は UI 
 - **トークン/秘密情報をソースコード・コミット・ログ・テストに出力しない**
   - 認証情報は `~/.familiar/*.token` ファイルまたは環境変数から解決(`packages/core/src/config.ts` の `resolveAuthSecret`)
   - `config.get` 等 API の応答にはシークレットを含めない(サニタイズ)
+  - GUI/CLI から設定した API キーは `~/.familiar/secrets/<provider>.key`(0600)にのみ保存し、
+    config.yaml には `api_key_file` 参照のみを書く(`writeProviderToDisk`)
 - 破壊的な操作(rm -rf、sudo、外部送信)は必ず承認フロー(`ApprovalAdapter`)を通す
 - テストはネットワーク不要(mock プロバイダ)で完結させる
 

@@ -15,6 +15,9 @@ import {
 import {
   AgentRunner,
   loadConfig,
+  configFilePath,
+  writeProviderToDisk,
+  describeAuthSource,
   familiarPaths,
   sanitizeConfigForApi,
   ProviderRegistry,
@@ -40,6 +43,8 @@ import {
   type CronJob,
   type CuratorScheduler,
   type ResolvedConfig,
+  type ProviderConfig,
+  type ProviderPatch,
   type SessionStore,
   type SelfImproveContext,
   type ToolRegistry,
@@ -302,6 +307,8 @@ export class AgentServer {
         return "pong";
       case "config.get":
         return sanitizeConfigForApi(this.cfg);
+      case "config.provider.set":
+        return this.configProviderSet(params);
       case "models.list":
         return this.modelsList(params);
       case "session.create":
@@ -378,6 +385,58 @@ export class AgentServer {
       default:
         throw new RpcError(RPC_ERROR_METHOD_NOT_FOUND, `unknown method: ${method}`);
     }
+  }
+
+  /** GUI "プロバイダー" settings: persist kind / endpoint / default model and
+   * the API key (never inline — see writeProviderToDisk), then hot-swap the
+   * in-memory config and drop provider caches. No secret values are returned. */
+  private configProviderSet(params: Record<string, unknown>): Record<string, unknown> {
+    const name = str(params, "name");
+    if (!name || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, "provider name (alphanumeric) is required");
+    }
+    const patch: ProviderPatch = { name };
+    const kind = str(params, "kind");
+    if (kind !== undefined && kind !== "") {
+      if (kind !== "openai_compatible" && kind !== "anthropic" && kind !== "mock") {
+        throw new RpcError(RPC_ERROR_INVALID_PARAMS, `unknown provider kind: ${kind}`);
+      }
+      patch.kind = kind;
+    }
+    const baseUrl = str(params, "base_url");
+    if (baseUrl !== undefined) {
+      const trimmed = baseUrl.trim();
+      if (trimmed !== "" && !/^https?:\/\//i.test(trimmed)) {
+        throw new RpcError(RPC_ERROR_INVALID_PARAMS, "base_url must start with http:// or https://");
+      }
+      patch.base_url = trimmed;
+    }
+    const defaultModel = str(params, "default_model");
+    if (defaultModel !== undefined) patch.default_model = defaultModel.trim();
+    if (params["clear_api_key"] === true) patch.clear_api_key = true;
+    else {
+      const apiKey = str(params, "api_key");
+      if (apiKey !== undefined && apiKey.trim() !== "") patch.api_key = apiKey.trim();
+    }
+
+    const updated = writeProviderToDisk(patch);
+
+    // hot-swap: replace the entry in the shared (reference-captured) config
+    // graph, then drop cached provider instances so secrets are re-resolved.
+    const nextPc: ProviderConfig = { ...updated };
+    this.cfg.providers[name] = nextPc;
+    this.providers.invalidate();
+
+    return {
+      updated: true,
+      provider: {
+        name,
+        kind: nextPc.kind,
+        base_url: nextPc.base_url,
+        default_model: nextPc.default_model,
+        auth: describeAuthSource(nextPc.auth),
+      },
+    };
   }
 
   private async modelsList(params: Record<string, unknown>): Promise<{

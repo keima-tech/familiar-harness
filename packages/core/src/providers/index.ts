@@ -13,6 +13,12 @@ export class ProviderRegistry {
 
   constructor(private readonly cfg: ResolvedConfig) {}
 
+  /** Drop cached providers: after config.provider.set, new calls re-read the
+   * (mutated) config so API keys and endpoints apply without a restart. */
+  invalidate(): void {
+    this.cache.clear();
+  }
+
   /** Create (without caching) — used by tests and diagnostics. */
   static create(providerId: string, cfg: ResolvedConfig): Provider {
     const pc: ProviderConfig | undefined = cfg.providers[providerId];

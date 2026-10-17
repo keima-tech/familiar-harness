@@ -23,6 +23,489 @@ async function rpc(method, params = {}) {
   return body.result;
 }
 
+// ---------------------------------------------------------------------------
+// i18n — ja is the default and canonical locale; en is switchable in settings
+// ---------------------------------------------------------------------------
+const STR = {
+  ja: {
+    "side.newSession": "新規セッション",
+    "side.filterPh": "セッションを絞り込み…  (Ctrl+K)",
+    "side.inbox": "✎ 承認インボックス",
+    "side.status": "⚙ ステータス",
+    "ns.provider": "プロバイダー",
+    "ns.model": "モデル",
+    "ns.profile": "プロファイル",
+    "ns.modelPh": "プロバイダーの既定",
+    "ns.create": "作成",
+    "ns.cancel": "キャンセル",
+    "ns.modelHint": "既定: {0}",
+    "ns.modelName": "モデル名",
+    "none": "(なし)",
+    "top.noSession": "セッションなし",
+    "top.gaugeTitle": "コンテキスト使用量 — クリックでセッション情報",
+    "top.search": "トランスクリプト内検索 (Ctrl+F)",
+    "top.settings": "設定",
+    "top.sessionActions": "セッション操作",
+    "menu.rename": "名前を変更…",
+    "menu.export": "Markdown で出力",
+    "menu.delete": "セッションを削除…",
+    "menu.deleteShort": "削除…",
+    "search.ph": "トランスクリプトを検索…",
+    "search.close": "検索を閉じる",
+    "composer.plus": "添付・追加",
+    "composer.retry": "直前の操作を再実行",
+    "toast.noRetry": "再実行するメッセージがありません",
+    "plus.file": "📎 ファイルを添付…",
+    "plus.ctx": "＠ コンテキスト追加",
+    "plus.shell": "❯ シェルコマンド",
+    "chip.mode": "エージェントモード",
+    "chip.model": "セッションのモデル",
+    "mode.build": "構築",
+    "mode.buildDesc": "全ツール使用可",
+    "mode.plan": "計画",
+    "mode.planDesc": "読み取り専用ツール",
+    "chip.modelLabel": "モデル",
+    "mp.apply": "適用",
+    "mp.cancel": "キャンセル",
+    "send.enter": "送信 (Enter)",
+    "send.ctrlEnter": "送信 (Ctrl+Enter)",
+    "composer.phEnter": "何でも聞いてください (Enter で送信 / Shift+Enter で改行)",
+    "composer.phCtrl": "何でも聞いてください (Ctrl+Enter で送信 / Enter で改行)",
+    "drawer.inbox": "承認インボックス",
+    "drawer.status": "システム状態",
+    "drawer.info": "セッション情報",
+    "settings.title": "設定",
+    "tool.args": "引数",
+    "tool.result": "結果",
+    "tool.running": "実行中…",
+    "tool.details": "詳細",
+    "tool.error": "エラー",
+    "transcript.empty": "セッション未選択",
+    "session.empty": "空のセッション",
+    "toast.titleEdit": "タイトルは上部バーで編集できます(Enter で確定)",
+    "toast.deleteFailed": "削除に失敗しました: {0}",
+    "toast.copied": "メッセージをコピーしました",
+    "toast.copyFailed": "コピーに失敗しました",
+    "toast.renamed": "名前を変更しました",
+    "toast.renameFailed": "名前変更に失敗しました: {0}",
+    "toast.noExport": "出力するセッションがありません",
+    "toast.exportFailed": "出力に失敗しました: {0}",
+    "toast.exported": "Markdown に出力しました",
+    "toast.approved": "承認しました",
+    "toast.denied": "拒否しました",
+    "toast.approvalFailed": "承認処理に失敗しました: {0}",
+    "toast.inboxUnavailable": "インボックスを取得できません: {0}",
+    "toast.configUnavailable": "config を取得できません: {0}",
+    "toast.nextSession": "次のセッションで {0} を使用します",
+    "toast.modelSet": "モデルを切替: {0}",
+    "toast.modelFailed": "モデル変更に失敗しました: {0}",
+    "toast.createFailed": "セッション作成に失敗しました: {0}",
+    "toast.sendFailed": "送信に失敗しました: {0}",
+    "toast.attached": "添付しました: {0}",
+    "toast.shellHint": "「!」で始めるとシェルコマンドの実行をエージェントに依頼します",
+    "toast.notifDenied": "通知の許可が得られませんでした",
+    "toast.theme": "テーマ: {0}",
+    "toast.appearanceReset": "外観設定をリセットしました",
+    "toast.saved": "保存しました",
+    "toast.saveFailed": "保存に失敗しました: {0}",
+    "toast.providerSaved": "プロバイダー設定を保存しました: {0}",
+    "turn.done": "✓ 完了 ({0})",
+    "turn.thinking": "考えています…",
+    "taskDone": "タスクが完了しました",
+    "home.title": "まだメッセージがありません",
+    "home.hint": "何でも聞いてください — ファイルの読み取り・コマンド実行・コード編集ができます。",
+    "approval.needed": "承認が必要: {0}",
+    "approval.approve": "承認",
+    "approval.deny": "拒否",
+    "approval.denyShort": "差戻し",
+    "inbox.empty": "承認待ちはありません — すべて反映済み ✓",
+    "stat.enabled": "有効",
+    "stat.disabled": "無効",
+    "stat.paused": "一時停止",
+    "stat.state": "状態",
+    "stat.lastRun": "前回実行",
+    "stat.nextDue": "次回",
+    "stat.stale": "未整理スキル",
+    "stat.archived": "アーカイブ",
+    "stat.snapshots": "スナップショット",
+    "stat.consolidation": "統合",
+    "stat.running": "実行中",
+    "stat.stopped": "停止中",
+    "stat.noServers": "サーバー未設定",
+    "stat.noJobs": "ジョブなし",
+    "stat.everyMinutes": "{0}分ごと",
+    "info.session": "セッション",
+    "info.title": "タイトル",
+    "info.id": "ID",
+    "info.providerModel": "プロバイダー / モデル",
+    "info.profile": "プロファイル",
+    "info.cwd": "作業ディレクトリ",
+    "info.created": "作成",
+    "info.updated": "更新",
+    "info.messages": "メッセージ",
+    "info.user": "ユーザー",
+    "info.assistant": "アシスタント",
+    "info.toolCalls": "ツール呼び出し",
+    "info.total": "合計",
+    "info.context": "コンテキスト",
+    "info.currentContext": "現在のコンテキスト",
+    "info.contextWindow": "コンテキスト上限",
+    "info.usage": "使用率",
+    "info.usageVisit": "使用量 (この訪問)",
+    "info.input": "入力",
+    "info.output": "出力",
+    "info.rawMessages": "生メッセージ",
+    "info.notMeasured": "(未計測)",
+    "info.unknown": "(不明)",
+    "set.general": "一般",
+    "set.inputSend": "送信と入力",
+    "set.enterSend": "Enter で送信",
+    "set.enterSendDesc": "オン: Enter で送信・Shift+Enter で改行 / オフ: Ctrl+Enter で送信・Enter で改行",
+    "set.tabToggle": "Tab でモード切替",
+    "set.tabToggleDesc": "構築 / 計画 を Tab キーで切り替えます(メッセージ入力中も有効)",
+    "set.notify": "通知",
+    "set.notifyDesc": "turn 完了時にデスクトップ通知を送ります(推奨: ウィンドウが非フォーカス時のみ)",
+    "set.notifyTitle": "デスクトップ通知",
+    "set.notifyHint": "初回有効時に通知の許可を求めます",
+    "set.notifyUnsupported": "この環境では利用できません",
+    "set.notifyUnfocused": "非フォーカス時のみ通知",
+    "set.notifyUnfocusedDesc": "familiar ウィンドウが前面のときは通知しない",
+    "set.lang": "言語",
+    "set.langDesc": "インターフェースの表示言語",
+    "set.appearance": "配色",
+    "set.appearanceDesc": "OpenCode のように システム / ライト / ダーク に従います",
+    "set.colors": "配色",
+    "set.light": "ライト",
+    "set.dark": "ダーク",
+    "set.system": "システム",
+    "set.display": "表示",
+    "set.fontSize": "UI フォントサイズ",
+    "set.fontSizeDesc": "インターフェース全体の文字サイズ",
+    "set.width": "トランスクリプト幅",
+    "set.widthDesc": "会話本文の最大幅",
+    "size.s": "小",
+    "size.m": "標準",
+    "size.l": "大",
+    "size.xl": "特大",
+    "size.normal": "通常",
+    "size.wide": "広",
+    "size.full": "全幅",
+    "set.reset": "外観設定をリセット",
+    "set.transcriptSec": "トランスクリプト",
+    "set.autoscroll": "自動スクロール",
+    "set.autoscrollDesc": "ストリーミング中に最下部へ追従(上に読み戻している間は停止)",
+    "set.toolsExpanded": "ツール行を既定で展開",
+    "set.toolsExpandedDesc": "ツール呼び出しの引数と結果を最初から表示します",
+    "set.shortcutsSec": "ショートカット",
+    "sc.tab": "構築 / 計画 を切替",
+    "sc.enter": "メッセージ送信",
+    "sc.enterNL": "改行(Enter 送信オフ時)",
+    "sc.shiftEnter": "改行",
+    "sc.ctrlEnterSend": "メッセージ送信",
+    "sc.ctrlEnterNL": "改行",
+    "sc.k": "セッション検索へフォーカス",
+    "sc.f": "トランスクリプト内検索",
+    "sc.esc": "メニュー / 検索 / モーダル / ドロワーを閉じる",
+    "set.providers": "プロバイダー",
+    "set.providersDesc": "API キー・エンドポイント・既定モデルはここから直接設定できます。キーは secrets/<name>.key (0600) に保存され、設定は config.yaml に追記されます。",
+    "prov.kind": "種類",
+    "prov.endpoint": "エンドポイント",
+    "prov.endpointPh": "https://api.openai.com/v1",
+    "prov.defaultModel": "既定モデル",
+    "prov.defaultModelPh": "例: gpt-5.2",
+    "prov.apiKey": "API キー",
+    "prov.keySet": "設定済み(変更する場合のみ入力)",
+    "prov.keyUnset": "未設定",
+    "prov.keyEnv": "env 参照 ({0})",
+    "prov.clearKey": "保存済みキーを削除",
+    "prov.save": "保存",
+    "prov.cancel": "キャンセル",
+    "prov.add": "＋ 新しいプロバイダー",
+    "prov.name": "名前",
+    "prov.namePh": "例: my-openai",
+    "prov.badName": "プロバイダー名は英数字で入力してください",
+    "prov.badUrl": "エンドポイントは http:// か https:// で始めてください",
+    "prov.default": "既定",
+    "prov.keyOk": "キー ✓",
+    "prov.keyMissing": "キー未設定",
+    "prov.none": "(なし)",
+    "ext.mcp": "MCP サーバー",
+    "ext.mcpDesc": "mcp.status より(n. = そのサーバーの公開ツール数)。設定は config.yaml の mcp.servers です。",
+    "ext.lsp": "LSP サーバー",
+    "ext.lspDesc": "lsp_diagnostics が使用する言語サーバー。設定は config.yaml の lsp.servers です。",
+    "ext.enabled": "有効",
+    "ext.disabled": "無効",
+    "ext.tools": "{0} ツール",
+    "sys.desc": "カレーター(自己改善 cron)とスケジューラの現在状態。詳細はステータスドロワー、設定は config.yaml です。",
+  },
+  en: {
+    "side.newSession": "New session",
+    "side.filterPh": "filter sessions…  (Ctrl+K)",
+    "side.inbox": "✎ approvals",
+    "side.status": "⚙ status",
+    "ns.provider": "provider",
+    "ns.model": "model",
+    "ns.profile": "profile",
+    "ns.modelPh": "provider default",
+    "ns.create": "Create",
+    "ns.cancel": "Cancel",
+    "ns.modelHint": "default: {0}",
+    "ns.modelName": "model name",
+    "none": "(none)",
+    "top.noSession": "no session",
+    "top.gaugeTitle": "context usage — click for session info",
+    "top.search": "search in transcript (Ctrl+F)",
+    "top.settings": "settings",
+    "top.sessionActions": "session actions",
+    "menu.rename": "Rename…",
+    "menu.export": "Export as Markdown",
+    "menu.delete": "Delete session…",
+    "menu.deleteShort": "Delete…",
+    "search.ph": "search in transcript…",
+    "search.close": "close search",
+    "composer.plus": "attach / add",
+    "composer.retry": "retry the last turn",
+    "toast.noRetry": "nothing to retry",
+    "plus.file": "📎 Attach from file…",
+    "plus.ctx": "＠ Add context",
+    "plus.shell": "❯ Shell command",
+    "chip.mode": "agent mode",
+    "chip.model": "model for this session",
+    "mode.build": "Build",
+    "mode.buildDesc": "full tool access",
+    "mode.plan": "Plan",
+    "mode.planDesc": "read-only tools",
+    "chip.modelLabel": "model",
+    "mp.apply": "Apply",
+    "mp.cancel": "Cancel",
+    "send.enter": "send (Enter)",
+    "send.ctrlEnter": "send (Ctrl+Enter)",
+    "composer.phEnter": "Ask anything… (Enter to send / Shift+Enter for a new line)",
+    "composer.phCtrl": "Ask anything… (Ctrl+Enter to send / Enter for a new line)",
+    "drawer.inbox": "approval inbox",
+    "drawer.status": "system status",
+    "drawer.info": "session info",
+    "settings.title": "Settings",
+    "tool.args": "arguments",
+    "tool.result": "result",
+    "tool.running": "running…",
+    "tool.details": "details",
+    "tool.error": "error",
+    "transcript.empty": "no session",
+    "session.empty": "empty session",
+    "toast.titleEdit": "edit the title in the topbar, Enter to save",
+    "toast.deleteFailed": "delete failed: {0}",
+    "toast.copied": "message copied",
+    "toast.copyFailed": "copy failed",
+    "toast.renamed": "renamed",
+    "toast.renameFailed": "rename failed: {0}",
+    "toast.noExport": "no session to export",
+    "toast.exportFailed": "export failed: {0}",
+    "toast.exported": "exported as markdown",
+    "toast.approved": "approved",
+    "toast.denied": "denied",
+    "toast.approvalFailed": "approval failed: {0}",
+    "toast.inboxUnavailable": "inbox unavailable: {0}",
+    "toast.configUnavailable": "config unavailable: {0}",
+    "toast.nextSession": "next session will use {0}",
+    "toast.modelSet": "model set to {0}",
+    "toast.modelFailed": "model change failed: {0}",
+    "toast.createFailed": "session.create failed: {0}",
+    "toast.sendFailed": "send failed: {0}",
+    "toast.attached": "attached: {0}",
+    "toast.shellHint": "start with \"!\" to ask the agent to run a shell command",
+    "toast.notifDenied": "notification permission denied",
+    "toast.theme": "theme: {0}",
+    "toast.appearanceReset": "appearance reset",
+    "toast.saved": "saved",
+    "toast.saveFailed": "save failed: {0}",
+    "toast.providerSaved": "provider settings saved: {0}",
+    "turn.done": "✓ done ({0})",
+    "turn.thinking": "thinking…",
+    "taskDone": "Task completed",
+    "home.title": "No messages yet",
+    "home.hint": "Ask anything — familiar can read files, run commands, and edit code in this workspace.",
+    "approval.needed": "approval needed: {0}",
+    "approval.approve": "Approve",
+    "approval.deny": "Deny",
+    "approval.denyShort": "Reject",
+    "inbox.empty": "no staged writes — all clear ✓",
+    "stat.enabled": "enabled",
+    "stat.disabled": "disabled",
+    "stat.paused": "paused",
+    "stat.state": "state",
+    "stat.lastRun": "last run",
+    "stat.nextDue": "next due",
+    "stat.stale": "stale skills",
+    "stat.archived": "archived",
+    "stat.snapshots": "snapshots",
+    "stat.consolidation": "consolidation",
+    "stat.running": "running",
+    "stat.stopped": "stopped",
+    "stat.noServers": "no servers configured",
+    "stat.noJobs": "no jobs",
+    "stat.everyMinutes": "every {0} min",
+    "info.session": "session",
+    "info.title": "title",
+    "info.id": "id",
+    "info.providerModel": "provider / model",
+    "info.profile": "profile",
+    "info.cwd": "cwd",
+    "info.created": "created",
+    "info.updated": "updated",
+    "info.messages": "messages",
+    "info.user": "user",
+    "info.assistant": "assistant",
+    "info.toolCalls": "tool calls",
+    "info.total": "total",
+    "info.context": "context",
+    "info.currentContext": "current context",
+    "info.contextWindow": "context window",
+    "info.usage": "usage",
+    "info.usageVisit": "usage (this visit)",
+    "info.input": "input",
+    "info.output": "output",
+    "info.rawMessages": "raw messages",
+    "info.notMeasured": "(not measured yet)",
+    "info.unknown": "(unknown)",
+    "set.general": "General",
+    "set.inputSend": "Sending & input",
+    "set.enterSend": "Send with Enter",
+    "set.enterSendDesc": "On: Enter sends, Shift+Enter inserts a newline. Off: Ctrl+Enter sends, Enter inserts a newline.",
+    "set.tabToggle": "Toggle mode with Tab",
+    "set.tabToggleDesc": "Toggle Build / Plan with the Tab key (also while typing)",
+    "set.notify": "Notifications",
+    "set.notifyDesc": "Desktop notification when a turn completes (recommended: only while unfocused)",
+    "set.notifyTitle": "Desktop notifications",
+    "set.notifyHint": "asks for permission when first enabled",
+    "set.notifyUnsupported": "not available in this environment",
+    "set.notifyUnfocused": "Notify only when unfocused",
+    "set.notifyUnfocusedDesc": "don't notify while the familiar window is focused",
+    "set.lang": "Language",
+    "set.langDesc": "interface language",
+    "set.appearance": "Appearance",
+    "set.appearanceDesc": "follows system / light / dark like OpenCode",
+    "set.colors": "Colors",
+    "set.light": "Light",
+    "set.dark": "Dark",
+    "set.system": "System",
+    "set.display": "Display",
+    "set.fontSize": "UI font size",
+    "set.fontSizeDesc": "overall interface text size",
+    "set.width": "Transcript width",
+    "set.widthDesc": "maximum content width",
+    "size.s": "S",
+    "size.m": "M",
+    "size.l": "L",
+    "size.xl": "XL",
+    "size.normal": "Normal",
+    "size.wide": "Wide",
+    "size.full": "Full",
+    "set.reset": "Reset appearance",
+    "set.transcriptSec": "Transcript",
+    "set.autoscroll": "Auto-scroll",
+    "set.autoscrollDesc": "stick to the bottom while streaming (pauses while scrolled up)",
+    "set.toolsExpanded": "Expand tool rows by default",
+    "set.toolsExpandedDesc": "show tool arguments and results from the start",
+    "set.shortcutsSec": "Shortcuts",
+    "sc.tab": "toggle Build / Plan",
+    "sc.enter": "send message",
+    "sc.enterNL": "newline (Enter-to-send off)",
+    "sc.shiftEnter": "new line",
+    "sc.ctrlEnterSend": "send message",
+    "sc.ctrlEnterNL": "newline",
+    "sc.k": "focus session filter",
+    "sc.f": "search in transcript",
+    "sc.esc": "close menus / search / modal / drawers",
+    "set.providers": "Providers",
+    "set.providersDesc": "API keys, endpoints and default models can be set directly here. Keys are stored in secrets/<name>.key (0600); settings are appended to config.yaml.",
+    "prov.kind": "kind",
+    "prov.endpoint": "endpoint",
+    "prov.endpointPh": "https://api.openai.com/v1",
+    "prov.defaultModel": "default model",
+    "prov.defaultModelPh": "e.g. gpt-5.2",
+    "prov.apiKey": "API key",
+    "prov.keySet": "set (enter only to change)",
+    "prov.keyUnset": "not set",
+    "prov.keyEnv": "env reference ({0})",
+    "prov.clearKey": "remove stored key",
+    "prov.save": "Save",
+    "prov.cancel": "Cancel",
+    "prov.add": "＋ new provider",
+    "prov.name": "name",
+    "prov.namePh": "e.g. my-openai",
+    "prov.badName": "provider name must be alphanumeric",
+    "prov.badUrl": "endpoint must start with http:// or https://",
+    "prov.default": "default",
+    "prov.keyOk": "key ✓",
+    "prov.keyMissing": "key missing",
+    "prov.none": "(none)",
+    "ext.mcp": "MCP servers",
+    "ext.mcpDesc": "from mcp.status (n. = tools exposed by that server). Configure in config.yaml [mcp.servers].",
+    "ext.lsp": "LSP servers",
+    "ext.lspDesc": "language servers used by lsp_diagnostics. Configure in config.yaml [lsp.servers].",
+    "ext.enabled": "enabled",
+    "ext.disabled": "disabled",
+    "ext.tools": "{0} tools",
+    "sys.desc": "Curator (self-improvement cron) and scheduler state. See the status drawer for details; configure in config.yaml.",
+  },
+};
+
+let lang = "ja";
+try {
+  lang = localStorage.getItem("familiar.lang") === "en" ? "en" : "ja";
+} catch { /* storage unavailable */ }
+
+/** Translate a key, optionally interpolating {0}, {1}… */
+function t(key, ...args) {
+  const dict = STR[lang] ?? STR.ja;
+  let s = dict[key] ?? STR.ja[key] ?? key;
+  args.forEach((a, i) => {
+    s = s.split(`{${i}}`).join(String(a));
+  });
+  return s;
+}
+
+/** Persist and apply the interface language. */
+function setLang(value) {
+  lang = value === "en" ? "en" : "ja";
+  try { localStorage.setItem("familiar.lang", lang); } catch { /* ignore */ }
+  applyI18n();
+}
+
+/**
+ * Apply strings to static HTML (data-i18n / -ph / -title) plus the
+ * JS-managed labels that can't be attributes (chips, placeholder that
+ * depends on prefs, composer, drawer state strings).
+ */
+function applyI18n() {
+  document.documentElement.lang = lang;
+  for (const el of document.querySelectorAll("[data-i18n]")) {
+    el.textContent = t(el.dataset["i18n"]);
+  }
+  for (const el of document.querySelectorAll("[data-i18n-ph]")) {
+    el.placeholder = t(el.dataset["i18nPh"]);
+  }
+  for (const el of document.querySelectorAll("[data-i18n-title]")) {
+    el.title = t(el.dataset["i18nTitle"]);
+  }
+  // dynamic labels
+  applyComposerPlaceholder();
+  $("#send").title = prefs.sendWithEnter ? t("send.enter") : t("send.ctrlEnter");
+  $("#session-title").textContent = state.currentSession
+    ? state.currentSession.title
+    : t("top.noSession");
+  $("#mode-chip").textContent = `${t(state.mode === "plan" ? "mode.plan" : "mode.build")} ▾`;
+  if (state.modelChipDefault) {
+    $("#model-chip").textContent = `${t("chip.modelLabel")} ▾`;
+  }
+}
+
+/** Composer placeholder reflects the send-key preference. */
+function applyComposerPlaceholder() {
+  $("#input").placeholder = prefs.sendWithEnter ? t("composer.phEnter") : t("composer.phCtrl");
+}
+
 // ---- md-render (pure, DOM-free; kept contiguous for headless unit tests) ----
 function escapeHtml(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => (
@@ -223,6 +706,10 @@ const state = {
   /** cached context window sizes (provider/model → tokens|null). */
   modelCtxCache: {},
   toolCounter: 0,
+  /** true while the model chip shows the localized placeholder (no selection). */
+  modelChipDefault: true,
+  /** last user message text, used by the retry button (Hermes /retry). */
+  lastUserText: "",
 };
 
 const ns = {
@@ -292,6 +779,10 @@ const THEMES = {
   "One Dark": {
     dark: { bg: "#282c34", panel: "#21252b", panel2: "#2f343e", text: "#d7dae0", dim: "#636d83", accent: "#61afef", ok: "#98c379", warn: "#d19a66", err: "#e06c75", border: "#3e4451", bubble: "#4c78cc", hover: "#373c46", codebg: "#232730" },
     light: { bg: "#f2f3f5", panel: "#fafbfc", panel2: "#ffffff", text: "#383a42", dim: "#82899a", accent: "#4078f2", ok: "#50a14f", warn: "#c18401", err: "#e45649", border: "#dcdfe4", bubble: "#4078f2", hover: "#e8eaed", codebg: "#f4f5f7" },
+  },
+  Oxocarbon: {
+    dark: { bg: "#161616", panel: "#1c1c1e", panel2: "#26262b", text: "#f2f4f8", dim: "#8d8d93", accent: "#78a9ff", ok: "#42be65", warn: "#f1c21b", err: "#fa4d56", border: "#343439", bubble: "#5a66d6", hover: "#26262a", codebg: "#131316" },
+    light: { bg: "#f4f4f4", panel: "#fafafa", panel2: "#ffffff", text: "#161616", dim: "#525252", accent: "#0f62fe", ok: "#24a148", warn: "#bf8b00", err: "#da1e28", border: "#d0d0d3", bubble: "#0f62fe", hover: "#e8e8ea", codebg: "#f0f0f2" },
   },
 };
 
@@ -409,7 +900,7 @@ function ulSessionsClick() {
     if (btn.dataset.act === "rename") {
       void openSession(id).then(() => {
         void startRename();
-        toast("edit the title in the topbar, Enter to save", "info");
+        toast(t("toast.titleEdit"), "info");
       });
     } else if (btn.dataset.act === "export") {
       void exportMarkdown(id);
@@ -505,7 +996,7 @@ async function deleteSession(id) {
   try {
     await rpc("session.delete", { id });
   } catch (err) {
-    toast(`delete failed: ${err.message}`, "err");
+    toast(t("toast.deleteFailed", err.message), "err");
     return;
   }
   if (state.sessionId === id) {
@@ -515,7 +1006,7 @@ async function deleteSession(id) {
     delete state.lastPromptTokensBySession[id];
     updateContextGauge();
     renderModelChip();
-    $("#session-title").textContent = "no session";
+    $("#session-title").textContent = t("top.noSession");
     $("#session-meta").textContent = "";
     $("#transcript").innerHTML = "";
   }
@@ -556,7 +1047,7 @@ function renderTranscript(messages) {
         call?.arguments ?? "",
         m.content ?? "",
         m.meta?.isError === true ? "err" : "done",
-        { resultLabel: "result", durationMs: duration },
+        { resultLabel: t("tool.result"), durationMs: duration },
       );
     }
   }
@@ -568,8 +1059,8 @@ function emptyStateNode() {
   div.className = "empty-state";
   div.innerHTML = `
     <div class="glyph">◍</div>
-    <h3>No messages yet</h3>
-    <div class="hint">Ask anything — familiar can read files, run commands,<br>and edit code in this workspace.</div>`;
+    <h3>${esc(t("home.title"))}</h3>
+    <div class="hint">${esc(t("home.hint"))}</div>`;
   return div;
 }
 
@@ -598,7 +1089,7 @@ function wireBubble(div, bubble, raw) {
   if (btn) {
     btn.addEventListener("click", () => {
       void copyText(raw).then((ok) =>
-        ok ? toast("message copied", "ok") : toast("copy failed", "err"));
+        ok ? toast(t("toast.copied"), "ok") : toast(t("toast.copyFailed"), "err"));
     });
   }
   wireCodeButtons(div, bubble);
@@ -661,7 +1152,7 @@ function applyTranscriptFilter() {
 // topbar session menu (rename / export / delete)
 // ---------------------------------------------------------------------------
 function closeAllPops() {
-  for (const id of ["session-menu-pop", "mode-pop", "model-pop"]) {
+  for (const id of ["session-menu-pop", "mode-pop", "model-pop", "plus-pop"]) {
     $(`#${id}`).hidden = true;
   }
 }
@@ -672,7 +1163,7 @@ function startRename() {
   if (title.querySelector("input")) return;
   const original = title.textContent;
   const input = document.createElement("input");
-  input.value = original === "no session" ? "" : original;
+  input.value = original === t("top.noSession") ? "" : original;
   input.spellcheck = false;
   title.textContent = "";
   title.appendChild(input);
@@ -693,9 +1184,9 @@ function startRename() {
       state.currentSession = updated;
       $("#session-title").textContent = updated.title || next;
       await refreshSessions();
-      toast("renamed", "ok");
+      toast(t("toast.renamed"), "ok");
     } catch (err) {
-      toast(`rename failed: ${err.message}`, "err");
+      toast(t("toast.renameFailed", err.message), "err");
       title.textContent = original;
     }
     input.remove();
@@ -715,14 +1206,14 @@ function startRename() {
 
 async function exportMarkdown(targetId = state.sessionId) {
   if (!targetId) {
-    toast("no session to export", "err");
+    toast(t("toast.noExport"), "err");
     return;
   }
   let data;
   try {
     data = await rpc("session.get", { id: targetId });
   } catch (err) {
-    toast(`export failed: ${err.message}`, "err");
+    toast(t("toast.exportFailed", err.message), "err");
     return;
   }
   const s = data.session;
@@ -754,7 +1245,7 @@ async function exportMarkdown(targetId = state.sessionId) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
-  toast("exported as markdown", "ok");
+  toast(t("toast.exported"), "ok");
 }
 
 
@@ -781,8 +1272,8 @@ function appendToolCard(name, args, resultContent, status, opts = {}) {
   const duration = opts.durationMs !== undefined ? (opts.durationMs / 1000).toFixed(1) : "";
   const expanded = prefs.toolsExpanded === true && status !== "run";
   const bodyHtml = `
-      ${argsText !== "" ? `<div class="tc-section"><h5>arguments</h5><pre>${esc(truncate(argsBlock, ARGS_CAP))}</pre></div>` : ""}
-      <div class="tc-section tc-result"><h5>${opts.resultLabel ?? "result"}</h5><pre>${status === "run" ? `<span class="dim">running…</span>` : esc(truncate(resultContent, RESULT_CAP))}</pre></div>`;
+      ${argsText !== "" ? `<div class="tc-section"><h5>${esc(t("tool.args"))}</h5><pre>${esc(truncate(argsBlock, ARGS_CAP))}</pre></div>` : ""}
+      <div class="tc-section tc-result"><h5>${opts.resultLabel ?? t("tool.result")}</h5><pre>${status === "run" ? `<span class="dim">${esc(t("tool.running"))}</span>` : esc(truncate(resultContent, RESULT_CAP))}</pre></div>`;
   wrap.innerHTML = `
     <div class="toolrow">
       <span class="tn">${num}</span>
@@ -790,7 +1281,7 @@ function appendToolCard(name, args, resultContent, status, opts = {}) {
       <span class="targs">${esc(preview)}</span>
       <span class="tmeta">${esc(duration)}</span>
       <span class="tc-status"></span>
-      <button class="tc-toggle ghost" type="button" title="details">▾</button>
+      <button class="tc-toggle ghost" type="button" title="${t("tool.details")}">▾</button>
     </div>
     <div class="tc-body" ${expanded ? "" : "hidden"}>${bodyHtml}</div>`;
   if (expanded) wrap.classList.add("open");
@@ -834,7 +1325,7 @@ function firstArgPreview(argsText) {
 function completeToolCard(entry, content, isError) {
   if (!entry || !entry.resultEl) return;
   entry.resultFull = String(content ?? "");
-  entry.labelEl.textContent = isError ? "error" : "result";
+  entry.labelEl.textContent = t(isError ? "tool.error" : "tool.result");
   entry.resultEl.textContent = truncate(content, RESULT_CAP);
   entry.statusEl.textContent = isError ? "✗" : "✓";
   if (!isError) {
@@ -888,7 +1379,7 @@ function setBusy(busy) {
       const s = ((Date.now() - state.turnStartedAt) / 1000).toFixed(1);
       state.lastElapsed = s;
       state.turnStartedAt = null;
-      setTurnEndLabel(`✓ done in ${s}s`);
+      setTurnEndLabel(t("turn.done", `${s}s`));
     } else {
       $("#turn-label").textContent = "";
     }
@@ -992,7 +1483,7 @@ function onEvent(sessionId, e) {
       const toks = u.promptTokens !== undefined
         ? ` · ↑${u.promptTokens} ↓${u.completionTokens ?? 0} tok` : "";
       setBusy(false);
-      setTurnEndLabel(`✓ done in ${state.lastElapsed ?? ""}${toks}`);
+      setTurnEndLabel(t("turn.done", `${state.lastElapsed ?? ""}${toks}`));
       updateContextGauge();
       maybeNotify();
       state.pendingEvents.delete(sessionId);
@@ -1016,7 +1507,7 @@ function onEvent(sessionId, e) {
 // dynamic approvals (serve mode)
 // ---------------------------------------------------------------------------
 function showApproval(e) {
-  $("#turn-label").textContent = `approval needed: ${e.tool}`;
+  $("#turn-label").textContent = t("approval.needed", e.tool);
   const dock = $("#approval-dock");
   const node = document.createElement("div");
   node.className = "dock";
@@ -1025,8 +1516,8 @@ function showApproval(e) {
     <div>⚠ <b>${esc(e.tool)}</b> — ${esc(e.summary)}</div>
     <div class="detail">${esc(e.detail ?? "")}</div>
     <div class="row">
-      <button data-act="approve">Approve</button>
-      <button class="ghost" data-act="deny">Deny</button>
+      <button data-act="approve">${esc(t("approval.approve"))}</button>
+      <button class="ghost" data-act="deny">${esc(t("approval.deny"))}</button>
     </div>`;
   node
     .querySelector('button[data-act="approve"]')
@@ -1042,9 +1533,9 @@ async function respondApproval(requestId, approved, node) {
   if (document.querySelector("#approval-dock").children.length === 0) $("#turn-label").textContent = "";
   try {
     await rpc("permission.respond", { requestId, approved });
-    toast(approved ? "approved" : "denied", approved ? "ok" : "info");
+    toast(t(approved ? "toast.approved" : "toast.denied"), approved ? "ok" : "info");
   } catch (err) {
-    toast(`approval failed: ${err.message}`, "err");
+    toast(t("toast.approvalFailed", err.message), "err");
   }
 }
 
@@ -1079,10 +1570,10 @@ async function loadInbox() {
     }
   } catch (err) {
     body.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
-    toast(`inbox unavailable: ${err.message}`, "err");
+    toast(t("toast.inboxUnavailable", err.message), "err");
   }
   if (count === 0 && open) {
-    body.innerHTML = `<div class="empty">no staged writes — all clear ✓</div>`;
+    body.innerHTML = `<div class="empty">${esc(t("inbox.empty"))}</div>`;
   }
   $("#inbox-count").textContent = count > 0 ? String(count) : "";
 }
@@ -1099,8 +1590,8 @@ function proposalNode(kind, item, act) {
     <div class="summary">${esc(item.summary)}</div>
     ${reason}${warns}
     <div class="row">
-      <button data-act="approve">Approve</button>
-      <button class="ghost" data-act="reject">Reject</button>
+      <button data-act="approve">${esc(t("approval.approve"))}</button>
+      <button class="ghost" data-act="reject">${esc(t("approval.denyShort"))}</button>
     </div>`;
   node.querySelector('button[data-act="approve"]').addEventListener("click", () => act(true, node));
   node.querySelector('button[data-act="reject"]').addEventListener("click", () => act(false, node));
@@ -1148,12 +1639,12 @@ async function loadStatus() {
     const res = await rpc("curator.status");
     const c = res.curator ?? {};
     body.appendChild(sectionCard("curator", [
-      ["state", `${c.enabled ? "enabled" : "disabled"}${c.paused ? " · paused" : ""}`],
-      ["last run", `${fmtTime(c.lastRunAt)}${c.lastRunAt ? ` (${relTime(c.lastRunAt)})` : ""}`],
-      ["next due", fmtTime(c.nextDueAt)],
-      ["stale skills", (c.stale ?? []).join(", ") || "—"],
-      ["archived", `${(c.archived ?? []).length} (snapshots: ${c.snapshots ?? 0})`],
-      ["consolidation", c.consolidate ? "on" : "off"],
+      [t("stat.state"), `${c.enabled ? t("stat.enabled") : t("stat.disabled")}${c.paused ? " · " + t("stat.paused") : ""}`],
+      [t("stat.lastRun"), `${fmtTime(c.lastRunAt)}${c.lastRunAt ? ` (${relTime(c.lastRunAt)})` : ""}`],
+      [t("stat.nextDue"), fmtTime(c.nextDueAt)],
+      [t("stat.stale"), (c.stale ?? []).join(", ") || "—"],
+      [t("stat.archived"), `${(c.archived ?? []).length} (${t("stat.snapshots")}: ${c.snapshots ?? 0})`],
+      [t("stat.consolidation"), c.consolidate ? t("stat.enabled") : t("stat.disabled")],
     ]));
   } catch (err) {
     body.appendChild(sectionError("curator", err));
@@ -1165,7 +1656,7 @@ async function loadStatus() {
       sv.name ?? "(unknown)",
       `${sv.state ?? "?"} · ${(sv.tools ?? []).length} tools${sv.error ? " · " + sv.error : ""}`,
     ]);
-    body.appendChild(sectionCard("mcp servers", rows.length > 0 ? rows : [["—", "no servers configured"]]));
+    body.appendChild(sectionCard("mcp servers", rows.length > 0 ? rows : [["—", t("stat.noServers")]]));
   } catch (err) {
     body.appendChild(sectionError("mcp servers", err));
   }
@@ -1174,9 +1665,9 @@ async function loadStatus() {
     const jobs = res.jobs ?? [];
     const rows = jobs.map((j) => [
       j.name ?? "(unnamed)",
-      j.enabled === false ? "disabled" : `every ${j.every_minutes} min`,
+      j.enabled === false ? t("stat.disabled") : t("stat.everyMinutes", j.every_minutes),
     ]);
-    body.appendChild(sectionCard("cron scheduler", rows.length > 0 ? rows : [["—", "no jobs"]], res.started ? "running" : "stopped"));
+    body.appendChild(sectionCard("cron scheduler", rows.length > 0 ? rows : [["—", t("stat.noJobs")]], res.started ? t("stat.running") : t("stat.stopped")));
   } catch (err) {
     body.appendChild(sectionError("cron scheduler", err));
   }
@@ -1213,6 +1704,8 @@ function savePrefs(patch) {
   prefs = { ...prefs, ...patch };
   localStorage.setItem("familiar.prefs", JSON.stringify(prefs));
   applyUiPrefs();
+  applyComposerPlaceholder();
+  $("#send").title = prefs.sendWithEnter ? t("send.enter") : t("send.ctrlEnter");
 }
 
 function applyUiPrefs() {
@@ -1230,7 +1723,7 @@ function maybeNotify() {
   try {
     const title = $("#session-title").textContent;
     new Notification("familiar — turn completed", {
-      body: title && title !== "no session" ? title : "タスクが完了しました",
+      body: title !== t("top.noSession") ? title : t("taskDone"),
       silent: false,
     });
   } catch { /* notification API quirks */ }
@@ -1330,37 +1823,52 @@ function renderSettingsSection(id) {
 }
 
 function renderGeneralSection(content) {
-  const c = card("送信と入力");
+  const c = card(t("set.inputSend"));
   c.appendChild(settingRow(
-    "Enter で送信",
-    "オン: Enter で送信・Shift+Enter で改行 / オフ: Ctrl+Enter で送信・Enter で改行",
+    t("set.enterSend"),
+    t("set.enterSendDesc"),
     toggleSwitch(prefs.sendWithEnter, () => {
       savePrefs({ sendWithEnter: !prefs.sendWithEnter });
       renderSettingsSection("general");
     }),
   ));
   c.appendChild(settingRow(
-    "Tab でモード切替",
-    "Build / Plan を Tab キーで切り替えます(メッセージ入力中も有効)",
+    t("set.tabToggle"),
+    t("set.tabToggleDesc"),
     toggleSwitch(prefs.tabModeToggle, () => {
       savePrefs({ tabModeToggle: !prefs.tabModeToggle });
       renderSettingsSection("general");
     }),
   ));
+  c.appendChild(settingRow(
+    t("set.lang"),
+    t("set.langDesc"),
+    (() => {
+      const seg = document.createElement("div");
+      seg.className = "seg-row";
+      for (const [label, value] of [["日本語", "ja"], ["English", "en"]]) {
+        seg.appendChild(segButton(label, value, lang === value, () => {
+          setLang(value);
+          renderSettingsSection("general");
+        }));
+      }
+      return seg;
+    })(),
+  ));
   content.appendChild(c);
 
-  const n = card("通知", "turn 完了時にデスクトップ通知を送ります(ウィンドウのフォーカス外のみ推奨)");
+  const n = card(t("set.notify"), t("set.notifyDesc"));
   const notifyEnabled = typeof Notification !== "undefined";
   n.appendChild(settingRow(
-    "デスクトップ通知",
-    notifyEnabled ? "初回有効時に通知の許可を求めます" : "この環境では利用できません",
+    t("set.notifyTitle"),
+    notifyEnabled ? t("set.notifyHint") : t("set.notifyUnsupported"),
     toggleSwitch(prefs.notify, async () => {
       const next = !prefs.notify;
       if (next && notifyEnabled) {
         try {
           const perm = await Notification.requestPermission();
           if (perm !== "granted") {
-            toast("notification permission denied", "err");
+            toast(t("toast.notifDenied"), "err");
             savePrefs({ notify: false });
             renderSettingsSection("general");
             return;
@@ -1372,8 +1880,8 @@ function renderGeneralSection(content) {
     }),
   ));
   n.appendChild(settingRow(
-    "非フォーカス時のみ通知",
-    "familiar ウィンドウが前面のときは通知しない",
+    t("set.notifyUnfocused"),
+    t("set.notifyUnfocusedDesc"),
     toggleSwitch(prefs.notifyOnlyUnfocused, () => {
       savePrefs({ notifyOnlyUnfocused: !prefs.notifyOnlyUnfocused });
       renderSettingsSection("general");
@@ -1384,10 +1892,10 @@ function renderGeneralSection(content) {
 
 function renderAppearanceSection(content) {
   const pref = currentModePref();
-  const c = card("配色", "OpenCode のようにシステム / ライト / ダークに従います");
+  const c = card(t("set.colors"), t("set.appearanceDesc"));
   const seg = document.createElement("div");
   seg.className = "seg-row";
-  for (const [label, value] of [["ライト", "light"], ["ダーク", "dark"], ["システム", "system"]]) {
+  for (const [label, value] of [[t("set.light"), "light"], [t("set.dark"), "dark"], [t("set.system"), "system"]]) {
     seg.appendChild(segButton(label, value, pref === value, () => {
       setModePref(value);
       renderSettingsSection("appearance");
@@ -1412,34 +1920,34 @@ function renderAppearanceSection(content) {
     sel.addEventListener("click", () => {
       setThemeName(name);
       renderSettingsSection("appearance");
-      toast(`theme: ${name}`, "ok");
+      toast(t("toast.theme", name), "ok");
     });
     grid.appendChild(sel);
   }
   c.appendChild(grid);
   content.appendChild(c);
 
-  const c2 = card("表示");
+  const c2 = card(t("set.display"));
   const sizeSeg = document.createElement("div");
   sizeSeg.className = "seg-row";
-  for (const [label, value] of [["小", "s"], ["標準", "m"], ["大", "l"], ["特大", "xl"]]) {
+  for (const [label, value] of [[t("size.s"), "s"], [t("size.m"), "m"], [t("size.l"), "l"], [t("size.xl"), "xl"]]) {
     sizeSeg.appendChild(segButton(label, value, prefs.fontSize === value, () => {
       savePrefs({ fontSize: value });
       renderSettingsSection("appearance");
     }));
   }
-  c2.appendChild(settingRow("UI フォントサイズ", "インターフェース全体の文字サイズ", sizeSeg));
+  c2.appendChild(settingRow(t("set.fontSize"), t("set.fontSizeDesc"), sizeSeg));
   const widthSeg = document.createElement("div");
   widthSeg.className = "seg-row";
-  for (const [label, value] of [["通常", "normal"], ["広", "wide"], ["全幅", "full"]]) {
+  for (const [label, value] of [[t("size.normal"), "normal"], [t("size.wide"), "wide"], [t("size.full"), "full"]]) {
     widthSeg.appendChild(segButton(label, value, prefs.width === value, () => {
       savePrefs({ width: value });
       renderSettingsSection("appearance");
     }));
   }
-  c2.appendChild(settingRow("トランスクリプト幅", "会話本文の最大幅", widthSeg));
+  c2.appendChild(settingRow(t("set.width"), t("set.widthDesc"), widthSeg));
   const reset = document.createElement("button");
-  reset.textContent = "外観設定をリセット";
+  reset.textContent = t("set.reset");
   reset.className = "ghost small";
   reset.addEventListener("click", () => {
     localStorage.removeItem("familiar.theme");
@@ -1447,25 +1955,25 @@ function renderAppearanceSection(content) {
     applyTheme();
     savePrefs({ fontSize: "m", width: "normal" });
     renderSettingsSection("appearance");
-    toast("appearance reset", "ok");
+    toast(t("toast.appearanceReset"), "ok");
   });
   c2.appendChild(reset);
   content.appendChild(c2);
 }
 
 function renderTranscriptSection(content) {
-  const c = card("トランスクリプト");
+  const c = card(t("set.transcriptSec"));
   c.appendChild(settingRow(
-    "自動スクロール",
-    "ストリーミング中に最下部へ追従(上に読み戻している間は停止)",
+    t("set.autoscroll"),
+    t("set.autoscrollDesc"),
     toggleSwitch(prefs.autoscroll, () => {
       savePrefs({ autoscroll: !prefs.autoscroll });
       renderSettingsSection("transcript");
     }),
   ));
   c.appendChild(settingRow(
-    "ツール行を既定で展開",
-    "ツール呼び出しの引数と結果を最初から表示します",
+    t("set.toolsExpanded"),
+    t("set.toolsExpandedDesc"),
     toggleSwitch(prefs.toolsExpanded, () => {
       savePrefs({ toolsExpanded: !prefs.toolsExpanded });
       renderSettingsSection("transcript");
@@ -1476,17 +1984,17 @@ function renderTranscriptSection(content) {
 
 function renderShortcutsSection(content) {
   const rows = [
-    ["Tab", "Build / Plan モード切替"],
-    ["Enter", prefs.sendWithEnter ? "メッセージ送信" : "改行(Enter 送信オフ時)"],
-    ["Shift + Enter", "改行"],
-    ["Ctrl + Enter", prefs.sendWithEnter ? "(改行)" : "メッセージ送信"],
-    ["Ctrl + K", "セッション絞り込みへフォーカス"],
-    ["Ctrl + F", "トランスクリプト内検索"],
-    ["Esc", "ーメニュー / 検索 / モーダル / ドロワーを閉じる"],
+    ["Tab", t("sc.tab")],
+    ["Enter", prefs.sendWithEnter ? t("sc.enter") : t("sc.enterNL")],
+    ["Shift + Enter", t("sc.shiftEnter")],
+    ["Ctrl + Enter", prefs.sendWithEnter ? t("sc.ctrlEnterNL") : t("sc.ctrlEnterSend")],
+    ["Ctrl + K", t("sc.k")],
+    ["Ctrl + F", t("sc.f")],
+    ["Esc", t("sc.esc")],
   ];
   const table = document.createElement("div");
   table.className = "card";
-  table.innerHTML = `<h4>ショートカット</h4>`;
+  table.innerHTML = `<h4>${esc(t("set.shortcutsSec"))}</h4>`;
   for (const [key, desc] of rows) {
     const row = document.createElement("div");
     row.className = "kbd-row";
@@ -1496,39 +2004,142 @@ function renderShortcutsSection(content) {
   content.appendChild(table);
 }
 
-async function renderProvidersSection(content) {
-  const c = card("接続済みプロバイダー", "provider の追加・API key の設定は config.yaml(CLI 側)で行います。ここでは接続状態を表示します。");
-  content.appendChild(c);
-  try {
-    await ensureNsConfig();
-    for (const name of Object.keys(ns.providers).sort((a, b) => (a === ns.defaultProvider ? -1 : b === ns.defaultProvider ? 1 : a.localeCompare(b)))) {
-      const conf = ns.providers[name] ?? {};
-      const row = document.createElement("div");
-      row.className = "pair prowp";
-      row.innerHTML = `<span class="pname">${esc(name)}<small class="pdefault">${name === ns.defaultProvider ? "既定" : ""}</small></span>` +
-        `<span class="pinfo">${esc(conf.kind ?? "?")}${conf.default_model ? ` · ${esc(conf.default_model)}` : ""}${providerAuthLabel(conf) ? ` · ${esc(providerAuthLabel(conf))}` : ""}</span>`;
-      c.appendChild(row);
+// ---------------------------------------------------------------------------
+// providers — editable (kind / endpoint / default model / API key)
+// ---------------------------------------------------------------------------
+let providerOpen = ""; // provider name with an expanded editor; "" = none; "__new__" = blank form
+
+/** One-line auth hint from the sanitized auth descriptor (never the value). */
+function providerAuthLabel(pc) {
+  const auth = pc?.auth;
+  if (!auth || auth.source === "none") return "";
+  if (auth.source === "env") return t("prov.keyEnv", auth.source.slice(4));
+  if (auth.source === "inline") return auth.resolved ? t("prov.keyOk") : t("prov.keyMissing");
+  return auth.resolved ? t("prov.keyOk") : t("prov.keyMissing");
+}
+
+function providerForm(name, pc, isNew) {
+  const form = document.createElement("div");
+  form.className = "pform";
+  const auth = pc?.auth ?? {};
+  form.innerHTML = `
+    ${isNew ? `<div class="field-row"><label>${esc(t("prov.name"))}</label><input class="pf-name" type="text" spellcheck="false" placeholder="${esc(t("prov.namePh"))}" /></div>` : ""}
+    <div class="field-row"><label>${esc(t("prov.kind"))}</label>
+      <select class="pf-kind">
+        <option value="openai_compatible">openai_compatible</option>
+        <option value="anthropic">anthropic</option>
+        <option value="mock">mock</option>
+      </select></div>
+    <div class="field-row"><label>${esc(t("prov.endpoint"))}</label><input class="pf-url" type="text" spellcheck="false" placeholder="${esc(t("prov.endpointPh"))}" /></div>
+    <div class="field-row"><label>${esc(t("prov.defaultModel"))}</label><input class="pf-model" type="text" spellcheck="false" placeholder="${esc(t("prov.defaultModelPh"))}" /></div>
+    <div class="field-row"><label>${esc(t("prov.apiKey"))}</label><input class="pf-key" type="password" autocomplete="new-password" placeholder="${auth.resolved ? esc(t("prov.keySet")) : esc(t("prov.keyUnset"))}" /></div>
+    <label class="pf-clear"><input type="checkbox" class="pf-clearbox" /> ${esc(t("prov.clearKey"))}</label>
+    <div class="pop-actions">
+      <button type="button" class="pf-save">${esc(t("prov.save"))}</button>
+      <button type="button" class="ghost pf-cancel">${esc(t("prov.cancel"))}</button>
+    </div>`;
+  form.querySelector(".pf-kind").value = pc?.kind ?? "openai_compatible";
+  form.querySelector(".pf-url").value = pc?.base_url ?? "";
+  form.querySelector(".pf-model").value = pc?.default_model ?? "";
+  const nameInput = form.querySelector(".pf-name");
+  if (nameInput) nameInput.value = name ?? "";
+  form.querySelector(".pf-cancel").addEventListener("click", () => {
+    providerOpen = "";
+    renderSettingsSection("providers");
+  });
+  form.querySelector(".pf-save").addEventListener("click", async () => {
+    const finalName = isNew ? (nameInput?.value ?? "").trim() : name;
+    if (!finalName) {
+      toast(t("prov.badName"), "err");
+      return;
     }
-  } catch (err) {
-    const row = document.createElement("div");
-    row.className = "status-err";
-    row.textContent = err.message;
-    c.appendChild(row);
+    const url = form.querySelector(".pf-url").value.trim();
+    if (url !== "" && !/^https?:\/\//i.test(url)) {
+      toast(t("prov.badUrl"), "err");
+      return;
+    }
+    const payload = {
+      name: finalName,
+      kind: form.querySelector(".pf-kind").value,
+      base_url: url,
+      default_model: form.querySelector(".pf-model").value.trim(),
+    };
+    const key = form.querySelector(".pf-key").value.trim();
+    if (key !== "") payload.api_key = key;
+    if (form.querySelector(".pf-clearbox").checked) payload.clear_api_key = true;
+    try {
+      const res = await rpc("config.provider.set", payload);
+      toast(t("toast.providerSaved", res.provider.name), "ok");
+      ns.loaded = false;
+      providerOpen = "";
+      await ensureNsConfig();
+      renderSettingsSection("providers");
+    } catch (err) {
+      toast(t("toast.saveFailed", err.message), "err");
+    }
+  });
+  return form;
+}
+
+async function renderProvidersSection(content) {
+  const c = card(t("set.providers"), t("set.providersDesc"));
+  content.appendChild(c);
+  if (!(await ensureNsConfig())) return;
+  const names = Object.keys(ns.providers).sort((a, b) =>
+    a === ns.defaultProvider ? -1 : b === ns.defaultProvider ? 1 : a.localeCompare(b));
+  for (const name of names) {
+    const pc = ns.providers[name] ?? {};
+    const wrap = document.createElement("div");
+    wrap.className = `provcard${providerOpen === name ? " open" : ""}`;
+    const authLabel = providerAuthLabel(pc);
+    wrap.innerHTML = `
+      <button class="provhead" type="button">
+        <span class="pname">${esc(name)}${name === ns.defaultProvider ? `<small class="pdefault">${esc(t("prov.default"))}</small>` : ""}</span>
+        <span class="pinfo">${esc(pc.kind ?? "?")}${pc.default_model ? ` · ${esc(pc.default_model)}` : ""}${authLabel ? ` · ${esc(authLabel)}` : ""}</span>
+      </button>
+      <div class="provbody" hidden></div>`;
+    wrap.querySelector(".provhead").addEventListener("click", () => {
+      providerOpen = providerOpen === name ? "" : name;
+      renderSettingsSection("providers");
+    });
+    if (providerOpen === name) {
+      const body = wrap.querySelector(".provbody");
+      body.hidden = false;
+      body.appendChild(providerForm(name, pc, false));
+    }
+    content.appendChild(wrap);
+  }
+  if (providerOpen === "__new__") {
+    const wrap = document.createElement("div");
+    wrap.className = "provcard open";
+    wrap.innerHTML = `<div class="provbody"></div>`;
+    wrap.querySelector(".provbody").appendChild(providerForm("", null, true));
+    content.appendChild(wrap);
+  } else {
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "ghost small";
+    add.textContent = t("prov.add");
+    add.addEventListener("click", () => {
+      providerOpen = "__new__";
+      renderSettingsSection("providers");
+    });
+    content.appendChild(add);
   }
 }
 
 async function renderExtensionsSection(content) {
   // MCP servers
-  const mcpCard = card("MCP サーバー", "mcp.status より(n. = そのサーバーの公開ツール数)。設定は config.yaml の mcp.servers です。");
+  const mcpCard = card(t("ext.mcp"), t("ext.mcpDesc"));
   content.appendChild(mcpCard);
   try {
     const res = await rpc("mcp.status");
     const servers = res.servers ?? [];
     if (servers.length === 0) {
-      mcpCard.appendChild(pairRow("—", "no servers configured"));
+      mcpCard.appendChild(pairRow("—", t("stat.noServers")));
     }
     for (const sv of servers) {
-      mcpCard.appendChild(pairRow(sv.name ?? "(unknown)", `${sv.state ?? "?"} · ${(sv.tools ?? []).length} tools${sv.error ? ` · ${sv.error}` : ""}`));
+      mcpCard.appendChild(pairRow(sv.name ?? "(unknown)", `${sv.state ?? "?"} · ${t("ext.tools", (sv.tools ?? []).length)}${sv.error ? ` · ${sv.error}` : ""}`));
     }
   } catch (err) {
     const row = document.createElement("div");
@@ -1537,20 +2148,20 @@ async function renderExtensionsSection(content) {
     mcpCard.appendChild(row);
   }
   // LSP servers (config.yaml lsp.servers)
-  const lspCard = card("LSP サーバー", "lsp_diagnostics が使用する言語サーバー。設定は config.yaml の lsp.servers です。");
+  const lspCard = card(t("ext.lsp"), t("ext.lspDesc"));
   content.appendChild(lspCard);
   try {
     const cfg = await rpc("config.get");
     const lsp = cfg.lsp?.servers;
     const names = lsp && typeof lsp === "object" ? Object.keys(lsp) : [];
     if (names.length === 0) {
-      lspCard.appendChild(pairRow("—", "no servers configured"));
+      lspCard.appendChild(pairRow("—", t("stat.noServers")));
     }
     for (const name of names) {
       const conf = lsp[name] ?? {};
       lspCard.appendChild(pairRow(
         name,
-        `${conf.disabled ? "disabled" : "enabled"} · ${Array.isArray(conf.extensions) ? conf.extensions.join(", ") : "?"}`,
+        `${conf.disabled ? t("ext.disabled") : t("ext.enabled")} · ${Array.isArray(conf.extensions) ? conf.extensions.join(", ") : "?"}`,
       ));
     }
   } catch (err) {
@@ -1569,18 +2180,18 @@ function pairRow(k, v) {
 }
 
 async function renderSystemSection(content) {
-  const hint = card("システム", "カレーター(自己改善 cron)とスケジューラの現在状態。詳細は status ドロワー、設定は config.yaml です。");
+  const hint = card(t("set.system"), t("sys.desc"));
   content.appendChild(hint);
   try {
     const res = await rpc("curator.status");
     const c = res.curator ?? {};
     content.appendChild(sectionCard("curator", [
-      ["state", `${c.enabled ? "enabled" : "disabled"}${c.paused ? " · paused" : ""}`],
-      ["last run", `${fmtTime(c.lastRunAt)}${c.lastRunAt ? ` (${relTime(c.lastRunAt)})` : ""}`],
-      ["next due", fmtTime(c.nextDueAt)],
-      ["stale skills", (c.stale ?? []).join(", ") || "—"],
-      ["archived", `${(c.archived ?? []).length} (snapshots: ${c.snapshots ?? 0})`],
-      ["consolidation", c.consolidate ? "on" : "off"],
+      [t("stat.state"), `${c.enabled ? t("stat.enabled") : t("stat.disabled")}${c.paused ? " · " + t("stat.paused") : ""}`],
+      [t("stat.lastRun"), `${fmtTime(c.lastRunAt)}${c.lastRunAt ? ` (${relTime(c.lastRunAt)})` : ""}`],
+      [t("stat.nextDue"), fmtTime(c.nextDueAt)],
+      [t("stat.stale"), (c.stale ?? []).join(", ") || "—"],
+      [t("stat.archived"), `${(c.archived ?? []).length} (${t("stat.snapshots")}: ${c.snapshots ?? 0})`],
+      [t("stat.consolidation"), c.consolidate ? t("stat.enabled") : t("stat.disabled")],
     ]));
   } catch (err) {
     content.appendChild(sectionError("curator", err));
@@ -1590,8 +2201,8 @@ async function renderSystemSection(content) {
     const jobs = res.jobs ?? [];
     content.appendChild(sectionCard(
       "cron scheduler",
-      jobs.length > 0 ? jobs.map((j) => [j.name ?? "(unnamed)", j.enabled === false ? "disabled" : `every ${j.every_minutes} min`]) : [["—", "no jobs"]],
-      res.started ? "running" : "stopped",
+      jobs.length > 0 ? jobs.map((j) => [j.name ?? "(unnamed)", j.enabled === false ? t("stat.disabled") : t("stat.everyMinutes", j.every_minutes)]) : [["—", t("stat.noJobs")]],
+      res.started ? t("stat.running") : t("stat.stopped"),
     ));
   } catch (err) {
     content.appendChild(sectionError("cron scheduler", err));
@@ -1605,7 +2216,7 @@ async function loadSessionInfo() {
   const body = $("#info-body");
   body.innerHTML = "";
   if (!state.sessionId) {
-    body.innerHTML = `<div class="empty">no session</div>`;
+    body.innerHTML = `<div class="empty">${esc(t("top.noSession"))}</div>`;
     return;
   }
   let data;
@@ -1619,36 +2230,36 @@ async function loadSessionInfo() {
   const msgs = (data.messages ?? []).filter((m) => m.meta?.ephemeral !== true);
   const counts = { user: 0, assistant: 0, tool: 0 };
   for (const m of msgs) counts[m.role === "system" ? "user" : m.role] = (counts[m.role] ?? 0) + 1;
-  body.appendChild(sectionCard("session", [
-    ["title", s.title || s.id.slice(0, 8)],
-    ["id", s.id],
-    ["provider / model", `${s.provider}${s.model ? ` / ${s.model}` : ""}`],
-    ["profile", s.profile ?? "(none)"],
-    ["cwd", s.cwd],
-    ["created", fmtTime(s.createdAt)],
-    ["updated", fmtTime(s.updatedAt)],
+  body.appendChild(sectionCard(t("info.session"), [
+    [t("info.title"), s.title || s.id.slice(0, 8)],
+    [t("info.id"), s.id],
+    [t("info.providerModel"), `${s.provider}${s.model ? ` / ${s.model}` : ""}`],
+    [t("info.profile"), s.profile ?? t("none")],
+    [t("info.cwd"), s.cwd],
+    [t("info.created"), fmtTime(s.createdAt)],
+    [t("info.updated"), fmtTime(s.updatedAt)],
   ]));
-  body.appendChild(sectionCard("messages", [
-    ["user", counts.user],
-    ["assistant", counts.assistant],
-    ["tool calls", counts.tool],
-    ["total", msgs.length],
+  body.appendChild(sectionCard(t("info.messages"), [
+    [t("info.user"), counts.user],
+    [t("info.assistant"), counts.assistant],
+    [t("info.toolCalls"), counts.tool],
+    [t("info.total"), msgs.length],
   ]));
   const used = state.lastPromptTokensBySession[s.id];
   const tot = state.usageBySession[s.id] ?? { prompt: 0, completion: 0 };
   const win = await contextWindowFor(s.provider, s.model).catch(() => null);
-  body.appendChild(sectionCard("context", [
-    ["current context", used !== undefined ? `${formatTokens(used)} tok` : "(not measured yet)"],
-    ["context window", win ? `${formatTokens(win)} tok` : "(unknown)"],
+  body.appendChild(sectionCard(t("info.context"), [
+    [t("info.currentContext"), used !== undefined ? `${formatTokens(used)} tok` : t("info.notMeasured")],
+    [t("info.contextWindow"), win ? `${formatTokens(win)} tok` : t("info.unknown")],
     ["usage", win && used !== undefined ? `${Math.round(Math.min(1, used / win) * 100)}%` : "—"],
   ]));
-  body.appendChild(sectionCard("usage (this visit)", [
-    ["input", `${formatTokens(tot.prompt)} tok`],
-    ["output", `${formatTokens(tot.completion)} tok`],
+  body.appendChild(sectionCard(t("info.usageVisit"), [
+    [t("info.input"), `${formatTokens(tot.prompt)} tok`],
+    [t("info.output"), `${formatTokens(tot.completion)} tok`],
   ]));
   const list = document.createElement("div");
   list.className = "card";
-  list.innerHTML = `<h4>raw messages</h4>`;
+  list.innerHTML = `<h4>${esc(t("info.rawMessages"))}</h4>`;
   for (const m of msgs.slice(-14)) {
     const line = document.createElement("div");
     line.className = "rawmsg";
@@ -1681,11 +2292,6 @@ function openCtxMenu(ev, sessionId) {
 // ---------------------------------------------------------------------------
 // new session picker (provider / model / profile)
 // ---------------------------------------------------------------------------
-function providerAuthLabel(pc) {
-  if (!pc?.auth || pc.auth.source === "none") return "";
-  return pc.auth.resolved ? "key ✓" : `missing ${pc.auth.source}`;
-}
-
 /** Load provider/profile catalog once for both the sidebar picker and the
  * composer model popover. */
 async function ensureNsConfig() {
@@ -1699,7 +2305,7 @@ async function ensureNsConfig() {
     ns.loaded = true;
     return true;
   } catch (err) {
-    toast(`config unavailable: ${err.message}`, "err");
+    toast(t("toast.configUnavailable", err.message), "err");
     return false;
   }
 }
@@ -1732,7 +2338,7 @@ async function openNewSessionPanel() {
   selProfile.innerHTML = "";
   const empty = document.createElement("option");
   empty.value = "";
-  empty.textContent = "(none)";
+  empty.textContent = t("none");
   selProfile.appendChild(empty);
   for (const name of Object.keys(ns.profiles).sort()) {
     const opt = document.createElement("option");
@@ -1749,7 +2355,7 @@ async function refreshModelList() {
   const provider = $("#ns-provider").value;
   const pc = ns.providers[provider] ?? {};
   const hint = pc.default_model ?? ns.defaultModel;
-  $("#ns-model").placeholder = hint ? `default: ${hint}` : "model name";
+  $("#ns-model").placeholder = hint ? t("ns.modelHint", hint) : t("ns.modelName");
   $("#ns-auth").textContent = `${provider} · ${pc.kind ?? "?"}${providerAuthLabel(pc) ? " · " + providerAuthLabel(pc) : ""}`;
   $("#ns-models").innerHTML = "";
   try {
@@ -1770,7 +2376,7 @@ async function refreshModelList() {
 // ---------------------------------------------------------------------------
 function setMode(mode) {
   state.mode = mode === "plan" ? "plan" : "build";
-  $("#mode-chip").textContent = `${state.mode === "plan" ? "Plan" : "Build"} ▾`;
+  $("#mode-chip").textContent = `${t(state.mode === "plan" ? "mode.plan" : "mode.build")} ▾`;
   $("#mode-chip").classList.toggle("plan-mode", state.mode === "plan");
   $("#mode-pop").hidden = true;
 }
@@ -1779,7 +2385,8 @@ function renderModelChip() {
   const s = state.currentSession;
   const provider = state.draft.provider || s?.provider || ns.defaultProvider;
   const model = state.draft.model || s?.model || "";
-  $("#model-chip").textContent = `${provider ?? "?"}${model ? "/" + model : ""} ▾`;
+  state.modelChipDefault = !provider && !model;
+  $("#model-chip").textContent = `${provider ?? t("chip.modelLabel")}${model ? "/" + model : ""} ▾`;
 }
 
 async function openModelPopover() {
@@ -1813,7 +2420,7 @@ async function refreshModelPopover() {
   const provider = $("#mp-provider").value;
   const pc = ns.providers[provider] ?? {};
   const hint = pc.default_model ?? ns.defaultModel;
-  $("#mp-model").placeholder = hint ? `default: ${hint}` : "model name";
+  $("#mp-model").placeholder = hint ? t("ns.modelHint", hint) : t("ns.modelName");
   $("#mp-models").innerHTML = "";
   try {
     const res = await rpc("models.list", { provider });
@@ -1837,7 +2444,7 @@ async function applyModelPopover() {
   state.draft.model = model;
   if (!state.sessionId) {
     renderModelChip();
-    toast(`next session will use ${provider}${model ? "/" + model : ""}`, "info");
+    toast(t("toast.nextSession", `${provider}${model ? "/" + model : ""}`), "info");
     return;
   }
   try {
@@ -1852,10 +2459,10 @@ async function applyModelPopover() {
     $("#session-meta").textContent = bits.join(" · ");
     renderModelChip();
     refreshSessions();
-    toast(`model set to ${updated.provider}/${updated.model}`, "ok");
+    toast(t("toast.modelSet", `${updated.provider}/${updated.model}`), "ok");
   } catch (err) {
     $("#model-chip").textContent = prevChip;
-    toast(`model change failed: ${err.message}`, "err");
+    toast(t("toast.modelFailed", err.message), "err");
   }
 }
 
@@ -1874,7 +2481,7 @@ async function createFromPanel() {
     await openSession(s.id);
     $("#input").focus();
   } catch (err) {
-    toast(`session.create failed: ${err.message}`, "err");
+    toast(t("toast.createFailed", err.message), "err");
   }
 }
 
@@ -1923,12 +2530,13 @@ async function send() {
         overrides = { ...state.draft };
       }
     }
+    state.lastUserText = text;
     const sparams = { id, text, plan: state.mode === "plan" };
     if (overrides?.provider) sparams.provider = overrides.provider;
     if (overrides?.model) sparams.model = overrides.model;
     await rpc("session.send", sparams);
   } catch (err) {
-    toast(`send failed: ${err.message}`, "err");
+    toast(t("toast.sendFailed", err.message), "err");
     setBusy(false);
   }
 }
@@ -1947,17 +2555,31 @@ function insertIntoComposer(text) {
   autoSize(ta);
 }
 
+/** Hermes-style /retry: re-send the last user message. */
+function retryLastTurn() {
+  if (!state.sessionId || !state.lastUserText) {
+    toast(t("toast.noRetry"), "info");
+    return;
+  }
+  const input = $("#input");
+  input.value = state.lastUserText;
+  autoSize(input);
+  void send();
+}
+
 // ---------------------------------------------------------------------------
 // boot
 // ---------------------------------------------------------------------------
 function boot() {
   applyTheme();
   applyUiPrefs();
+  applyI18n();
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
     if (currentModePref() === "system") applyTheme();
   });
 
   $("#new-session").addEventListener("click", () => void openNewSessionPanel());
+  $("#retry").addEventListener("click", retryLastTurn);
   $("#composer-new").addEventListener("click", () => {
     const opening = $("#plus-pop").hidden;
     closeAllPops();
@@ -1974,7 +2596,7 @@ function boot() {
       insertIntoComposer("@ ");
     } else if (kind === "shell") {
       insertIntoComposer("! ");
-      toast("'!' で始めるとシェルコマンドの実行をエージェントに依頼します", "info");
+      toast(t("toast.shellHint"), "info");
     }
   });
   $("#file-attach").addEventListener("change", () => {
@@ -1983,7 +2605,7 @@ function boot() {
     if (!f) return;
     const ref = f.path || f.name; // Electron exposes the full path
     insertIntoComposer(`@${ref} `);
-    toast(`attached: ${ref}`, "ok");
+    toast(t("toast.attached", ref), "ok");
   });
   $("#ns-cancel").addEventListener("click", () => {
     $("#new-session-panel").hidden = true;

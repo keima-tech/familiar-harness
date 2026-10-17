@@ -113,3 +113,25 @@
 - 参照元: opencode.ai/docs/themes, /docs/config(theme 一覧・attention・
   keybinds・default agent 等の語彙)。Hermes Agent のリポジトリは本ワークスペース
   外のため未参照(参照指示があれば取り込み可)。
+
+## v1.1 の実装メモ④(2026-10-17 夜、i18n + プロバイダー手動設定)
+
+- **i18n(ja 既定 / en)**: 表示文字列を `STR` 辞書 + `t(key, ...args)` に集約し、
+  静的 HTML は `data-i18n` / `data-i18n-ph` / `data-i18n-title`、動的ラベル
+  (チップ・composer placeholder・送信ボタンの title)は `applyI18n()` で反映。
+  切替は 設定 > 一般 > 言語。保存先は localStorage `familiar.lang`。
+- **テーマ 14 種**: Oxocarbon を追加(OpenCode 準拠リスト + Ayu/Matrix/Macchiato)。
+- **Hermes Agent 参照**(https://github.com/NousResearch/hermes-agent): 既存
+  対応済みの対応は personality=profile / skills / memory / curator=cron /
+  `hermes model`=モデルチップ / `/usage`=コンテキストリング。今回は
+  **直前の操作を再実行(↻ ボタン = `/retry` 相当)** を追加。
+- **設定 > プロバイダーで手動設定**: 新 RPC `config.provider.set` で
+  kind / base_url / default_model / API キーを編集・追加。キーは
+  `~/.familiar/secrets/<name>.key` (0600) にのみ書き込み、config.yaml には
+  `api_key_file` 参照を追記(インライン秘密情報は残さない)。書き込み後は
+  インメモリ config を更新して `ProviderRegistry.invalidate()` で
+  **再起動なしで即時反映**。応答は秘匿値を含まない要約のみ。
+- **+ ボタン**: 枠線をなくし控えめに + 外側クリックで閉じないバグを修正
+  (`closeAllPops()` に `plus-pop` が欠落していた)。
+- **虫眼鏡・歯車アイコン**: 16→18px・パディング拡大で視認性を向上。
+- smoke シナリオ I に provider.set の HTTP e2e(永続化・秘匿・入力検証)を追加。

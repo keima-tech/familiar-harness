@@ -1,9 +1,9 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { log } from "./logger.js";
-import { familiarPaths } from "./paths.js";
+import { familiarHome, familiarPaths } from "./paths.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -340,6 +340,96 @@ export interface LoadConfigOptions {
   configFile?: string;
   /** e.g. { default_provider } from CLI flags */
   overrides?: Partial<Pick<ResolvedConfig, "default_provider">>;
+}
+
+/** Patch applied to a provider entry via the GUI ("プロバイダー" settings). */
+export interface ProviderPatch {
+  name: string;
+  kind?: ProviderKind;
+  /** "" removes the base_url (fall back to the kind default). */
+  base_url?: string;
+  /** "" removes the default_model. */
+  default_model?: string;
+  /** Non-empty writes the key into secrets/<name>.key (0600) and wires api_key_file. */
+  api_key?: string;
+  /** Removes inline/file secrets; an `env:` reference is preserved. */
+  clear_api_key?: boolean;
+}
+
+/**
+ * Persist a provider patch to config.yaml. API keys are never written inline:
+ * they land in `<familiar home>/secrets/<name>.key` with 0600 and the config
+ * references them via api_key_file. Values are never logged.
+ */
+export function writeProviderToDisk(
+  patch: ProviderPatch,
+  options: LoadConfigOptions = {},
+): ProviderConfig {
+  const name = patch.name;
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) {
+    throw new Error(`invalid provider name: ${name}`);
+  }
+  const file = configFilePath(options.configFile);
+  let doc: Record<string, unknown> = {};
+  if (fs.existsSync(file)) {
+    const parsed = parseYaml(fs.readFileSync(file, "utf8"));
+    if (parsed !== null && parsed !== undefined) {
+      if (!isPlainObject(parsed)) throw new Error(`config file must be a YAML mapping: ${file}`);
+      doc = parsed;
+    }
+  }
+  const providers = isPlainObject(doc["providers"])
+    ? (doc["providers"] as Record<string, unknown>)
+    : ((doc["providers"] = {}) as Record<string, unknown>);
+  const existing = isPlainObject(providers[name]) ? { ...(providers[name] as Record<string, unknown>) } : {};
+
+  const entry: Record<string, unknown> = { ...existing };
+  if (patch.kind) entry["kind"] = patch.kind;
+  else if (typeof entry["kind"] !== "string" || entry["kind"] === "") entry["kind"] = "openai_compatible";
+
+  if (patch.base_url !== undefined) {
+    if (patch.base_url === "") delete entry["base_url"];
+    else entry["base_url"] = patch.base_url;
+  }
+  if (patch.default_model !== undefined) {
+    if (patch.default_model === "") delete entry["default_model"];
+    else entry["default_model"] = patch.default_model;
+  }
+
+  if (patch.clear_api_key) {
+    const auth = isPlainObject(entry["auth"]) ? { ...(entry["auth"] as Record<string, unknown>) } : {};
+    delete auth["api_key"]; // legacy inline secret (hidden from helpers) — remove if present
+    delete auth["api_key_file"];
+    const env = typeof auth["env"] === "string" ? (auth["env"] as string) : undefined;
+    if (env && env !== "none") entry["auth"] = { env };
+    else delete entry["auth"];
+    // best effort: drop the stale key file
+    try {
+      if (typeof existing["auth"] === "object" && existing["auth"] !== null) {
+        const oldFile = (existing["auth"] as Record<string, unknown>)["api_key_file"];
+        if (typeof oldFile === "string") fs.rmSync(expandHome(oldFile), { force: true });
+      }
+    } catch {
+      // ignore cleanup failure — the credential is already unreferenced
+    }
+  } else if (typeof patch.api_key === "string" && patch.api_key !== "") {
+    const secretsDir = path.join(familiarHome(), "secrets");
+    fs.mkdirSync(secretsDir, { recursive: true });
+    const secretFile = path.join(secretsDir, `${name}.key`);
+    fs.writeFileSync(secretFile, patch.api_key + "\n", { mode: 0o600 });
+    entry["auth"] = { api_key_file: secretFile };
+  }
+
+  providers[name] = entry;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(tmp, stringifyYaml(doc), { mode: 0o600 });
+  fs.renameSync(tmp, file);
+  log.info(`provider config written: ${name}`);
+  if (entry["kind"] !== "openai_compatible" && entry["kind"] !== "anthropic" && entry["kind"] !== "mock") {
+    entry["kind"] = "openai_compatible";
+  }
+  return entry as unknown as ProviderConfig;
 }
 
 export function configFilePath(explicit?: string): string {

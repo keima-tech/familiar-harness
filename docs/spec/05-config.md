@@ -81,6 +81,8 @@ permissions:
 context:
   token_soft_limit: 81920  # 推定(chars/4)超過で compaction ガード発動
   keep_last: 10            # compaction で残す直近メッセージ数
+  compaction:              # M4: 上限超過時の挙動
+    mode: summarize        # summarize=aux 補正機(auxiliary.compactor 未設定ならメインモデル・失敗時 drop にフォールバック) / drop=伏字無しで削除
 
 server:
   port: 46210
@@ -90,24 +92,32 @@ server:
 sessions:
   # store は固定で node:sqlite (`~/.familiar/state.db`)
 
-# --- M3 以降 ---
+# --- M3 以降(実装済み) ---
 memory:
-  enabled: true
   write_approval: true          # 既定 ON(v1)
-  namespaces: [user, project]   # user= ~/.familiar/memories, project= <cwd>/.familiar/memory
+  max_prompt_chars: 4000        # 注入上限(実装上のキー)
 skills:
-  enabled: true
   write_approval: true
+self_review:
+  enabled: true                 # turn 直後の reviewer
 curator:
   enabled: true
   interval_hours: 168
   min_idle_hours: 2
   stale_after_days: 14
   archive_after_days: 30
-  consolidate: false
-  prune_builtins: false
-display:
-  memory_notifications: true    # 自己改善の書き込み通知を表示
+  consolidate: false            # Phase-2 LLM 統合(opt-in・提案は staging 経由)
+
+# auxiliary スロット(実装): curator / reviewer / compactor
+#   reviewer 未設定 → セッションモデル / compactor 未設定 → セッションモデル /
+#   curator 未設定 → default_provider
+auxiliary:
+  # reviewer:  { provider: ollama, model: lfm2.5:latest }
+  # compactor: { provider: ollama, model: lfm2.5:latest }
+  # curator:   { provider: openrouter, model: google/gemini-3-flash }
+
+# 実行時上書き(優先: settings.json > config.yaml)
+#   ~/.familiar/settings.json: { "memory_write_approval": bool, "skills_write_approval": bool }
 ```
 
 ## 上書き順序(優先度 高→低)

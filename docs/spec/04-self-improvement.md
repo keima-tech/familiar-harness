@@ -6,6 +6,13 @@
 - 実測: mock による smoke(scenario D/E/F)+ 実モデル(lfm2.5:latest を `auxiliary.reviewer` に)で staging→approve→次ターン注入まで確認。
 - 実装上の補足: 承認 on/off は `~/.familiar/settings.json` オーバーライド / reviewer は `auxiliary.reviewer` 未設定ならメインモデル / skill 削除は `.archive/` へ退避(ハードデリートしない)/ CAS 失敗時は approve が拒否メッセージを返す(手動で出し直す)。
 
+> **M4 実装状況(2026-10-17)**: compaction 要約・curator・Web UI・Desktop α は実装・検証済み。
+- compaction: `context.compaction.mode: summarize`(既定)— aux(`auxiliary.compactor`→メインモデル)で 1 call、失敗時 drop にフォールバック。イベントは `compaction {dropped, kept, summarized}`。
+- curator Phase 1: `~/.familiar/curator/state.json`(lastRunAt/paused)+ ledger `curator/ledger.jsonl` + snapshot `~/.familiar/snapshots/<id>/`。stale は `.usage.json` の `staleAt`(使用で自動解除)、pin も同一ファイル。
+- curator Phase 2(consolidate opt-in): 1 call でカタログ(top10・body 4k 上限)を精査し umbrella/patch/absorb 提案を **pendingSkills に staging**(通常の承認フロー経由・absorbed_into は reason と ledger に記録)。dry-run 可。
+- scheduler: serve/desktop 起動で 15 分 tick。初回は観測のみ(lastRunAt 起点で 1 interval 遅らせ実行)。idle は最終 turn 完了時刻から測定。
+- 未実装(繰り越し): `familiar curator adopt` / `prune_builtins` / 大規模分割 sweep(50-100 call 版)/ desktop インストーラ(electron-builder は M6)。
+
 Hermes Agent の実装を参考に、以下の 5 部品で構成する。**memory は「常時コンテキストに載る小さな事実」、skills は「関連時のみロードする手続き」**という役割分担が原則。
 
 ```

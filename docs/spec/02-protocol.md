@@ -54,6 +54,14 @@ POST /rpc
 | `skills.pending`(M3) | `{}` | `{ items: PendingItem[] }` |
 | `skills.approve`(M3) | `{ prefix?, all?: true }` | `{ approved: n, failed?: [..CAS 拒否..] }` |
 | `skills.reject`(M3) | `{ prefix }` | `{ rejected: n }` |
+| `curator.status`(M4) | `{}` | `{ curator: { enabled, paused, consolidate, lastRunAt?, nextDueAt?, stale[], archived[], snapshots } }` |
+| `curator.run`(M4) | `{ dryRun?, consolidate? }` | `{ phase1, consolidation? }` — phase-1 遷移 + (opt-in) 統合提案の staging |
+
+### serve の静的配信(M4)
+
+- `GET /` / `/app.js` / `/app.css` … 単一ページ Web UI(照: `packages/server/public`)。セッション一覧・チャット・動的承認ボタン・自己改善 Inbox を含む。
+- `GET /healthz` … `{ ok: true, protocol: "familiar/1" }`(desktop や CLI probe の生存確認に使用)。
+- 上記以外の GET とディレクトリトラバーサルは 404。
 | `config.get` に含まれるサニタイズ項目は 05 を参照 | | |
 
 `ModelInfo = { id: string; provider: string; contextTokens?: number }`
@@ -75,7 +83,7 @@ type AgentEvent =
                              content: string; isError: boolean; durationMs: number }
   | { type: "turn.end";      turnId: string; usage?: Usage }
   | { type: "turn.error";    turnId: string; error: string; recoverable: boolean }
-  | { type: "compaction";    dropped: number; kept: number }
+  | { type: "compaction";    dropped: number; kept: number; summarized?: boolean }
   // M2: dynamic approval (serve mode)
   | { type: "permission.request";  requestId: string; tool: string; summary: string; detail?: string }
   | { type: "permission.resolved"; requestId: string; approved: boolean }

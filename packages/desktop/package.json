@@ -2,6 +2,12 @@
   "name": "@familiar/desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "Desktop shell (Electron) — placeholder until M4",
-  "type": "module"
+  "description": "Familiar desktop shell (Electron) — M4 alpha: wraps the familiar-server web UI",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^38.0.0"
+  }
 }

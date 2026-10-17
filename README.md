@@ -65,8 +65,8 @@ docs/spec/    詳細仕様
 |---|---|
 | M1 | agent loop + 基本ツール(read/write/edit/glob/grep/bash) + セッション永続化 + CLI ✅ |
 | M2 | Google provider・fallback 連鎖・plan モード・動的承認 RPC・CLI リモート接続・webfetch/websearch/todo/task・worktree ✅ |
-| M3 (現在) | memory + skills + background self-review + write_approval ✅ |
-| M4 | curator + compaction 要約版 + Desktop α + `familiar serve` 同梱 Web UI |
+| M3 | memory + skills + background self-review + write_approval ✅ |
+| M4 (現在) | compaction 要約・curator・Web UI(`familiar serve` 静的配信)・Desktop α(Electron) ✅ |
 | M5 | MCP / LSP / hooks・プラグイン / cron |
 | M6 | v1.0(配布: electron-builder によるインストーラ。Windows: NSIS / Linux: deb・AppImage) |
 

@@ -20,7 +20,8 @@
 
 - `AgentServer` はロジック層で HTTP とは独立。`familiar serve` が HTTP+WS トランスポートを付加。
 - CLI の `run` / `chat` は **InProcessTransport** で同一 RPC インターフェースを直接呼ぶ(サーバ起動を要求しない)。外部クライアント(desktop 等)用に `familiar serve` で同名メソッドを公開。
-- 将来 CLI → デーモン接続(`familiar serve` 自動 spawn)は M2。
+- CLI → デーモン接続(probe → 自動 spawn)は M2 実装済み。
+- **M4**: `familiar serve` が同一ポートで単一ページ Web UI(`packages/server/public`)と `/healthz` を静的配信。desktop α(Electron)はこの UI を BrowserWindow に読み込む(`familiar serve` を probe → 無ければ子プロセス起動)。
 
 ## 2. パッケージ構成と依存方向
 
@@ -98,7 +99,9 @@ packages/
     providers/{base.ts, openai-compatible.ts, anthropic.ts, mock.ts, index.ts}
     tools/{registry.ts, permissions.ts, fs-tools.ts, bash.ts, index.ts}
     session/{store.ts, json-sqlite.ts}
+    selfimprove/{context.ts, settings.ts, memory/*, skills/*, review/*, curator/*}
   server/src/{agent-server.ts, http-transport.ts}
-  cli/src/{familiar.ts, commands/*.ts, ui/display.ts}
-  desktop/  (M4)
+  server/public/{index.html, app.js, app.css}   # M4: familiar serve 同梱 Web UI
+  cli/src/{familiar.ts, ui/display.ts}
+  desktop/  # M4 α: Electron シェル(main.js — serve spawn/probe + BrowserWindow)
 ```

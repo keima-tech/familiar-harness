@@ -39,6 +39,8 @@ Usage:
   familiar serve [--port N] [--config PATH]
   familiar sessions list | show <id> [--messages] | delete <id>
   familiar model list [provider]
+  familiar memory [list] | pending | approve <id> | reject <id> | approval on|off
+  familiar skills [list] | view <name> | pending | approve <id|all> | reject <id>
   familiar worktree list | add <name> | remove <name> | prune   (git worktree wrapper)
   familiar init
   familiar doctor
@@ -539,6 +541,125 @@ async function cmdInit(): Promise<void> {
   process.stdout.write(dim(`home:   ${familiarPaths.home()}\nstate:  ${familiarPaths.stateDb()}\n`));
 }
 
+// ---------------------------------------------------------------------------
+// self-improvement: memory / skills commands (M3)
+// ---------------------------------------------------------------------------
+
+function openLocalServer(flags: Record<string, string | boolean>): AgentServer {
+  return new AgentServer({ config: loadCliConfig(flags) });
+}
+
+type PendingApi = { id: string; kind: string; target?: string; summary: string; createdAt: number };
+
+async function cmdMemory(flags: Record<string, string | boolean>, positionals: string[]): Promise<void> {
+  const server = openLocalServer(flags);
+  const si = server.selfImprove; // note: in remote-daemon mode use node RPC; CLI keeps local for now
+  const sub = positionals[0] ?? "list";
+  if (sub === "list") {
+    const entries = si.memories.list().sort((a, b) => b.updatedAt - a.updatedAt);
+    const st = approvalStateOr(server);
+    process.stdout.write(
+      `${cyan(String(entries.length))} memories · write_approval ${st.memoryWriteApproval ? green("on") : red("off")} (skills: ${st.skillsWriteApproval ? green("on") : red("off")})\n`,
+    );
+    for (const m of entries) {
+      const tags = m.tags.length > 0 ? dim(` [${m.tags.join(",")}]`) : "";
+      const stamp = new Date(m.updatedAt).toISOString().slice(0, 10);
+      process.stdout.write(`${dim(m.id.slice(0, 6))}  ${dim(stamp)}  ${(m.source === "background" ? cyan : (s: string) => s)(m.source.slice(0, 1))}  ${m.content.slice(0, 140)}${tags}\n`);
+    }
+    if (entries.length === 0) process.stdout.write(dim("(no memories yet — the agent can create them with memory_manage)\n"));
+    return;
+  }
+  if (sub === "pending") {
+    const items = si.pendingMemories.list();
+    if (items.length === 0) process.stdout.write(dim("(no staged memory writes)\n"));
+    for (const item of items) {
+      process.stdout.write(`${green(item.id)}  ${item.kind}  ${item.summary}\n`);
+    }
+    return;
+  }
+  if (sub === "approve" || sub === "reject") {
+    const prefix = positionals[1];
+    if (!prefix) fail(`usage: familiar memory ${sub} <id|prefix|all>`);
+    const result = await server.dispatch(`memory.${sub}`, { id: prefix });
+    process.stdout.write(green(JSON.stringify(result) + "\n"));
+    return;
+  }
+  if (sub === "approval") {
+    const set = positionals[1];
+    if (set === "on" || set === "off") {
+      await server.dispatch("memory.approval", { set });
+      process.stdout.write(green(`memory write_approval: ${set}\n`));
+      return;
+    }
+    const st = approvalStateOr(server);
+    process.stdout.write(`memory write_approval: ${st.memoryWriteApproval ? "on" : "off"}\nusage: familiar memory approval on|off\n`);
+    return;
+  }
+  fail(`unknown memory subcommand: ${sub} (list | pending | approve <id> | reject <id> | approval on|off)`);
+}
+
+async function cmdSkills(flags: Record<string, string | boolean>, positionals: string[]): Promise<void> {
+  const server = openLocalServer(flags);
+  const si = server.selfImprove;
+  const sub = positionals[0] ?? "list";
+  if (sub === "list") {
+    const catalog = si.skills.list();
+    process.stdout.write(`${cyan(String(catalog.length))} skills\n`);
+    for (const s of catalog) {
+      const last = s.lastUsedAt ? dim(` · last ${new Date(s.lastUsedAt).toISOString().slice(0, 10)}`) : "";
+      process.stdout.write(`${cyan(s.name)}${s.useCount > 0 ? dim(` · used ${s.useCount}x${last}`) : dim(" · unused")}\n    ${s.description.slice(0, 120)}\n`);
+    }
+    if (catalog.length === 0) process.stdout.write(dim("(no skills yet)\n"));
+    return;
+  }
+  if (sub === "view") {
+    const name = positionals[1];
+    if (!name) fail("usage: familiar skills view <name>");
+    const view = si.skills.view(name);
+    if (!view) fail(`skill not found: ${name}`);
+    process.stdout.write(`${view.description}${view.warnings.length > 0 ? `\n${cyan("warns:")} ${view.warnings.join("; ")}` : ""}\n\n${view.body}\n`);
+    return;
+  }
+  if (sub === "pending") {
+    const items = si.pendingSkills.list();
+    if (items.length === 0) process.stdout.write(dim("(no staged skill writes)\n"));
+    for (const item of items) {
+      const warns = item.warnings && item.warnings.length > 0 ? ` ${dim(`[${item.warnings.join("; ")}]`)}` : "";
+      process.stdout.write(`${green(item.id)}  ${item.kind}  ${item.summary}${warns}\n`);
+    }
+    return;
+  }
+  if (sub === "approve") {
+    if (positionals[1] === "all") {
+      const res = (await server.dispatch("skills.approve", { all: true })) as { approved: number; messages: string[]; failed?: string[] };
+      for (const m of res.messages ?? []) process.stdout.write(green(`${m}\n`));
+      for (const m of res.failed ?? []) process.stdout.write(red(`FAIL ${m}\n`));
+      return;
+    }
+    const prefix = positionals[1];
+    if (!prefix) fail("usage: familiar skills approve <id|prefix|all>");
+    const res = await server.dispatch("skills.approve", { prefix });
+    process.stdout.write(green(JSON.stringify(res) + "\n"));
+    return;
+  }
+  if (sub === "reject") {
+    const prefix = positionals[1];
+    if (!prefix) fail("usage: familiar skills reject <id|prefix>");
+    const res = await server.dispatch("skills.reject", { prefix });
+    process.stdout.write(green(JSON.stringify(res) + "\n"));
+    return;
+  }
+  fail(`unknown skills subcommand: ${sub} (list | view <name> | pending | approve <id|all> | reject <id>)`);
+}
+
+function approvalStateOr(server: AgentServer): { memoryWriteApproval: boolean; skillsWriteApproval: boolean } {
+  const si = server.selfImprove;
+  const memOn = si.settings.get("memory_write_approval") ?? server.cfg.memory.write_approval !== false;
+  const skillOn = si.settings.get("skills_write_approval") ?? server.cfg.skills.write_approval !== false;
+  return { memoryWriteApproval: memOn, skillsWriteApproval: skillOn };
+}
+
+
 async function cmdDoctor(): Promise<void> {
   let failures = 0;
   const ok = (msg: string): void => {
@@ -663,6 +784,12 @@ async function main(): Promise<void> {
         break;
       case "model":
         await cmdModel(flags, rest);
+        break;
+      case "memory":
+        await cmdMemory(flags, rest);
+        break;
+      case "skills":
+        await cmdSkills(flags, rest);
         break;
       case "worktree":
         await cmdWorktree(flags, rest, resolveCwd(flags));

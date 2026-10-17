@@ -139,6 +139,20 @@ export function createPrettyPrinter(): (event: AgentEvent) => void {
       case "turn.end":
         process.stdout.write("\n");
         break;
+      case "improvement.staged": {
+        const parts: string[] = [];
+        if (event.memoryCount > 0) parts.push(`${event.memoryCount} memory`);
+        if (event.skillCount > 0) parts.push(`${event.skillCount} skill`);
+        if (parts.length > 0) {
+          process.stdout.write(
+            c.faint(`  ✎ self-review staged ${parts.join(", ")} — run 'familiar memory pending' / 'familiar skills pending' to review\n`),
+          );
+        }
+        break;
+      }
+      case "memory.truncation":
+        process.stdout.write(c.faint(`  … ${event.dropped} memory entries dropped (prompt cap)\n`));
+        break;
       default:
         break;
     }

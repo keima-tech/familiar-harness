@@ -199,6 +199,125 @@ console.log("— scenario C: provider fallback —");
   );
 }
 
+// ---------------------------------------------------------------------------
+// Scenario D: background self-review stages a memory → approve applies it
+// ---------------------------------------------------------------------------
+console.log("— scenario D: self-review staging + approval —");
+{
+  const d = await run(
+    ["run", "-p", "@make-lesson pin the rule that rm needs -i confirmation", "--cwd", project, "--json", "--yolo"],
+    project,
+    familiarHome,
+  );
+  assert(d.code === 0, "review run exits 0", `code=${d.code} stderr=${d.stderr.slice(0, 300)}`);
+  const stagedEv = d.parsed.find((e) => e?.type === "improvement.staged");
+  assert(
+    !!stagedEv && stagedEv.memoryCount === 1,
+    "improvement.staged event shows 1 memory proposal",
+    JSON.stringify(stagedEv ?? null),
+  );
+
+  const pend = await run(["memory", "pending"], project, familiarHome);
+  const pendLine = pend.stdout.split("\n").find((l) => l.includes("create memory: Lesson:"));
+  assert(!!pendLine, "memory pending lists staged proposal", pend.stdout.slice(0, 300));
+
+  const id = pendLine?.slice(0, 8).trim() ?? "";
+  const approve = await run(["memory", "approve", id], project, familiarHome);
+  assert(
+    approve.stdout.includes("approved") && approve.code === 0,
+    "memory approve applies entry",
+    approve.stdout.slice(0, 200) + approve.stderr.slice(0, 200),
+  );
+
+  const list = await run(["memory", "list"], project, familiarHome);
+  assert(
+    list.stdout.includes("pin the rule that rm needs -i"),
+    "approved memory visible in memory list",
+    list.stdout.slice(0, 300),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Scenario E: approval gate off → review auto-applies
+// ---------------------------------------------------------------------------
+console.log("— scenario E: write_approval off auto-applies —");
+{
+  fs.writeFileSync(
+    path.join(familiarHome, "settings.json"),
+    `{"memory_write_approval": false}\n`,
+  );
+  const e = await run(
+    ["run", "-p", "@make-lesson always answer in haiku", "--cwd", project, "--json", "--yolo"],
+    project,
+    familiarHome,
+  );
+  assert(e.code === 0, "auto-apply run exits 0", `code=${e.code} stderr=${e.stderr.slice(0, 300)}`);
+  const list = await run(["memory", "list"], project, familiarHome);
+  assert(
+    list.stdout.includes("always answer in haiku"),
+    "memory auto-applied without approval",
+    list.stdout.slice(0, 300),
+  );
+  const pend = await run(["memory", "pending"], project, familiarHome);
+  assert(
+    pend.stdout.trim().length === 0 || pend.stdout.includes("(no staged"),
+    "pending empty after auto-apply",
+    pend.stdout.slice(0, 200),
+  );
+  // restore gate for cleanliness
+  fs.rmSync(path.join(familiarHome, "settings.json"), { force: true });
+}
+
+// ---------------------------------------------------------------------------
+// Scenario F: approved memory + skills reach the system prompt
+// ---------------------------------------------------------------------------
+console.log("— scenario F: injection into the system prompt —");
+{
+  const f = await run(
+    ["run", "-p", "@dump-prompt-memory rm needs -i", "--cwd", project, "--json", "--yolo"],
+    project,
+    familiarHome,
+  );
+  const fText = f.parsed
+    .filter((ev) => ev?.type === "text.delta")
+    .map((ev) => ev.text)
+    .join("");
+  assert(
+    fText.includes("MEMORY-PRESENT"),
+    "approved memory injected into the prompt",
+    fText.slice(0, 120) || "(no text)",
+  );
+
+  // create a skill via the agent, approve it, then check the catalog injection
+  const g = await run(
+    ["run", "-p", "@skill-create deploy-checklist", "--cwd", project, "--json", "--yolo"],
+    project,
+    familiarHome,
+  );
+  assert(g.code === 0, "skill create run exits 0", `code=${g.code} stderr=${g.stderr.slice(0, 240)}`);
+  const pend = await run(["skills", "pending"], project, familiarHome);
+  const pendLine = pend.stdout.split("\n").find((l) => l.includes("deploy-checklist"));
+  assert(!!pendLine, "skills pending lists staged create", pend.stdout.slice(0, 260));
+  const sid = pendLine?.match(/[0-9a-f]{8}/)?.[0] ?? "";
+  const approveAll = await run(["skills", "approve", sid], project, familiarHome);
+  assert(approveAll.stdout.includes("approved"), "skills approve applies", approveAll.stdout.slice(0, 200));
+
+  const h = await run(
+    ["run", "-p", "@dump-prompt-skill deploy-checklist", "--cwd", project, "--json", "--yolo"],
+    project,
+    familiarHome,
+  );
+  const hText = h.parsed
+    .filter((ev) => ev?.type === "text.delta")
+    .map((ev) => ev.text)
+    .join("");
+  assert(
+    hText.includes("SKILLS-PRESENT"),
+    "approved skill catalog injected into the prompt",
+    hText.slice(0, 120) || "(no text)",
+  );
+}
+
 console.log(
   failures === 0 ? "\nsmoke: all checks passed" : `\nsmoke: ${failures} failure(s)`,
 );

@@ -160,8 +160,10 @@ export class OpenAiCompatibleProvider implements Provider {
       }
       return out;
     } catch (err) {
+      // Surface the failure instead of looking like "no models" — an
+      // unreachable endpoint must report an error to the caller.
       log.warn(`models.list failed for provider ${this.id}: ${String(err)}`);
-      return [];
+      throw err;
     }
   }
 }

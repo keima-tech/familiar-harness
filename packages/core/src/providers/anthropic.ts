@@ -157,8 +157,9 @@ export class AnthropicProvider implements Provider {
       }
       return out;
     } catch (err) {
+      // Surface the failure instead of looking like "no models".
       log.warn(`models.list failed for provider ${this.id}: ${String(err)}`);
-      return [];
+      throw err;
     }
   }
 }

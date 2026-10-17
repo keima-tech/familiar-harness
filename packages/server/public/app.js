@@ -260,6 +260,13 @@ const STR = {
     "prov.name": "名前",
     "prov.namePh": "例: my-openai",
     "prov.badName": "プロバイダー名は英数字で入力してください",
+    "prov.fetchModels": "モデル一覧を取得",
+    "prov.probeNeedsUrl": "エンドポイントを入力してください",
+    "prov.probing": "取得中…",
+    "prov.probeEmpty": "モデルが見つかりませんでした",
+    "prov.probeOk": "{0} 件のモデル",
+    "prov.probePicked": "選択: {0}",
+    "prov.probeMock": "mock はモデル一覧の取得が不要です",
     "prov.badUrl": "エンドポイントは http:// か https:// で始めてください",
     "prov.default": "既定",
     "prov.keyOk": "キー ✓",
@@ -473,6 +480,13 @@ const STR = {
     "prov.name": "name",
     "prov.namePh": "e.g. my-openai",
     "prov.badName": "provider name must be alphanumeric",
+    "prov.fetchModels": "Fetch model list",
+    "prov.probeNeedsUrl": "enter an endpoint first",
+    "prov.probing": "fetching…",
+    "prov.probeEmpty": "no models found",
+    "prov.probeOk": "{0} model(s)",
+    "prov.probePicked": "selected: {0}",
+    "prov.probeMock": "mock needs no model probe",
     "prov.badUrl": "endpoint must start with http:// or https://",
     "prov.default": "default",
     "prov.keyOk": "key ✓",
@@ -2070,18 +2084,119 @@ function providerForm(name, pc, isNew) {
         <option value="mock">mock</option>
       </select></div>
     <div class="field-row"><label>${esc(t("prov.endpoint"))}</label><input class="pf-url" type="text" spellcheck="false" placeholder="${esc(t("prov.endpointPh"))}" /></div>
+    <datalist class="pf-dl" hidden></datalist>
     <div class="field-row"><label>${esc(t("prov.defaultModel"))}</label><input class="pf-model" type="text" spellcheck="false" placeholder="${esc(t("prov.defaultModelPh"))}" /></div>
     <div class="field-row"><label>${esc(t("prov.apiKey"))}</label><input class="pf-key" type="password" autocomplete="new-password" placeholder="${auth.resolved ? esc(t("prov.keySet")) : esc(t("prov.keyUnset"))}" /></div>
     <label class="pf-clear"><input type="checkbox" class="pf-clearbox" /> ${esc(t("prov.clearKey"))}</label>
+    <div class="pf-probe-row">
+      <button type="button" class="pf-probe ghost small">${esc(t("prov.fetchModels"))}</button>
+      <span class="pf-probe-status dim"></span>
+    </div>
+    <div class="pf-models"></div>
+    <div class="form-error" hidden></div>
     <div class="pop-actions">
       <button type="button" class="pf-save">${esc(t("prov.save"))}</button>
       <button type="button" class="ghost pf-cancel">${esc(t("prov.cancel"))}</button>
     </div>`;
-  form.querySelector(".pf-kind").value = pc?.kind ?? "openai_compatible";
-  form.querySelector(".pf-url").value = pc?.base_url ?? "";
-  form.querySelector(".pf-model").value = pc?.default_model ?? "";
+  const kindSel = form.querySelector(".pf-kind");
+  const urlInput = form.querySelector(".pf-url");
+  const modelInput = form.querySelector(".pf-model");
+  const keyInput = form.querySelector(".pf-key");
+  const probeBtn = form.querySelector(".pf-probe");
+  const probeStatus = form.querySelector(".pf-probe-status");
+  const modelsBox = form.querySelector(".pf-models");
+  const errBox = form.querySelector(".form-error");
+  kindSel.value = pc?.kind ?? "openai_compatible";
+  urlInput.value = pc?.base_url ?? "";
+  modelInput.value = pc?.default_model ?? "";
   const nameInput = form.querySelector(".pf-name");
   if (nameInput) nameInput.value = name ?? "";
+
+  /** Readable inline error (the bottom-right toast is blurred by the modal
+   * backdrop, so failures must also be visible inside the dialog). */
+  const setError = (msg) => {
+    errBox.textContent = msg || "";
+    errBox.hidden = !msg;
+  };
+
+  let probeTimer = null;
+  const syncMockState = () => {
+    const isMock = kindSel.value === "mock";
+    probeBtn.disabled = isMock;
+    if (isMock) {
+      probeStatus.textContent = t("prov.probeMock");
+      modelsBox.innerHTML = "";
+    }
+  };
+  syncMockState();
+  async function probeModels() {
+    if (kindSel.value === "mock") return;
+    const url = urlInput.value.trim();
+    if (!/^https?:\/\//i.test(url)) {
+      modelsBox.innerHTML = "";
+      probeStatus.textContent = t("prov.probeNeedsUrl");
+      setError(t("prov.badUrl"));
+      return;
+    }
+    setError("");
+    probeStatus.textContent = t("prov.probing");
+    modelsBox.innerHTML = "";
+    try {
+      const res = await rpc("models.probe", {
+        kind: kindSel.value,
+        base_url: url,
+        ...(keyInput.value.trim() ? { api_key: keyInput.value.trim() } : {}),
+      });
+      const models = res.models ?? [];
+      if (res.error) {
+        probeStatus.textContent = "";
+        setError(res.error);
+        return;
+      }
+      const dl = form.querySelector(".pf-dl");
+      dl.innerHTML = models.map((m) => `<option value="${esc(m.id)}"></option>`).join("");
+      if (models.length === 0) {
+        probeStatus.textContent = t("prov.probeEmpty");
+        return;
+      }
+      probeStatus.textContent = t("prov.probeOk", models.length);
+      for (const m of models) {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "pf-modelrow";
+        const ctxBits = [];
+        if (m.contextTokens) ctxBits.push(`${Math.round(m.contextTokens / 1000)}k`);
+        row.innerHTML = `<span class="pm-name">${esc(m.id)}</span><span class="pm-meta">${esc(ctxBits.join(" · "))}</span>`;
+        row.addEventListener("click", () => {
+          modelInput.value = m.id;
+          setError("");
+          probeStatus.textContent = t("prov.probePicked", m.id);
+        });
+        modelsBox.appendChild(row);
+      }
+    } catch (err) {
+      probeStatus.textContent = "";
+      setError(err.message);
+    }
+  }
+  probeBtn.addEventListener("click", probeModels);
+  kindSel.addEventListener("change", () => {
+    syncMockState();
+    clearTimeout(probeTimer);
+    probeTimer = setTimeout(() => void probeModels(), 200);
+  });
+  // auto-refresh shortly after the endpoint/kind/key settles
+  for (const el of [urlInput, kindSel, keyInput]) {
+    el.addEventListener("input", () => {
+      clearTimeout(probeTimer);
+      probeTimer = setTimeout(() => void probeModels(), 800);
+    });
+    el.addEventListener("change", () => {
+      clearTimeout(probeTimer);
+      probeTimer = setTimeout(() => void probeModels(), 200);
+    });
+  }
+
   form.querySelector(".pf-cancel").addEventListener("click", () => {
     providerOpen = "";
     renderSettingsSection("providers");
@@ -2089,31 +2204,35 @@ function providerForm(name, pc, isNew) {
   form.querySelector(".pf-save").addEventListener("click", async () => {
     const finalName = isNew ? (nameInput?.value ?? "").trim() : name;
     if (!finalName) {
+      setError(t("prov.badName"));
       toast(t("prov.badName"), "err");
       return;
     }
-    const url = form.querySelector(".pf-url").value.trim();
+    const url = urlInput.value.trim();
     if (url !== "" && !/^https?:\/\//i.test(url)) {
+      setError(t("prov.badUrl"));
       toast(t("prov.badUrl"), "err");
       return;
     }
     const payload = {
       name: finalName,
-      kind: form.querySelector(".pf-kind").value,
+      kind: kindSel.value,
       base_url: url,
-      default_model: form.querySelector(".pf-model").value.trim(),
+      default_model: modelInput.value.trim(),
     };
-    const key = form.querySelector(".pf-key").value.trim();
+    const key = keyInput.value.trim();
     if (key !== "") payload.api_key = key;
     if (form.querySelector(".pf-clearbox").checked) payload.clear_api_key = true;
     try {
       const res = await rpc("config.provider.set", payload);
+      setError("");
       toast(t("toast.providerSaved", res.provider.name), "ok");
       ns.loaded = false;
       providerOpen = "";
       await ensureNsConfig();
       renderSettingsSection("providers");
     } catch (err) {
+      setError(err.message);
       toast(t("toast.saveFailed", err.message), "err");
     }
   });

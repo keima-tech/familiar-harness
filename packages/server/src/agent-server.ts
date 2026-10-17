@@ -311,6 +311,8 @@ export class AgentServer {
         return this.configProviderSet(params);
       case "models.list":
         return this.modelsList(params);
+      case "models.probe":
+        return this.modelsProbe(params);
       case "session.create":
         return this.createSession(params);
       case "session.list":
@@ -451,6 +453,47 @@ export class AgentServer {
       return { provider: providerId, models };
     } catch (err) {
       return { provider: providerId, models: [], error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * List models from a provider config that is *not saved yet* (settings GUI:
+   * custom OpenAI-compatible endpoint / Ollama). A throwaway provider is
+   * created on a cloned config — nothing is persisted, cached, or logged, and
+   * the API key is never part of the response.
+   */
+  private async modelsProbe(params: Record<string, unknown>): Promise<{
+    models: ModelInfo[];
+    error?: string;
+  }> {
+    const baseUrl = (str(params, "base_url") ?? "").trim();
+    if (!/^https?:\/\//i.test(baseUrl)) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, "base_url must start with http:// or https://");
+    }
+    const kind = str(params, "kind") ?? "openai_compatible";
+    if (kind !== "openai_compatible" && kind !== "anthropic") {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, `unsupported kind for probe: ${kind}`);
+    }
+    const apiKey = str(params, "api_key");
+    const probeId = "__probe__";
+    const synthetic: ProviderConfig = {
+      kind,
+      base_url: baseUrl,
+      ...(apiKey ? { auth: { api_key: apiKey } } : {}),
+    };
+    const cfg: ResolvedConfig = {
+      ...this.cfg,
+      providers: { ...this.cfg.providers, [probeId]: synthetic },
+    };
+    try {
+      const provider = ProviderRegistry.create(probeId, cfg);
+      const models = await provider.listModels();
+      return { models };
+    } catch (err) {
+      return {
+        models: [],
+        error: `${baseUrl}: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   }
 

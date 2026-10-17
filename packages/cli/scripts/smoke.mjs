@@ -485,6 +485,33 @@ console.log("— scenario I: web ui transport —");
     }),
   }).then((r) => r.json());
   assert(!!provBad.error, "config.provider.set rejects invalid input", JSON.stringify(provBad).slice(0, 160));
+  // v1.1: models.probe — list models from an endpoint that is NOT saved yet
+  const probeOllama = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 25,
+      method: "models.probe",
+      params: { kind: "openai_compatible", base_url: "http://127.0.0.1:1" },
+    }),
+  }).then((r) => r.json());
+  assert(
+    Array.isArray(probeOllama.result?.models) && typeof probeOllama.result?.error === "string",
+    "models.probe reports unreachable endpoints as errors, not empty lists",
+    JSON.stringify(probeOllama).slice(0, 160),
+  );
+  const probeBad = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 26,
+      method: "models.probe",
+      params: { kind: "openai_compatible", base_url: "not-a-url" },
+    }),
+  }).then((r) => r.json());
+  assert(!!probeBad.error, "models.probe rejects invalid base_url", JSON.stringify(probeBad).slice(0, 160));
   const sent = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

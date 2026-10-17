@@ -144,13 +144,18 @@
       <div id="status-body"></div>
     </aside>
 
-    <aside id="settings" hidden>
-      <div class="drawer-head">
-        <b>settings</b>
-        <button id="close-settings" class="ghost">✕</button>
+    <div id="settings-overlay" class="overlay" hidden>
+    <div class="modal" role="dialog" aria-label="settings">
+      <div class="modal-head">
+        <b>設定</b>
+        <button id="close-settings" class="iconbtn" title="close (Esc)">✕</button>
       </div>
-      <div id="settings-body"></div>
-    </aside>
+      <div class="modal-body">
+        <nav id="settings-nav"></nav>
+        <div id="settings-content"></div>
+      </div>
+    </div>
+  </div>
 
     <aside id="session-info" hidden>
       <div class="drawer-head">

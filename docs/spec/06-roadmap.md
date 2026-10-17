@@ -92,3 +92,24 @@
   トークン数 or —)。クリックで **session info ドロワー**(セッション情報・メッセージ
   カウント・コンテキスト使用率・this visit のトークン・raw メッセージ一覧)。
   旧 usage chip(gauge に統合)は削除。
+
+## v1.1 の実装メモ③(2026-10-17 深夜、設定モーダル + Tab 切替)
+
+- **Tab で Build/Plan 切替**: keydown をグローバルで捕捉(入力系別要素内は除外、
+  `#input`/body は有効)。ON/OFF は設定で切替可(OpenCode の Tab 切替踏襲)。
+- **設定は中央モーダル化**: 左ナビ + 右ペイン(OpenCode デスクトップの設定画面準拠)。
+  セクションは 一般 / 外観 / トランスクリプト / ショートカット / プロバイダー /
+  拡張機能 / システム。Esc・背景クリック・✕ で閉じる。
+- **UI preferences(`familiar.prefs`)**
+  - 送信キー(Enter 送信 ⇄ Ctrl+Enter 送信)、Tab 切替、自動スクロール、
+    ツール行既定展開、UI フォントサイズ(--fs)、トランスクリプト幅(--content-w)
+  - デスクトップ通知(turn 完了時 = OpenCode tui の attention 相当。非フォーカス時
+    のみ通知の下設定、初回有効時に Notification.requestPermission)。
+- **テーマ 13 種 × light/dark = 26 パレット**: OpenCode docs の built-in themes に
+  併せて **Ayu / Matrix / Catppuccin Macchiato** を追加(既存 10 种 + 3)。
+- **右クリックメニューの幅バグ修正**: `.pop` 側 `right: 0` が fixed 要素に効いて
+  左右全域に伸びていたため `#ctx-menu { right: auto; width: max-content;
+  max-width: 280px }` に。
+- 参照元: opencode.ai/docs/themes, /docs/config(theme 一覧・attention・
+  keybinds・default agent 等の語彙)。Hermes Agent のリポジトリは本ワークスペース
+  外のため未参照(参照指示があれば取り込み可)。

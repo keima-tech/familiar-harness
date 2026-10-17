@@ -238,6 +238,8 @@ const ns = {
 // Selected values are written to `:root` as CSS custom properties, falling
 // back to the stylesheet defaults (= Tokyo Night dark) before JS loads.
 // ---------------------------------------------------------------------------
+// [x] themes: built on OpenCode's theme list (docs/themes) — see THEMES below
+// [x] desktop notifications on turn completion (~/{attention} equivalent)
 const THEMES = {
   "Tokyo Night": {
     dark: { bg: "#101014", panel: "#151519", panel2: "#1b1b21", text: "#e8e8ea", dim: "#85858e", accent: "#6c8cff", ok: "#7dc98f", warn: "#d9a35f", err: "#e46a6a", border: "#26262c", bubble: "#3948e0", hover: "#232329", codebg: "#121216" },
@@ -246,6 +248,18 @@ const THEMES = {
   Catppuccin: {
     dark: { bg: "#1e1e2e", panel: "#181825", panel2: "#313244", text: "#cdd6f4", dim: "#6c7086", accent: "#89b4fa", ok: "#a6e3a1", warn: "#f9e2af", err: "#f38ba8", border: "#454758", bubble: "#585b70", hover: "#37394f", codebg: "#1d1d29" },
     light: { bg: "#eef1f6", panel: "#fbfcfe", panel2: "#ffffff", text: "#4c4f69", dim: "#8c8fa1", accent: "#1e66f5", ok: "#40a02b", warn: "#df8e1d", err: "#d20f39", border: "#ccd0da", bubble: "#1e66f5", hover: "#e4e7ef", codebg: "#f5f6fa" },
+  },
+  "Catppuccin Macchiato": {
+    dark: { bg: "#24273a", panel: "#1e2030", panel2: "#363a4f", text: "#cad3f5", dim: "#6e738d", accent: "#8aadf4", ok: "#a6da95", warn: "#eed49f", err: "#ee99a0", border: "#494d64", bubble: "#5b6078", hover: "#3f4258", codebg: "#20212f" },
+    light: { bg: "#eff1f5", panel: "#fbfcfe", panel2: "#ffffff", text: "#4c4f69", dim: "#8c8fa1", accent: "#1e66f5", ok: "#40a02b", warn: "#df8e1d", err: "#d20f39", border: "#ccd0da", bubble: "#1e66f5", hover: "#e4e7ef", codebg: "#f5f6fa" },
+  },
+  Ayu: {
+    dark: { bg: "#0b0e14", panel: "#11151c", panel2: "#1c212c", text: "#e6e1cf", dim: "#8a9199", accent: "#ff995e", ok: "#aad94c", warn: "#ffc94c", err: "#f07178", border: "#232a3c", bubble: "#5a6b7e", hover: "#1e2430", codebg: "#0e1219" },
+    light: { bg: "#fafafa", panel: "#f1f3f5", panel2: "#ffffff", text: "#57566b", dim: "#8a9199", accent: "#ff995e", ok: "#86b300", warn: "#f2ae49", err: "#e6504f", border: "#e2e5e9", bubble: "#ff995e", hover: "#eaedef", codebg: "#f5f7f8" },
+  },
+  Matrix: {
+    dark: { bg: "#041105", panel: "#061808", panel2: "#0b2410", text: "#9de6a4", dim: "#3f7a4c", accent: "#27e879", ok: "#7dff9a", warn: "#b7e86a", err: "#ff5f5f", border: "#123f1e", bubble: "#1e7a3c", hover: "#0e2a15", codebg: "#05150a" },
+    light: { bg: "#eef7ee", panel: "#f6fbf6", panel2: "#ffffff", text: "#1e3f26", dim: "#5c7c64", accent: "#128a44", ok: "#1d8a4a", warn: "#8a6d1d", err: "#b02a37", border: "#cfdecf", bubble: "#128a44", hover: "#e2f0e2", codebg: "#f2f9f2" },
   },
   Nord: {
     dark: { bg: "#2e3440", panel: "#292f3a", panel2: "#3b4252", text: "#eceff4", dim: "#77839c", accent: "#88c0d0", ok: "#a3be8c", warn: "#ebcb8b", err: "#bf616a", border: "#434c5e", bubble: "#5e81ac", hover: "#3f4a5e", codebg: "#272c36" },
@@ -765,6 +779,10 @@ function appendToolCard(name, args, resultContent, status, opts = {}) {
   state.toolCounter += 1;
   const num = state.toolCounter;
   const duration = opts.durationMs !== undefined ? (opts.durationMs / 1000).toFixed(1) : "";
+  const expanded = prefs.toolsExpanded === true && status !== "run";
+  const bodyHtml = `
+      ${argsText !== "" ? `<div class="tc-section"><h5>arguments</h5><pre>${esc(truncate(argsBlock, ARGS_CAP))}</pre></div>` : ""}
+      <div class="tc-section tc-result"><h5>${opts.resultLabel ?? "result"}</h5><pre>${status === "run" ? `<span class="dim">running…</span>` : esc(truncate(resultContent, RESULT_CAP))}</pre></div>`;
   wrap.innerHTML = `
     <div class="toolrow">
       <span class="tn">${num}</span>
@@ -774,10 +792,8 @@ function appendToolCard(name, args, resultContent, status, opts = {}) {
       <span class="tc-status"></span>
       <button class="tc-toggle ghost" type="button" title="details">▾</button>
     </div>
-    <div class="tc-body" hidden>
-      ${argsText !== "" ? `<div class="tc-section"><h5>arguments</h5><pre>${esc(truncate(argsBlock, ARGS_CAP))}</pre></div>` : ""}
-      <div class="tc-section tc-result"><h5>${opts.resultLabel ?? "result"}</h5><pre>${status === "run" ? `<span class="dim">running…</span>` : esc(truncate(resultContent, RESULT_CAP))}</pre></div>
-    </div>`;
+    <div class="tc-body" ${expanded ? "" : "hidden"}>${bodyHtml}</div>`;
+  if (expanded) wrap.classList.add("open");
   wrap.querySelector(".tc-toggle").addEventListener("click", () => {
     const body = wrap.querySelector(".tc-body");
     body.hidden = !body.hidden;
@@ -830,6 +846,7 @@ function completeToolCard(entry, content, isError) {
 }
 
 function scrollBottom(force = false) {
+  if (!force && prefs.autoscroll === false) return;
   const t = $("#transcript");
   const near = t.scrollHeight - t.scrollTop - t.clientHeight < 240;
   if (force || near) t.scrollTop = t.scrollHeight;
@@ -977,6 +994,7 @@ function onEvent(sessionId, e) {
       setBusy(false);
       setTurnEndLabel(`✓ done in ${state.lastElapsed ?? ""}${toks}`);
       updateContextGauge();
+      maybeNotify();
       state.pendingEvents.delete(sessionId);
       refreshSessions();
       loadInbox();
@@ -1093,13 +1111,12 @@ function proposalNode(kind, item, act) {
 // status drawer (curator / MCP / cron)
 // ---------------------------------------------------------------------------
 function openDrawer(which) {
-  const drawers = ["inbox", "status", "settings", "session-info"];
+  const drawers = ["inbox", "status", "session-info"];
   for (const id of drawers) {
     $(`#${id}`).hidden = id !== which;
   }
   if (which === "inbox") void loadInbox();
   if (which === "status") void loadStatus();
-  if (which === "settings") void loadSettings();
   if (which === "session-info") void loadSessionInfo();
 }
 
@@ -1166,8 +1183,59 @@ async function loadStatus() {
 }
 
 // ---------------------------------------------------------------------------
-// settings drawer (appearance / providers / stored UI prefs)
+// UI preferences (localStorage "familiar.prefs") + settings modal
 // ---------------------------------------------------------------------------
+const DEFAULT_PREFS = {
+  sendWithEnter: true,      // Enter=send (off: Ctrl/Cmd+Enter sends, Enter=newline)
+  tabModeToggle: true,      // Tab toggles Build/Plan
+  autoscroll: true,         // stick to bottom while streaming
+  toolsExpanded: false,     // tool rows expanded by default
+  notify: false,            // desktop notification when a turn completes
+  notifyOnlyUnfocused: true,
+  fontSize: "m",            // s | m | l | xl
+  width: "normal",          // normal | wide | full
+};
+
+const FONT_SIZES = { s: "13px", m: "14px", l: "15.5px", xl: "17px" };
+const WIDTHS = { normal: "52rem", wide: "68rem", full: "92rem" };
+
+function loadPrefs() {
+  try {
+    return { ...DEFAULT_PREFS, ...(JSON.parse(localStorage.getItem("familiar.prefs") ?? "{}") ?? {}) };
+  } catch {
+    return { ...DEFAULT_PREFS };
+  }
+}
+
+let prefs = loadPrefs();
+
+function savePrefs(patch) {
+  prefs = { ...prefs, ...patch };
+  localStorage.setItem("familiar.prefs", JSON.stringify(prefs));
+  applyUiPrefs();
+}
+
+function applyUiPrefs() {
+  document.documentElement.style.setProperty("--fs", FONT_SIZES[prefs.fontSize] ?? "14px");
+  document.documentElement.style.setProperty("--content-w", WIDTHS[prefs.width] ?? "52rem");
+  document.documentElement.dataset.uiFontSize = prefs.fontSize;
+  document.documentElement.dataset.uiWidth = prefs.width;
+}
+
+/** Desktop notification on turn completion (~OpenCode tui "attention"). */
+function maybeNotify() {
+  if (!prefs.notify) return;
+  if (prefs.notifyOnlyUnfocused && document.hasFocus()) return;
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  try {
+    const title = $("#session-title").textContent;
+    new Notification("familiar — turn completed", {
+      body: title && title !== "no session" ? title : "タスクが完了しました",
+      silent: false,
+    });
+  } catch { /* notification API quirks */ }
+}
+
 function segButton(label, value, active, onClick) {
   const b = document.createElement("button");
   b.type = "button";
@@ -1177,84 +1245,357 @@ function segButton(label, value, active, onClick) {
   return b;
 }
 
-function loadSettings() {
-  const body = $("#settings-body");
-  body.innerHTML = "";
+/** Settings row: label + description on the left, control on the right. */
+function settingRow(label, description, control) {
+  const row = document.createElement("div");
+  row.className = "setting-row";
+  const text = document.createElement("div");
+  text.className = "setting-text";
+  text.innerHTML = `<b>${esc(label)}</b><span>${esc(description)}</span>`;
+  row.appendChild(text);
+  row.appendChild(control);
+  return row;
+}
 
-  // -- appearance: light / dark / system -------------------------------------
-  const appearance = document.createElement("div");
-  appearance.className = "card";
-  appearance.innerHTML = `<h4>appearance</h4>`;
+function toggleSwitch(checked, onChange) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = `switch${checked ? " on" : ""}`;
+  b.setAttribute("role", "switch");
+  b.setAttribute("aria-checked", String(!!checked));
+  b.innerHTML = `<span class="knob"></span>`;
+  b.addEventListener("click", () => onChange(b));
+  return b;
+}
+
+function card(title, note) {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<h4>${esc(title)}</h4>${note ? `<div class="note">${esc(note)}</div>` : ""}`;
+  return card;
+}
+
+// --- modal shell -------------------------------------------------------------
+const SETTINGS_SECTIONS = [
+  { id: "general", label: "一般", icon: "⚙" },
+  { id: "appearance", label: "外観", icon: "◧" },
+  { id: "transcript", label: "トランスクリプト", icon: "▤" },
+  { id: "shortcuts", label: "ショートカット", icon: "⌘" },
+  { id: "providers", label: "プロバイダー", icon: "▣" },
+  { id: "extensions", label: "拡張機能", icon: "↯" },
+  { id: "system", label: "システム", icon: "🖥" },
+];
+let settingsSection = "general";
+
+function openSettingsModal() {
+  closeAllPops();
+  const overlay = $("#settings-overlay");
+  overlay.hidden = false;
+  renderSettingsNav();
+  renderSettingsSection(settingsSection);
+}
+
+function closeSettingsModal() {
+  $("#settings-overlay").hidden = true;
+}
+
+function renderSettingsNav() {
+  const nav = $("#settings-nav");
+  nav.innerHTML = "";
+  for (const s of SETTINGS_SECTIONS) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = `nav-item${s.id === settingsSection ? " active" : ""}`;
+    item.innerHTML = `<span class="ni">${esc(s.icon)}</span>${esc(s.label)}`;
+    item.addEventListener("click", () => {
+      settingsSection = s.id;
+      renderSettingsNav();
+      renderSettingsSection(s.id);
+    });
+    nav.appendChild(item);
+  }
+}
+
+function renderSettingsSection(id) {
+  const content = $("#settings-content");
+  content.innerHTML = "";
+  content.scrollTop = 0;
+  if (id === "general") renderGeneralSection(content);
+  else if (id === "appearance") renderAppearanceSection(content);
+  else if (id === "transcript") renderTranscriptSection(content);
+  else if (id === "shortcuts") renderShortcutsSection(content);
+  else if (id === "providers") void renderProvidersSection(content);
+  else if (id === "extensions") void renderExtensionsSection(content);
+  else if (id === "system") void renderSystemSection(content);
+}
+
+function renderGeneralSection(content) {
+  const c = card("送信と入力");
+  c.appendChild(settingRow(
+    "Enter で送信",
+    "オン: Enter で送信・Shift+Enter で改行 / オフ: Ctrl+Enter で送信・Enter で改行",
+    toggleSwitch(prefs.sendWithEnter, () => {
+      savePrefs({ sendWithEnter: !prefs.sendWithEnter });
+      renderSettingsSection("general");
+    }),
+  ));
+  c.appendChild(settingRow(
+    "Tab でモード切替",
+    "Build / Plan を Tab キーで切り替えます(メッセージ入力中も有効)",
+    toggleSwitch(prefs.tabModeToggle, () => {
+      savePrefs({ tabModeToggle: !prefs.tabModeToggle });
+      renderSettingsSection("general");
+    }),
+  ));
+  content.appendChild(c);
+
+  const n = card("通知", "turn 完了時にデスクトップ通知を送ります(ウィンドウのフォーカス外のみ推奨)");
+  const notifyEnabled = typeof Notification !== "undefined";
+  n.appendChild(settingRow(
+    "デスクトップ通知",
+    notifyEnabled ? "初回有効時に通知の許可を求めます" : "この環境では利用できません",
+    toggleSwitch(prefs.notify, async () => {
+      const next = !prefs.notify;
+      if (next && notifyEnabled) {
+        try {
+          const perm = await Notification.requestPermission();
+          if (perm !== "granted") {
+            toast("notification permission denied", "err");
+            savePrefs({ notify: false });
+            renderSettingsSection("general");
+            return;
+          }
+        } catch { /* env without permission flow */ }
+      }
+      savePrefs({ notify: next });
+      renderSettingsSection("general");
+    }),
+  ));
+  n.appendChild(settingRow(
+    "非フォーカス時のみ通知",
+    "familiar ウィンドウが前面のときは通知しない",
+    toggleSwitch(prefs.notifyOnlyUnfocused, () => {
+      savePrefs({ notifyOnlyUnfocused: !prefs.notifyOnlyUnfocused });
+      renderSettingsSection("general");
+    }),
+  ));
+  content.appendChild(n);
+}
+
+function renderAppearanceSection(content) {
+  const pref = currentModePref();
+  const c = card("配色", "OpenCode のようにシステム / ライト / ダークに従います");
   const seg = document.createElement("div");
   seg.className = "seg-row";
-  const pref = currentModePref();
   for (const [label, value] of [["ライト", "light"], ["ダーク", "dark"], ["システム", "system"]]) {
     seg.appendChild(segButton(label, value, pref === value, () => {
       setModePref(value);
-      loadSettings();
+      renderSettingsSection("appearance");
     }));
   }
-  appearance.appendChild(seg);
+  c.appendChild(seg);
 
-  // -- appearance: theme grid --------------------------------------------------
   const grid = document.createElement("div");
   grid.className = "theme-grid";
   const cur = currentThemeName();
+  const eff = pref === "light" ? "light" : pref === "dark" ? "dark"
+    : (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
   for (const [name, pal] of Object.entries(THEMES)) {
-    const preview = pal[pref === "light" ? "light" : pref === "dark" ? "dark" : (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")];
-    const card = document.createElement("button");
-    card.type = "button";
-    card.className = `theme-card${name === cur ? " selected" : ""}`;
-    card.innerHTML = `
+    const preview = pal[eff] ?? pal.dark;
+    const sel = document.createElement("button");
+    sel.type = "button";
+    sel.className = `theme-card${name === cur ? " selected" : ""}`;
+    sel.innerHTML = `
       <span class="sw" style="background:${preview.bg};border-color:${preview.border}">
         <i style="background:${preview.accent}"></i><i style="background:${preview.ok}"></i><i style="background:${preview.err}"></i>
       </span><span class="tname">${esc(name)}</span>`;
-    card.addEventListener("click", () => {
+    sel.addEventListener("click", () => {
       setThemeName(name);
-      loadSettings();
+      renderSettingsSection("appearance");
       toast(`theme: ${name}`, "ok");
     });
-    grid.appendChild(card);
+    grid.appendChild(sel);
   }
-  appearance.appendChild(grid);
-  body.appendChild(appearance);
+  c.appendChild(grid);
+  content.appendChild(c);
 
-  // -- providers (read-only catalog from the sanitized config) ----------------
-  void (async () => {
-    try {
-      await ensureNsConfig();
-      const card = document.createElement("div");
-      card.className = "card";
-      card.innerHTML = `<h4>providers</h4><div class="note">provider の追加・API key の設定は config.yaml(CLI 側)で行います。ここでは接続状態を表示します。</div>`;
-      const pc = ns.providers;
-      for (const name of Object.keys(pc).sort((a, b) => (a === ns.defaultProvider ? -1 : b === ns.defaultProvider ? 1 : a.localeCompare(b)))) {
-        const conf = pc[name] ?? {};
-        const hint = providerAuthLabel(conf);
-        const row = document.createElement("div");
-        row.className = "pair";
-        row.innerHTML = `<span class="k">${esc(name)}</span><span class="v">${esc(conf.kind ?? "?")}${conf.default_model ? ` · ${esc(conf.default_model)}` : ""}${hint ? ` · ${esc(hint)}` : ""}</span>`;
-        card.appendChild(row);
-      }
-      body.appendChild(card);
-    } catch { /* config.get 失敗時は無音 */ }
-  })();
-
-  // -- stored UI preferences ---------------------------------------------------
-  const data = document.createElement("div");
-  data.className = "card";
-  data.innerHTML = `<h4>UI preferences</h4>`;
-  const resetBtn = document.createElement("button");
-  resetBtn.textContent = "テーマ設定をリセット";
-  resetBtn.className = "ghost small";
-  resetBtn.addEventListener("click", () => {
+  const c2 = card("表示");
+  const sizeSeg = document.createElement("div");
+  sizeSeg.className = "seg-row";
+  for (const [label, value] of [["小", "s"], ["標準", "m"], ["大", "l"], ["特大", "xl"]]) {
+    sizeSeg.appendChild(segButton(label, value, prefs.fontSize === value, () => {
+      savePrefs({ fontSize: value });
+      renderSettingsSection("appearance");
+    }));
+  }
+  c2.appendChild(settingRow("UI フォントサイズ", "インターフェース全体の文字サイズ", sizeSeg));
+  const widthSeg = document.createElement("div");
+  widthSeg.className = "seg-row";
+  for (const [label, value] of [["通常", "normal"], ["広", "wide"], ["全幅", "full"]]) {
+    widthSeg.appendChild(segButton(label, value, prefs.width === value, () => {
+      savePrefs({ width: value });
+      renderSettingsSection("appearance");
+    }));
+  }
+  c2.appendChild(settingRow("トランスクリプト幅", "会話本文の最大幅", widthSeg));
+  const reset = document.createElement("button");
+  reset.textContent = "外観設定をリセット";
+  reset.className = "ghost small";
+  reset.addEventListener("click", () => {
     localStorage.removeItem("familiar.theme");
     localStorage.removeItem("familiar.mode");
     applyTheme();
-    loadSettings();
+    savePrefs({ fontSize: "m", width: "normal" });
+    renderSettingsSection("appearance");
     toast("appearance reset", "ok");
   });
-  data.appendChild(resetBtn);
-  body.appendChild(data);
+  c2.appendChild(reset);
+  content.appendChild(c2);
+}
+
+function renderTranscriptSection(content) {
+  const c = card("トランスクリプト");
+  c.appendChild(settingRow(
+    "自動スクロール",
+    "ストリーミング中に最下部へ追従(上に読み戻している間は停止)",
+    toggleSwitch(prefs.autoscroll, () => {
+      savePrefs({ autoscroll: !prefs.autoscroll });
+      renderSettingsSection("transcript");
+    }),
+  ));
+  c.appendChild(settingRow(
+    "ツール行を既定で展開",
+    "ツール呼び出しの引数と結果を最初から表示します",
+    toggleSwitch(prefs.toolsExpanded, () => {
+      savePrefs({ toolsExpanded: !prefs.toolsExpanded });
+      renderSettingsSection("transcript");
+    }),
+  ));
+  content.appendChild(c);
+}
+
+function renderShortcutsSection(content) {
+  const rows = [
+    ["Tab", "Build / Plan モード切替"],
+    ["Enter", prefs.sendWithEnter ? "メッセージ送信" : "改行(Enter 送信オフ時)"],
+    ["Shift + Enter", "改行"],
+    ["Ctrl + Enter", prefs.sendWithEnter ? "(改行)" : "メッセージ送信"],
+    ["Ctrl + K", "セッション絞り込みへフォーカス"],
+    ["Ctrl + F", "トランスクリプト内検索"],
+    ["Esc", "ーメニュー / 検索 / モーダル / ドロワーを閉じる"],
+  ];
+  const table = document.createElement("div");
+  table.className = "card";
+  table.innerHTML = `<h4>ショートカット</h4>`;
+  for (const [key, desc] of rows) {
+    const row = document.createElement("div");
+    row.className = "kbd-row";
+    row.innerHTML = `<kbd>${esc(key)}</kbd><span>${esc(desc)}</span>`;
+    table.appendChild(row);
+  }
+  content.appendChild(table);
+}
+
+async function renderProvidersSection(content) {
+  const c = card("接続済みプロバイダー", "provider の追加・API key の設定は config.yaml(CLI 側)で行います。ここでは接続状態を表示します。");
+  content.appendChild(c);
+  try {
+    await ensureNsConfig();
+    for (const name of Object.keys(ns.providers).sort((a, b) => (a === ns.defaultProvider ? -1 : b === ns.defaultProvider ? 1 : a.localeCompare(b)))) {
+      const conf = ns.providers[name] ?? {};
+      const row = document.createElement("div");
+      row.className = "pair prowp";
+      row.innerHTML = `<span class="pname">${esc(name)}<small class="pdefault">${name === ns.defaultProvider ? "既定" : ""}</small></span>` +
+        `<span class="pinfo">${esc(conf.kind ?? "?")}${conf.default_model ? ` · ${esc(conf.default_model)}` : ""}${providerAuthLabel(conf) ? ` · ${esc(providerAuthLabel(conf))}` : ""}</span>`;
+      c.appendChild(row);
+    }
+  } catch (err) {
+    const row = document.createElement("div");
+    row.className = "status-err";
+    row.textContent = err.message;
+    c.appendChild(row);
+  }
+}
+
+async function renderExtensionsSection(content) {
+  // MCP servers
+  const mcpCard = card("MCP サーバー", "mcp.status より(n. = そのサーバーの公開ツール数)。設定は config.yaml の mcp.servers です。");
+  content.appendChild(mcpCard);
+  try {
+    const res = await rpc("mcp.status");
+    const servers = res.servers ?? [];
+    if (servers.length === 0) {
+      mcpCard.appendChild(pairRow("—", "no servers configured"));
+    }
+    for (const sv of servers) {
+      mcpCard.appendChild(pairRow(sv.name ?? "(unknown)", `${sv.state ?? "?"} · ${(sv.tools ?? []).length} tools${sv.error ? ` · ${sv.error}` : ""}`));
+    }
+  } catch (err) {
+    const row = document.createElement("div");
+    row.className = "status-err";
+    row.textContent = err.message;
+    mcpCard.appendChild(row);
+  }
+  // LSP servers (config.yaml lsp.servers)
+  const lspCard = card("LSP サーバー", "lsp_diagnostics が使用する言語サーバー。設定は config.yaml の lsp.servers です。");
+  content.appendChild(lspCard);
+  try {
+    const cfg = await rpc("config.get");
+    const lsp = cfg.lsp?.servers;
+    const names = lsp && typeof lsp === "object" ? Object.keys(lsp) : [];
+    if (names.length === 0) {
+      lspCard.appendChild(pairRow("—", "no servers configured"));
+    }
+    for (const name of names) {
+      const conf = lsp[name] ?? {};
+      lspCard.appendChild(pairRow(
+        name,
+        `${conf.disabled ? "disabled" : "enabled"} · ${Array.isArray(conf.extensions) ? conf.extensions.join(", ") : "?"}`,
+      ));
+    }
+  } catch (err) {
+    const row = document.createElement("div");
+    row.className = "status-err";
+    row.textContent = err.message;
+    lspCard.appendChild(row);
+  }
+}
+
+function pairRow(k, v) {
+  const row = document.createElement("div");
+  row.className = "pair";
+  row.innerHTML = `<span class="k">${esc(String(k))}</span><span class="v">${esc(String(v))}</span>`;
+  return row;
+}
+
+async function renderSystemSection(content) {
+  const hint = card("システム", "カレーター(自己改善 cron)とスケジューラの現在状態。詳細は status ドロワー、設定は config.yaml です。");
+  content.appendChild(hint);
+  try {
+    const res = await rpc("curator.status");
+    const c = res.curator ?? {};
+    content.appendChild(sectionCard("curator", [
+      ["state", `${c.enabled ? "enabled" : "disabled"}${c.paused ? " · paused" : ""}`],
+      ["last run", `${fmtTime(c.lastRunAt)}${c.lastRunAt ? ` (${relTime(c.lastRunAt)})` : ""}`],
+      ["next due", fmtTime(c.nextDueAt)],
+      ["stale skills", (c.stale ?? []).join(", ") || "—"],
+      ["archived", `${(c.archived ?? []).length} (snapshots: ${c.snapshots ?? 0})`],
+      ["consolidation", c.consolidate ? "on" : "off"],
+    ]));
+  } catch (err) {
+    content.appendChild(sectionError("curator", err));
+  }
+  try {
+    const res = await rpc("cron.status");
+    const jobs = res.jobs ?? [];
+    content.appendChild(sectionCard(
+      "cron scheduler",
+      jobs.length > 0 ? jobs.map((j) => [j.name ?? "(unnamed)", j.enabled === false ? "disabled" : `every ${j.every_minutes} min`]) : [["—", "no jobs"]],
+      res.started ? "running" : "stopped",
+    ));
+  } catch (err) {
+    content.appendChild(sectionError("cron scheduler", err));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1611,6 +1952,7 @@ function insertIntoComposer(text) {
 // ---------------------------------------------------------------------------
 function boot() {
   applyTheme();
+  applyUiPrefs();
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
     if (currentModePref() === "system") applyTheme();
   });
@@ -1657,9 +1999,10 @@ function boot() {
   $("#search-close").addEventListener("click", () => toggleSearch(false));
   $("#transcript-search").addEventListener("input", applyTranscriptFilter);
   $("#ctx-gauge").addEventListener("click", () => openDrawer("session-info"));
-  $("#open-settings").addEventListener("click", () => openDrawer("settings"));
-  $("#close-settings").addEventListener("click", () => {
-    $("#settings").hidden = true;
+  $("#open-settings").addEventListener("click", () => openSettingsModal());
+  $("#close-settings").addEventListener("click", () => closeSettingsModal());
+  $("#settings-overlay").addEventListener("click", (ev) => {
+    if (ev.target === ev.currentTarget) closeSettingsModal();
   });
   $("#close-info").addEventListener("click", () => {
     $("#session-info").hidden = true;
@@ -1712,7 +2055,10 @@ function boot() {
   });
   const input = $("#input");
   input.addEventListener("keydown", (ev) => {
-    if (ev.key === "Enter" && !ev.shiftKey) {
+    const wantsSend = prefs.sendWithEnter
+      ? ev.key === "Enter" && !ev.shiftKey
+      : ev.key === "Enter" && (ev.ctrlKey || ev.metaKey);
+    if (wantsSend) {
       ev.preventDefault();
       void send();
     }
@@ -1729,6 +2075,17 @@ function boot() {
   });
 
   document.addEventListener("keydown", (ev) => {
+    // Tab toggles Build/Plan (skips while renaming or searching)
+    if (ev.key === "Tab" && prefs.tabModeToggle) {
+      const t = ev.target;
+      const editable = t instanceof HTMLElement &&
+        (t.tagName === "SELECT" || (t.tagName === "INPUT" && t.id !== "input"));
+      if (!editable) {
+        ev.preventDefault();
+        setMode(state.mode === "plan" ? "build" : "plan");
+        return;
+      }
+    }
     if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "k") {
       ev.preventDefault();
       $("#session-filter").focus();
@@ -1740,6 +2097,10 @@ function boot() {
       return;
     }
     if (ev.key === "Escape") {
+      if (!$("#settings-overlay").hidden) {
+        closeSettingsModal();
+        return;
+      }
       hideCtxMenu();
       closeAllPops();
       if (!$("#search-bar").hidden) {
@@ -1752,11 +2113,9 @@ function boot() {
       }
       const status = $("#status");
       const inbox = $("#inbox");
-      const settings = $("#settings");
       const info = $("#session-info");
       if (!status.hidden) openDrawer("none");
       else if (!inbox.hidden) openDrawer("none");
-      else if (!settings.hidden) openDrawer("none");
       else if (!info.hidden) openDrawer("none");
     }
   });

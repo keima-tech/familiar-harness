@@ -105,7 +105,7 @@ function createWindow(url) {
     height: 840,
     minWidth: 900,
     minHeight: 600,
-    title: "Familiar",
+    title: "Familiar Harness",
     backgroundColor: "#0f1117",
     webPreferences: {
       contextIsolation: true,

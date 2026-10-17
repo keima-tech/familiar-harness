@@ -19,7 +19,7 @@
   },
   "build": {
     "appId": "dev.familiar.harness",
-    "productName": "Familiar",
+    "productName": "Familiar Harness",
     "directories": { "output": "release" },
   "artifactName": "familiar-${version}-${os}-${arch}.${ext}",
     "files": [

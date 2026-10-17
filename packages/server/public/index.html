@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Familiar</title>
+  <title>Familiar Harness</title>
   <link rel="stylesheet" href="/app.css" />
 </head>
 <body>
   <div id="app">
     <aside id="sidebar">
       <div class="side-head">
-        <span class="logo">◍ familiar</span>
+        <span class="logo">◍ Familiar Harness</span>
         <button id="new-session" title="新規セッション" data-i18n-title="side.newSession">＋</button>
       </div>
       <div id="session-search" class="search-row">
@@ -24,14 +24,14 @@
         </div>
         <div class="field-row">
           <label for="ns-model" data-i18n="ns.model">モデル</label>
-          <input id="ns-model" list="ns-models" spellcheck="false" placeholder="プロバイダーの既定" data-i18n-ph="ns.modelPh" />
-          <datalist id="ns-models"></datalist>
+          <select id="ns-model"></select>
         </div>
         <div class="field-row">
           <label for="ns-profile" data-i18n="ns.profile">プロファイル</label>
           <select id="ns-profile"></select>
         </div>
         <div class="panel-row">
+          <button id="ns-settings" class="ghost link-left" type="button" data-i18n="mp.settings">プロバイダー設定…</button>
           <button id="ns-create" data-i18n="ns.create">作成</button>
           <button id="ns-cancel" class="ghost" data-i18n="ns.cancel">キャンセル</button>
         </div>
@@ -100,10 +100,10 @@
             </div>
           </div>
           <div class="menu-wrap">
-            <button id="mode-chip" type="button" title="エージェントモード" data-i18n-title="chip.mode">構築 ▾</button>
+            <button id="mode-chip" type="button" title="エージェントモード" data-i18n-title="chip.mode">Build ▾</button>
             <div id="mode-pop" class="pop up" hidden>
-              <button type="button" data-mode="build"><b data-i18n="mode.build">構築</b><small data-i18n="mode.buildDesc">全ツール使用可</small></button>
-              <button type="button" data-mode="plan"><b data-i18n="mode.plan">計画</b><small data-i18n="mode.planDesc">読み取り専用ツール</small></button>
+              <button type="button" data-mode="build"><b data-i18n="mode.build">Build</b><small data-i18n="mode.buildDesc">全ツール使用可</small></button>
+              <button type="button" data-mode="plan"><b data-i18n="mode.plan">Plan</b><small data-i18n="mode.planDesc">読み取り専用ツール</small></button>
             </div>
           </div>
           <div class="menu-wrap">
@@ -115,10 +115,10 @@
               </div>
               <div class="field-row">
                 <label for="mp-model" data-i18n="ns.model">モデル</label>
-                <input id="mp-model" list="mp-models" spellcheck="false" placeholder="プロバイダーの既定" data-i18n-ph="ns.modelPh" />
-                <datalist id="mp-models"></datalist>
+                <select id="mp-model"></select>
               </div>
               <div class="pop-actions">
+                <button id="mp-settings" type="button" class="ghost link-left" data-i18n="mp.settings">プロバイダー設定…</button>
                 <button id="mp-apply" type="button" data-i18n="mp.apply">適用</button>
                 <button id="mp-cancel" type="button" class="ghost" data-i18n="mp.cancel">キャンセル</button>
               </div>

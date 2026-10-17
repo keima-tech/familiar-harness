@@ -72,8 +72,6 @@ const STR = {
     "ns.modelPh": "プロバイダーの既定",
     "ns.create": "作成",
     "ns.cancel": "キャンセル",
-    "ns.modelHint": "既定: {0}",
-    "ns.modelName": "モデル名",
     "none": "(なし)",
     "top.noSession": "セッションなし",
     "top.gaugeTitle": "コンテキスト使用量 — クリックでセッション情報",
@@ -94,9 +92,9 @@ const STR = {
     "plus.shell": "❯ シェルコマンド",
     "chip.mode": "エージェントモード",
     "chip.model": "セッションのモデル",
-    "mode.build": "構築",
+    "mode.build": "Build",
     "mode.buildDesc": "全ツール使用可",
-    "mode.plan": "計画",
+    "mode.plan": "Plan",
     "mode.planDesc": "読み取り専用ツール",
     "chip.modelLabel": "モデル",
     "mp.apply": "適用",
@@ -198,7 +196,7 @@ const STR = {
     "set.enterSend": "Enter で送信",
     "set.enterSendDesc": "オン: Enter で送信・Shift+Enter で改行 / オフ: Ctrl+Enter で送信・Enter で改行",
     "set.tabToggle": "Tab でモード切替",
-    "set.tabToggleDesc": "構築 / 計画 を Tab キーで切り替えます(メッセージ入力中も有効)",
+    "set.tabToggleDesc": "Build / Plan を Tab キーで切り替えます(メッセージ入力中も有効)",
     "set.notify": "通知",
     "set.notifyDesc": "turn 完了時にデスクトップ通知を送ります(推奨: ウィンドウが非フォーカス時のみ)",
     "set.notifyTitle": "デスクトップ通知",
@@ -233,7 +231,7 @@ const STR = {
     "set.toolsExpanded": "ツール行を既定で展開",
     "set.toolsExpandedDesc": "ツール呼び出しの引数と結果を最初から表示します",
     "set.shortcutsSec": "ショートカット",
-    "sc.tab": "構築 / 計画 を切替",
+    "sc.tab": "Build / Plan を切替",
     "sc.enter": "メッセージ送信",
     "sc.enterNL": "改行(Enter 送信オフ時)",
     "sc.shiftEnter": "改行",
@@ -267,6 +265,8 @@ const STR = {
     "prov.probeOk": "{0} 件のモデル",
     "prov.probePicked": "選択: {0}",
     "prov.probeMock": "mock はモデル一覧の取得が不要です",
+    "mp.settings": "プロバイダー設定…",
+    "ns.modelDefault": "プロバイダーの既定",
     "prov.badUrl": "エンドポイントは http:// か https:// で始めてください",
     "prov.default": "既定",
     "prov.keyOk": "キー ✓",
@@ -292,8 +292,6 @@ const STR = {
     "ns.modelPh": "provider default",
     "ns.create": "Create",
     "ns.cancel": "Cancel",
-    "ns.modelHint": "default: {0}",
-    "ns.modelName": "model name",
     "none": "(none)",
     "top.noSession": "no session",
     "top.gaugeTitle": "context usage — click for session info",
@@ -487,6 +485,8 @@ const STR = {
     "prov.probeOk": "{0} model(s)",
     "prov.probePicked": "selected: {0}",
     "prov.probeMock": "mock needs no model probe",
+    "mp.settings": "Provider settings…",
+    "ns.modelDefault": "provider default",
     "prov.badUrl": "endpoint must start with http:// or https://",
     "prov.default": "default",
     "prov.keyOk": "key ✓",
@@ -1839,7 +1839,8 @@ const SETTINGS_SECTIONS = [
 ];
 let settingsSection = "general";
 
-function openSettingsModal() {
+function openSettingsModal(section) {
+  if (section) settingsSection = section;
   closeAllPops();
   const overlay = $("#settings-overlay");
   overlay.hidden = false;
@@ -2518,24 +2519,38 @@ async function openNewSessionPanel() {
   await refreshModelList();
 }
 
-async function refreshModelList() {
-  const provider = $("#ns-provider").value;
-  const pc = ns.providers[provider] ?? {};
-  const hint = pc.default_model ?? ns.defaultModel;
-  $("#ns-model").placeholder = hint ? t("ns.modelHint", hint) : t("ns.modelName");
-  $("#ns-auth").textContent = `${provider} · ${pc.kind ?? "?"}${providerAuthLabel(pc) ? " · " + providerAuthLabel(pc) : ""}`;
-  $("#ns-models").innerHTML = "";
+/** Fill a model <select> from models.list, keeping `want` selectable. */
+async function fillModelSelect(sel, provider, want) {
+  sel.innerHTML = "";
+  const def = document.createElement("option");
+  def.value = "";
+  def.textContent = t("ns.modelDefault");
+  sel.appendChild(def);
   try {
     const res = await rpc("models.list", { provider });
     for (const m of res.models ?? []) {
       const opt = document.createElement("option");
       opt.value = m.id;
-      if (m.contextTokens) opt.label = `${m.id} (${Math.round(m.contextTokens / 1000)}k)`;
-      $("#ns-models").appendChild(opt);
+      opt.textContent = m.contextTokens ? `${m.id} (${Math.round(m.contextTokens / 1000)}k)` : m.id;
+      sel.appendChild(opt);
     }
   } catch {
-    /* provider unreachable — free-text entry stays available */
+    /* provider unreachable — only the default option remains */
   }
+  if (want && ![...sel.options].some((o) => o.value === want)) {
+    const opt = document.createElement("option");
+    opt.value = want;
+    opt.textContent = want;
+    sel.appendChild(opt);
+  }
+  sel.value = want ?? "";
+}
+
+async function refreshModelList() {
+  const provider = $("#ns-provider").value;
+  const pc = ns.providers[provider] ?? {};
+  $("#ns-auth").textContent = `${provider} · ${pc.kind ?? "?"}${providerAuthLabel(pc) ? " · " + providerAuthLabel(pc) : ""}`;
+  await fillModelSelect($("#ns-model"), provider, "");
 }
 
 // ---------------------------------------------------------------------------
@@ -2578,28 +2593,13 @@ async function openModelPopover() {
   }
   const current = state.draft.provider || state.currentSession?.provider || ns.defaultProvider || names[0];
   sel.value = names.includes(current) ? current : names[0] ?? "";
-  $("#mp-model").value = state.draft.model || state.currentSession?.model || "";
   pop.hidden = false;
-  await refreshModelPopover();
+  await refreshModelPopover(state.draft.model || state.currentSession?.model || "");
 }
 
-async function refreshModelPopover() {
+async function refreshModelPopover(want = "") {
   const provider = $("#mp-provider").value;
-  const pc = ns.providers[provider] ?? {};
-  const hint = pc.default_model ?? ns.defaultModel;
-  $("#mp-model").placeholder = hint ? t("ns.modelHint", hint) : t("ns.modelName");
-  $("#mp-models").innerHTML = "";
-  try {
-    const res = await rpc("models.list", { provider });
-    for (const m of res.models ?? []) {
-      const opt = document.createElement("option");
-      opt.value = m.id;
-      if (m.contextTokens) opt.label = `${m.id} (${Math.round(m.contextTokens / 1000)}k)`;
-      $("#mp-models").appendChild(opt);
-    }
-  } catch {
-    /* free-text stays available */
-  }
+  await fillModelSelect($("#mp-model"), provider, want);
 }
 
 async function applyModelPopover() {
@@ -2822,7 +2822,9 @@ function boot() {
     setMode(btn.dataset.mode);
   });
   $("#model-chip").addEventListener("click", () => void openModelPopover());
-  $("#mp-provider").addEventListener("change", () => void refreshModelPopover());
+  $("#mp-provider").addEventListener("change", () => void refreshModelPopover(""));
+  $("#mp-settings").addEventListener("click", () => openSettingsModal("providers"));
+  $("#ns-settings").addEventListener("click", () => openSettingsModal("providers"));
   $("#mp-apply").addEventListener("click", () => void applyModelPopover());
   $("#mp-cancel").addEventListener("click", () => {
     $("#model-pop").hidden = true;

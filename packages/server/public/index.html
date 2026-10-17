@@ -13,6 +13,9 @@
         <span class="logo">◍ familiar</span>
         <button id="new-session" title="new session">＋</button>
       </div>
+      <div id="session-search" class="search-row">
+        <input id="session-filter" type="search" placeholder="filter sessions…" autocomplete="off" spellcheck="false" />
+      </div>
       <div id="new-session-panel" hidden>
         <div class="field-row">
           <label for="ns-provider">provider</label>
@@ -46,7 +49,7 @@
           <div id="session-title" class="title">no session</div>
           <div id="session-meta" class="meta"></div>
         </div>
-        <div id="turn-state" class="state"></div>
+        <div id="turn-state" class="state"><span id="turn-spinner" class="spinner" hidden></span><span id="turn-label"></span></div>
       </header>
 
       <section id="transcript"></section>
@@ -54,7 +57,7 @@
       <div id="approval-dock"></div>
 
       <form id="composer">
-        <textarea id="input" rows="2" placeholder="message… (Enter to send / Shift+Enter newline)"></textarea>
+        <textarea id="input" rows="1" placeholder="message… (Enter to send / Shift+Enter newline)"></textarea>
         <button id="send" type="submit">Send</button>
       </form>
     </main>
@@ -75,6 +78,7 @@
       <div id="status-body"></div>
     </aside>
   </div>
+  <div id="toasts"></div>
   <script src="/app.js"></script>
 </body>
 </html>

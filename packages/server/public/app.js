@@ -1434,7 +1434,10 @@ function liveBubble(sessionId) {
     caret.className = "caret";
     bubble.appendChild(contentEl);
     bubble.appendChild(caret);
-    entry = { bubble, contentEl, text: "", reasoningEl: null, reasoning: "" };
+    // the previous step's caret must stop blinking once a new bubble starts
+    const prev = state.turnBubbles[state.turnBubbles.length - 1];
+    if (prev?.caret) prev.caret.remove();
+    entry = { bubble, contentEl, caret, text: "", reasoningEl: null, reasoning: "" };
     state.pendingEvents.set(sessionId, entry);
     state.turnBubbles.push(entry);
   }
@@ -1588,8 +1591,11 @@ function onEvent(sessionId, e) {
       const toks = u.promptTokens !== undefined
         ? ` · ↑${u.promptTokens} ↓${u.completionTokens ?? 0} tok${tps ? ` (${tps} tok/s)` : ""}` : "";
       setTurnEndLabel(t("turn.done", `${state.lastElapsed ?? ""}${toks}`));
-      // collapse thinking blocks; stamp copy/meta footer on the last bubble
-      for (const b of state.turnBubbles) if (b.thinkingEl) b.thinkingEl.open = false;
+      // collapse thinking blocks, stop carets; footer on the last bubble
+      for (const b of state.turnBubbles) {
+        if (b.thinkingEl) b.thinkingEl.open = false;
+        if (b.caret) b.caret.remove();
+      }
       const lastBubble = state.turnBubbles[state.turnBubbles.length - 1];
       if (lastBubble) {
         const s = state.currentSession;
@@ -1610,6 +1616,8 @@ function onEvent(sessionId, e) {
     }
     case "turn.error":
       setBusy(false);
+      for (const b of state.turnBubbles) if (b.caret) b.caret.remove();
+      state.turnBubbles = [];
       appendMessage("assistant", `⚠ ${e.error}`, null);
       break;
     case "improvement.staged":
@@ -2688,7 +2696,6 @@ async function openModelPopover() {
     box.className = "mp-grp";
     box.innerHTML = `<div class="mp-group">${esc(name)}</div>`;
     list.appendChild(box);
-    if (providerHasDefaultModel(ns.providers[name])) mpRow(box, name, "", cur);
     // progressive: fill the group as soon as this provider answers
     rpc("models.list", { provider: name })
       .then((res) => {

@@ -1,6 +1,8 @@
-/* Familiar web UI (α, M4) — vanilla JS, no build step.
+/* Familiar web UI (v1.0, M6) — vanilla JS, no build step.
  * Talks to the same RPC surface as the CLI/desktop:
  *   POST /rpc  JSON-RPC         WS /ws  shared event stream
+ * v1.0 additions: per-session delete, provider/model/profile picker for new
+ * sessions, and a system status drawer (curator / MCP / cron).
  */
 "use strict";
 
@@ -26,6 +28,11 @@ function esc(text) {
   return div.innerHTML;
 }
 
+function fmtTime(ts) {
+  if (!ts) return "—";
+  return new Date(ts).toISOString().slice(0, 16).replace("T", " ");
+}
+
 // ---------------------------------------------------------------------------
 // app state
 // ---------------------------------------------------------------------------
@@ -34,6 +41,15 @@ const state = {
   sessionId: null,
   busy: false,
   pendingEvents: new Map(), // sessionId -> partial assistant render state
+};
+
+// new-session picker cache (filled once from config.get)
+const ns = {
+  providers: {},
+  profiles: {},
+  defaultProvider: null,
+  defaultModel: null,
+  loaded: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -47,15 +63,32 @@ async function refreshSessions() {
     const li = document.createElement("li");
     li.dataset.id = s.id;
     const title = s.title || s.id.slice(0, 8);
-    const when = new Date(s.updatedAt).toISOString().slice(0, 16).replace("T", " ");
-    li.innerHTML = `<span>${esc(title)}</span><span class="when">${esc(when)} · ${esc(s.provider)}</span>`;
+    const model = s.model ? "/" + s.model : "";
+    const when = fmtTime(s.updatedAt);
+    li.innerHTML =
+      `<div class="row-line"><span>${esc(title)}</span>` +
+      `<button class="del" data-id="${esc(s.id)}" title="delete session">✕</button></div>` +
+      `<span class="when">${esc(when)} · ${esc(s.provider)}${esc(model)}</span>`;
     if (s.id === state.sessionId) li.classList.add("active");
-    li.addEventListener("click", () => openSession(s.id));
     ul.appendChild(li);
   }
   if (!state.sessionId && state.sessions.length > 0) {
     await openSession(state.sessions[0].id);
   }
+}
+
+ulSessionsClick();
+
+function ulSessionsClick() {
+  $("#sessions").addEventListener("click", (ev) => {
+    const del = ev.target.closest("button.del");
+    if (del) {
+      void deleteSession(del.dataset.id);
+      return;
+    }
+    const li = ev.target.closest("li");
+    if (li?.dataset.id) void openSession(li.dataset.id);
+  });
 }
 
 async function openSession(id) {
@@ -68,7 +101,128 @@ async function openSession(id) {
   const data = await rpc("session.get", { id });
   const s = data.session;
   $("#session-title").textContent = s.title || s.id.slice(0, 8);
+  const bits = [s.provider];
+  if (s.model) bits.push(s.model);
+  if (s.profile) bits.push(`profile: ${s.profile}`);
+  $("#session-meta").textContent = bits.join(" · ");
   renderTranscript(data.messages ?? []);
+}
+
+async function deleteSession(id) {
+  const s = state.sessions.find((x) => x.id === id);
+  const label = s?.title || id.slice(0, 8);
+  if (!window.confirm(`delete session "${label}"? this cannot be undone`)) return;
+  try {
+    await rpc("session.delete", { id });
+  } catch (err) {
+    appendMessage("assistant", `⚠ delete failed: ${err.message}`, null);
+    return;
+  }
+  if (state.sessionId === id) {
+    state.sessionId = null;
+    $("#session-title").textContent = "no session";
+    $("#session-meta").textContent = "";
+    $("#transcript").innerHTML = "";
+  }
+  await refreshSessions();
+}
+
+// ---------------------------------------------------------------------------
+// new session picker (provider / model / profile)
+// ---------------------------------------------------------------------------
+function providerAuthLabel(pc) {
+  if (!pc?.auth || pc.auth.source === "none") return "";
+  return pc.auth.resolved ? "key ✓" : `missing ${pc.auth.source}`;
+}
+
+async function openNewSessionPanel() {
+  const panel = $("#new-session-panel");
+  if (!panel.hidden) {
+    panel.hidden = true;
+    return;
+  }
+  if (!ns.loaded) {
+    try {
+      const cfg = await rpc("config.get");
+      ns.providers = cfg.providers ?? {};
+      ns.profiles = cfg.profiles ?? {};
+      ns.defaultProvider = cfg.default_provider ?? "mock";
+      ns.defaultModel = cfg.default_model;
+      ns.loaded = true;
+    } catch (err) {
+      panel.hidden = true;
+      appendMessage("assistant", `⚠ config unavailable, creating a default session: ${err.message}`, null);
+      void newSession(); // legacy fallback
+      return;
+    }
+  }
+  const selProvider = $("#ns-provider");
+  selProvider.innerHTML = "";
+  const names = Object.keys(ns.providers).sort();
+  names.sort((a, b) => (a === ns.defaultProvider ? -1 : b === ns.defaultProvider ? 1 : a.localeCompare(b)));
+  for (const name of names) {
+    const pc = ns.providers[name] ?? {};
+    const hint = providerAuthLabel(pc);
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = hint ? `${name} (${hint})` : name;
+    selProvider.appendChild(opt);
+  }
+  selProvider.value = names.includes(ns.defaultProvider) ? ns.defaultProvider : names[0] ?? "";
+  const selProfile = $("#ns-profile");
+  selProfile.innerHTML = "";
+  const empty = document.createElement("option");
+  empty.value = "";
+  empty.textContent = "(none)";
+  selProfile.appendChild(empty);
+  for (const name of Object.keys(ns.profiles).sort()) {
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = name;
+    selProfile.appendChild(opt);
+  }
+  $("#ns-model").value = "";
+  panel.hidden = false;
+  await refreshModelList();
+}
+
+async function refreshModelList() {
+  const provider = $("#ns-provider").value;
+  const pc = ns.providers[provider] ?? {};
+  const hint = pc.default_model ?? ns.defaultModel;
+  $("#ns-model").placeholder = hint ? `default: ${hint}` : "model name";
+  $("#ns-auth").textContent = `${provider} · ${pc.kind ?? "?"}${providerAuthLabel(pc) ? " · " + providerAuthLabel(pc) : ""}`;
+  $("#ns-models").innerHTML = "";
+  try {
+    const res = await rpc("models.list", { provider });
+    for (const m of res.models ?? []) {
+      const opt = document.createElement("option");
+      opt.value = m.id;
+      if (m.contextTokens) opt.label = `${m.id} (${Math.round(m.contextTokens / 1000)}k)`;
+      $("#ns-models").appendChild(opt);
+    }
+  } catch {
+    /* provider unreachable — free-text entry stays available */
+  }
+}
+
+async function createFromPanel() {
+  const provider = $("#ns-provider").value || ns.defaultProvider || "mock";
+  const model = $("#ns-model").value.trim();
+  const profile = $("#ns-profile").value;
+  const params = { provider };
+  if (model !== "") params.model = model;
+  if (profile !== "") params.profile = profile;
+  try {
+    const s = await rpc("session.create", params);
+    $("#new-session-panel").hidden = true;
+    state.sessionId = s.id;
+    await refreshSessions();
+    await openSession(s.id);
+    $("#input").focus();
+  } catch (err) {
+    appendMessage("assistant", `⚠ session.create failed: ${err.message}`, null);
+  }
 }
 
 async function newSession() {
@@ -307,6 +461,80 @@ function proposalNode(kind, item, act) {
 }
 
 // ---------------------------------------------------------------------------
+// status drawer (curator / MCP / cron)
+// ---------------------------------------------------------------------------
+function openDrawer(which) {
+  const inbox = $("#inbox");
+  const status = $("#status");
+  inbox.hidden = which !== "inbox";
+  status.hidden = which !== "status";
+  if (which === "inbox") void loadInbox();
+  if (which === "status") void loadStatus();
+}
+
+function sectionCard(title, rows, note) {
+  const card = document.createElement("div");
+  card.className = "card";
+  const head = note ? `${esc(title)} <span class="note">${esc(note)}</span>` : esc(title);
+  card.innerHTML = `<h4>${head}</h4>`;
+  for (const [k, v] of rows) {
+    const pair = document.createElement("div");
+    pair.className = "pair";
+    pair.innerHTML = `<span class="k">${esc(k)}</span><span class="v">${esc(v)}</span>`;
+    card.appendChild(pair);
+  }
+  return card;
+}
+
+function sectionError(title, err) {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<h4>${esc(title)}</h4><div class="status-err">${esc(err.message)}</div>`;
+  return card;
+}
+
+async function loadStatus() {
+  const body = $("#status-body");
+  body.innerHTML = "";
+  try {
+    const res = await rpc("curator.status");
+    const c = res.curator ?? {};
+    body.appendChild(sectionCard("curator", [
+      ["state", `${c.enabled ? "enabled" : "disabled"}${c.paused ? " · paused" : ""}`],
+      ["last run", fmtTime(c.lastRunAt)],
+      ["next due", fmtTime(c.nextDueAt)],
+      ["stale skills", (c.stale ?? []).join(", ") || "—"],
+      ["archived", `${(c.archived ?? []).length} (snapshots: ${c.snapshots ?? 0})`],
+      ["consolidation", c.consolidate ? "on" : "off"],
+    ]));
+  } catch (err) {
+    body.appendChild(sectionError("curator", err));
+  }
+  try {
+    const res = await rpc("mcp.status");
+    const servers = res.servers ?? [];
+    const rows = servers.map((sv) => [
+      sv.name ?? "(unknown)",
+      `${sv.state ?? "?"} · ${(sv.tools ?? []).length} tools${sv.error ? " · " + sv.error : ""}`,
+    ]);
+    body.appendChild(sectionCard("mcp servers", rows.length > 0 ? rows : [["—", "no servers configured"]]));
+  } catch (err) {
+    body.appendChild(sectionError("mcp servers", err));
+  }
+  try {
+    const res = await rpc("cron.status");
+    const jobs = res.jobs ?? [];
+    const rows = jobs.map((j) => [
+      j.name ?? "(unnamed)",
+      j.enabled === false ? "disabled" : `every ${j.every_minutes} min`,
+    ]);
+    body.appendChild(sectionCard("cron scheduler", rows.length > 0 ? rows : [["—", "no jobs"]], res.started ? "running" : "stopped"));
+  } catch (err) {
+    body.appendChild(sectionError("cron scheduler", err));
+  }
+}
+
+// ---------------------------------------------------------------------------
 // composer
 // ---------------------------------------------------------------------------
 async function send() {
@@ -335,7 +563,12 @@ async function send() {
 // boot
 // ---------------------------------------------------------------------------
 function boot() {
-  $("#new-session").addEventListener("click", newSession);
+  $("#new-session").addEventListener("click", () => void openNewSessionPanel());
+  $("#ns-cancel").addEventListener("click", () => {
+    $("#new-session-panel").hidden = true;
+  });
+  $("#ns-create").addEventListener("click", () => void createFromPanel());
+  $("#ns-provider").addEventListener("change", () => void refreshModelList());
   $("#composer").addEventListener("submit", (ev) => {
     ev.preventDefault();
     void send();
@@ -346,13 +579,13 @@ function boot() {
       void send();
     }
   });
-  $("#toggle-inbox").addEventListener("click", async () => {
-    const box = $("#inbox");
-    box.hidden = !box.hidden;
-    await loadInbox();
-  });
+  $("#toggle-inbox").addEventListener("click", () => openDrawer("inbox"));
   $("#close-inbox").addEventListener("click", () => {
     $("#inbox").hidden = true;
+  });
+  $("#toggle-status").addEventListener("click", () => openDrawer("status"));
+  $("#close-status").addEventListener("click", () => {
+    $("#status").hidden = true;
   });
   void refreshSessions();
   void loadInbox();

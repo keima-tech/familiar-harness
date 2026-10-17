@@ -13,15 +13,39 @@
         <span class="logo">◍ familiar</span>
         <button id="new-session" title="new session">＋</button>
       </div>
+      <div id="new-session-panel" hidden>
+        <div class="field-row">
+          <label for="ns-provider">provider</label>
+          <select id="ns-provider"></select>
+          <span id="ns-auth" class="hint"></span>
+        </div>
+        <div class="field-row">
+          <label for="ns-model">model</label>
+          <input id="ns-model" list="ns-models" spellcheck="false" placeholder="provider default" />
+          <datalist id="ns-models"></datalist>
+        </div>
+        <div class="field-row">
+          <label for="ns-profile">profile</label>
+          <select id="ns-profile"></select>
+        </div>
+        <div class="panel-row">
+          <button id="ns-create">Create</button>
+          <button id="ns-cancel" class="ghost">Cancel</button>
+        </div>
+      </div>
       <ul id="sessions"></ul>
       <div class="side-foot">
-        <button id="toggle-inbox" class="ghost">✎ approval inbox <span id="inbox-count" class="badge">0</span></button>
+        <button id="toggle-inbox" class="ghost">✎ inbox <span id="inbox-count" class="badge">0</span></button>
+        <button id="toggle-status" class="ghost">⚙ status</button>
       </div>
     </aside>
 
     <main id="main">
       <header id="topbar">
-        <div id="session-title" class="title">no session</div>
+        <div class="title-wrap">
+          <div id="session-title" class="title">no session</div>
+          <div id="session-meta" class="meta"></div>
+        </div>
         <div id="turn-state" class="state"></div>
       </header>
 
@@ -41,6 +65,14 @@
         <button id="close-inbox" class="ghost">✕</button>
       </div>
       <div id="inbox-body"></div>
+    </aside>
+
+    <aside id="status" hidden>
+      <div class="inbox-head">
+        <b>system status</b>
+        <button id="close-status" class="ghost">✕</button>
+      </div>
+      <div id="status-body"></div>
     </aside>
   </div>
   <script src="/app.js"></script>

@@ -18,8 +18,6 @@
       </div>
       <ul id="sessions"></ul>
       <div class="side-foot">
-        <button id="toggle-inbox" class="ghost"><span data-i18n="side.inbox">✎ 承認インボックス</span> <span id="inbox-count" class="badge">0</span></button>
-        <button id="toggle-status" class="ghost"><span data-i18n="side.status">⚙ ステータス</span></button>
         <button id="open-settings" class="ghost"><span data-i18n="side.settings">⚙ 設定</span></button>
       </div>
     </aside>
@@ -47,6 +45,8 @@
               <text x="11" y="14.5" text-anchor="middle">—</text>
             </svg>
           </button>
+          <button id="toggle-inbox" class="iconbtn" title="承認インボックス" data-i18n-title="top.inbox">✎<span id="inbox-count" class="badge">0</span></button>
+          <button id="toggle-status" class="iconbtn" title="ステータス" data-i18n-title="top.status">ⓘ</button>
           <button id="search-toggle" class="iconbtn" title="トランスクリプト内検索 (Ctrl+F)" data-i18n-title="top.search">⌕</button>
           <div class="menu-wrap">
             <button id="session-menu-btn" class="iconbtn" title="セッション操作" data-i18n-title="top.sessionActions">⋯</button>

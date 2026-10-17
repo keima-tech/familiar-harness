@@ -65,8 +65,9 @@ const STR = {
     "side.newSession": "新規セッション",
     "side.filterPh": "セッションを絞り込み…  (Ctrl+K)",
     "side.settings": "⚙ 設定",
-    "side.inbox": "✎ 承認インボックス",
-    "side.status": "⚙ ステータス",
+    "top.inbox": "承認インボックス",
+    "top.status": "ステータス",
+    "del.confirm": "セッション「{0}」を削除しますか? この操作は元に戻せません",
     "none": "(なし)",
     "top.noSession": "セッションなし",
     "top.gaugeTitle": "コンテキスト使用量 — クリックでセッション情報",
@@ -283,8 +284,9 @@ const STR = {
     "side.newSession": "New session",
     "side.filterPh": "filter sessions…  (Ctrl+K)",
     "side.settings": "⚙ Settings",
-    "side.inbox": "✎ approvals",
-    "side.status": "⚙ status",
+    "top.inbox": "approvals",
+    "top.status": "status",
+    "del.confirm": "delete session \"{0}\"? this cannot be undone",
     "none": "(none)",
     "top.noSession": "no session",
     "top.gaugeTitle": "context usage — click for session info",
@@ -1137,7 +1139,7 @@ async function confirmCwd() {
 async function deleteSession(id) {
   const s = state.sessions.find((x) => x.id === id);
   const label = s?.title || id.slice(0, 8);
-  if (!window.confirm(`delete session "${label}"? this cannot be undone`)) return;
+  if (!window.confirm(t("del.confirm", label))) return;
   try {
     await rpc("session.delete", { id });
   } catch (err) {

@@ -340,6 +340,9 @@ button.small { padding: 5px 12px; font-size: 12px; }
   border: 1px solid transparent;
 }
 .top-actions .iconbtn:hover { border-color: var(--border); background: var(--panel2); }
+.top-actions .iconbtn .badge {
+  font-size: 10px; padding: 0 5px; margin-left: 2px; vertical-align: 8px;
+}
 
 /* ---- popovers (menu-wrap) ---- */
 .menu-wrap { position: relative; }

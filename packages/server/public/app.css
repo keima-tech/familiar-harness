@@ -293,6 +293,31 @@ button.small { padding: 5px 12px; font-size: 12px; }
 }
 .form-error[hidden] { display: none; }
 
+/* ---- working-folder modal ---- */
+.cwd-modal { width: min(480px, 92vw); }
+.cwd-modal h3 { margin: 0 0 10px; font-size: 15px; }
+#cwd-input {
+  width: 100%; background: var(--panel); border: 1px solid var(--border);
+  color: var(--text); border-radius: 8px; padding: 8px 10px; font: inherit;
+  font-size: 12.5px; outline: none; font-family: var(--mono, monospace);
+}
+#cwd-input:focus { border-color: var(--accent); }
+.cwd-suggest {
+  max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px;
+  border: 1px solid var(--border); border-radius: 8px; padding: 4px; background: var(--panel);
+}
+.cwd-row {
+  display: flex; align-items: baseline; gap: 10px; text-align: left; width: 100%;
+  background: transparent; border: none; color: var(--text); font: inherit;
+  font-size: 12.5px; padding: 6px 8px; border-radius: 6px; cursor: pointer;
+}
+.cwd-row:hover { background: var(--hover); }
+.cwd-row .cr-name { flex: none; font-weight: 600; }
+.cwd-row .cr-path {
+  flex: 1; min-width: 0; color: var(--dim); font-size: 11px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl;
+}
+
 /* ---- session list context menu ---- */
 #ctx-menu {
   position: fixed; z-index: 60; left: 0; top: 0;

@@ -262,3 +262,15 @@
   1.2 秒で戻る)。回答末のフッターと同じ挙動に揃えた。
 - **md レンダラのユニットテストをリポジトリへ恒久化**: `packages/server/scripts/md-test.mjs`
   (`npm run mdtest`、29 アサーション)。/tmp 版が消失したため。
+## v1.1 の実装メモ⑭(2026-10-18、cwd サジェスト・ネイティブ選択・設定アイコン移動)
+
+- **作業フォルダー変更をモーダル化**: `window.prompt` をやめ、`#cwd-overlay`
+  モーダルに。入力に応じて新 RPC **`fs.dirs`**(指定ディレクトリのサブディレクトリ
+  を列挙、`~` 展開対応・隠し除外)で**存在するフォルダーをサジェスト**。行クリックで
+  掘り下げ、Enter / 「設定」で `session.update {cwd}`。
+- **ネイティブなフォルダー選択(デスクトップのみ)**: Electron に `preload.js` を追加し
+  `window.familiarDesktop.pickDirectory()`(ipcMain → `dialog.showOpenDialog`
+  openDirectory)を公開。UI は関数が存在するときだけ「📁 参照…」ボタンを出す
+  (ブラウザ版は出ない)。`files` に `preload.js` を追加。
+- **設定アイコンを左下へ**: トップバーの ⚙ をサイドバー下部 `side-foot`
+  (インボックス/ステータスと同じ列)の「⚙ 設定」ボタンへ移動。

@@ -475,6 +475,23 @@ console.log("— scenario I: web ui transport —");
     }),
   }).then((r) => r.json());
   assert(!!updCwdBad.error, "session.update rejects a non-existent cwd", JSON.stringify(updCwdBad).slice(0, 140));
+  // v1.1: fs.dirs (working-folder suggestions)
+  const dirsOk = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 30, method: "fs.dirs", params: { path: "/tmp" } }),
+  }).then((r) => r.json());
+  assert(
+    Array.isArray(dirsOk.result?.dirs) && typeof dirsOk.result?.home === "string",
+    "fs.dirs lists directories",
+    JSON.stringify(dirsOk).slice(0, 120),
+  );
+  const dirsBad = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 31, method: "fs.dirs", params: { path: "/no/such/dir-xyz" } }),
+  }).then((r) => r.json());
+  assert(!!dirsBad.error, "fs.dirs errors on a non-existent directory", JSON.stringify(dirsBad).slice(0, 140));
   // v1.1: config.provider.set (settings GUI writes kind / endpoint / key)
   const provSet = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
     method: "POST",

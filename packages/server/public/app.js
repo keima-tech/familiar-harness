@@ -64,13 +64,13 @@ const STR = {
   ja: {
     "side.newSession": "新規セッション",
     "side.filterPh": "セッションを絞り込み…  (Ctrl+K)",
+    "side.settings": "⚙ 設定",
     "side.inbox": "✎ 承認インボックス",
     "side.status": "⚙ ステータス",
     "none": "(なし)",
     "top.noSession": "セッションなし",
     "top.gaugeTitle": "コンテキスト使用量 — クリックでセッション情報",
     "top.search": "トランスクリプト内検索 (Ctrl+F)",
-    "top.settings": "設定",
     "top.sessionActions": "セッション操作",
     "menu.rename": "名前を変更…",
     "menu.export": "Markdown で出力",
@@ -259,7 +259,10 @@ const STR = {
     "prov.probeMock": "mock はモデル一覧の取得が不要です",
     "ns.modelDefault": "プロバイダーの既定",
     "cwd.title": "作業フォルダーを変更",
-    "cwd.prompt": "セッションの作業フォルダー(絶対パス):",
+    "cwd.browse": "📁 参照…",
+    "cwd.ok": "設定",
+    "cwd.cancel": "キャンセル",
+    "cwd.noMatch": "一致するフォルダーがありません",
     "toast.cwdSet": "作業フォルダー: {0}",
     "toast.cwdFailed": "フォルダーを変更できませんでした: {0}",
     "prov.badUrl": "エンドポイントは http:// か https:// で始めてください",
@@ -279,13 +282,13 @@ const STR = {
   en: {
     "side.newSession": "New session",
     "side.filterPh": "filter sessions…  (Ctrl+K)",
+    "side.settings": "⚙ Settings",
     "side.inbox": "✎ approvals",
     "side.status": "⚙ status",
     "none": "(none)",
     "top.noSession": "no session",
     "top.gaugeTitle": "context usage — click for session info",
     "top.search": "search in transcript (Ctrl+F)",
-    "top.settings": "settings",
     "top.sessionActions": "session actions",
     "menu.rename": "Rename…",
     "menu.export": "Export as Markdown",
@@ -474,7 +477,10 @@ const STR = {
     "prov.probeMock": "mock needs no model probe",
     "ns.modelDefault": "provider default",
     "cwd.title": "Change working folder",
-    "cwd.prompt": "Session working folder (absolute path):",
+    "cwd.browse": "📁 Browse…",
+    "cwd.ok": "Set",
+    "cwd.cancel": "Cancel",
+    "cwd.noMatch": "no matching folders",
     "toast.cwdSet": "working folder: {0}",
     "toast.cwdFailed": "could not change folder: {0}",
     "prov.badUrl": "endpoint must start with http:// or https://",
@@ -1046,20 +1052,85 @@ function renderSessionCwd(s) {
   btn.title = cwd;
 }
 
-async function editSessionCwd() {
+// ---- working-folder modal (type-to-suggest + native browse on desktop) ----
+let cwdSuggestTimer = null;
+
+function openCwdModal() {
   const s = state.currentSession;
   if (!s) return;
-  const next = window.prompt(t("cwd.prompt"), s.cwd);
-  if (next === null) return;
-  const trimmed = next.trim();
-  if (trimmed === "") return;
+  const input = $("#cwd-input");
+  input.value = s.cwd ?? "";
+  const errBox = $("#cwd-overlay .form-error");
+  errBox.hidden = true;
+  errBox.textContent = "";
+  // native folder dialog is only available inside the Electron shell
+  $("#cwd-browse").hidden = typeof window.familiarDesktop?.pickDirectory !== "function";
+  $("#cwd-overlay").hidden = false;
+  void refreshCwdSuggest();
+  input.focus();
+  input.select();
+}
+
+function closeCwdModal() {
+  $("#cwd-overlay").hidden = true;
+}
+
+/** Split the input into the directory to list and the name prefix to filter. */
+function cwdQueryParts(v) {
+  const t = v.trim();
+  if (t === "") return { dir: "", prefix: "" };
+  const m = t.match(/^(.*[\\/])([^\\/]*)$/);
+  if (m) return { dir: m[1], prefix: m[2] ?? "" };
+  return { dir: "", prefix: t }; // bare word: suggest under the home dir
+}
+
+async function refreshCwdSuggest() {
+  const box = $("#cwd-suggest");
+  const { dir, prefix } = cwdQueryParts($("#cwd-input").value);
+  let res;
   try {
-    const updated = await rpc("session.update", { id: s.id, cwd: trimmed });
+    res = await rpc("fs.dirs", { path: dir });
+  } catch {
+    box.innerHTML = "";
+    return;
+  }
+  const q = prefix.toLowerCase();
+  const base = (d) => d.split(/[\\/]/).pop() ?? d;
+  const items = (res.dirs ?? []).filter((d) => base(d).toLowerCase().startsWith(q));
+  box.innerHTML = "";
+  if (items.length === 0) {
+    box.innerHTML = `<div class="mp-note">${esc(t("cwd.noMatch"))}</div>`;
+    return;
+  }
+  for (const d of items.slice(0, 60)) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "cwd-row";
+    row.innerHTML = `<span class="cr-name">📁 ${esc(base(d))}</span><span class="cr-path">${esc(d)}</span>`;
+    row.addEventListener("click", () => {
+      const input = $("#cwd-input");
+      input.value = d + (d.includes("\\") ? "\\" : "/");
+      void refreshCwdSuggest();
+      input.focus();
+    });
+    box.appendChild(row);
+  }
+}
+
+async function confirmCwd() {
+  const s = state.currentSession;
+  const v = $("#cwd-input").value.trim();
+  const errBox = $("#cwd-overlay .form-error");
+  if (!s || v === "") return;
+  try {
+    const updated = await rpc("session.update", { id: s.id, cwd: v });
     state.currentSession = updated;
     renderSessionCwd(updated);
+    closeCwdModal();
     toast(t("toast.cwdSet", updated.cwd), "ok");
   } catch (err) {
-    toast(t("toast.cwdFailed", err.message), "err");
+    errBox.textContent = err.message;
+    errBox.hidden = false;
   }
 }
 
@@ -2821,7 +2892,33 @@ function boot() {
 
   $("#new-session").addEventListener("click", () => void newSession());
   $("#retry").addEventListener("click", retryLastTurn);
-  $("#edit-cwd").addEventListener("click", () => void editSessionCwd());
+  $("#edit-cwd").addEventListener("click", () => openCwdModal());
+  $("#cwd-cancel").addEventListener("click", closeCwdModal);
+  $("#cwd-ok").addEventListener("click", () => void confirmCwd());
+  $("#cwd-input").addEventListener("input", () => {
+    clearTimeout(cwdSuggestTimer);
+    cwdSuggestTimer = setTimeout(() => void refreshCwdSuggest(), 200);
+  });
+  $("#cwd-input").addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      void confirmCwd();
+    }
+  });
+  $("#cwd-browse").addEventListener("click", async () => {
+    try {
+      const picked = await window.familiarDesktop.pickDirectory();
+      if (picked) {
+        $("#cwd-input").value = picked;
+        void refreshCwdSuggest();
+      }
+    } catch {
+      /* dialog dismissed */
+    }
+  });
+  $("#cwd-overlay").addEventListener("click", (ev) => {
+    if (ev.target === $("#cwd-overlay")) closeCwdModal();
+  });
   $("#composer-new").addEventListener("click", () => {
     const opening = $("#plus-pop").hidden;
     closeAllPops();
@@ -2954,6 +3051,10 @@ function boot() {
     if (ev.key === "Escape") {
       if (!$("#settings-overlay").hidden) {
         closeSettingsModal();
+        return;
+      }
+      if (!$("#cwd-overlay").hidden) {
+        closeCwdModal();
         return;
       }
       hideCtxMenu();

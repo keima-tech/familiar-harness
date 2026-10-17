@@ -4,7 +4,7 @@
 // Packaging (electron-builder installers) is the M6 milestone.
 "use strict";
 
-const { app, BrowserWindow, shell } = require("electron");
+const { app, BrowserWindow, shell, dialog, ipcMain } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -18,6 +18,15 @@ const CFG = {
 
 let mainWindow = null;
 let child = null;
+
+// Native "browse" folder picker for the web UI (window.familiarDesktop.pickDirectory).
+ipcMain.handle("dialog:pickDirectory", async (ev) => {
+  const win = BrowserWindow.fromWebContents(ev.sender) ?? mainWindow;
+  const res = await dialog.showOpenDialog(win, {
+    properties: ["openDirectory", "createDirectory"],
+  });
+  return res.canceled ? null : (res.filePaths[0] ?? null);
+});
 
 function probeOnce(port) {
   return new Promise((resolve) => {
@@ -111,6 +120,7 @@ function createWindow(url) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      preload: path.join(__dirname, "preload.js"),
     },
   });
   // External links (docs etc.) open in the default browser, not the shell.

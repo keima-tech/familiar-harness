@@ -20,6 +20,7 @@
       <div class="side-foot">
         <button id="toggle-inbox" class="ghost"><span data-i18n="side.inbox">✎ 承認インボックス</span> <span id="inbox-count" class="badge">0</span></button>
         <button id="toggle-status" class="ghost"><span data-i18n="side.status">⚙ ステータス</span></button>
+        <button id="open-settings" class="ghost"><span data-i18n="side.settings">⚙ 設定</span></button>
       </div>
     </aside>
 
@@ -47,7 +48,6 @@
             </svg>
           </button>
           <button id="search-toggle" class="iconbtn" title="トランスクリプト内検索 (Ctrl+F)" data-i18n-title="top.search">⌕</button>
-          <button id="open-settings" class="iconbtn" title="設定" data-i18n-title="top.settings">⚙</button>
           <div class="menu-wrap">
             <button id="session-menu-btn" class="iconbtn" title="セッション操作" data-i18n-title="top.sessionActions">⋯</button>
             <div id="session-menu-pop" class="pop" hidden>
@@ -119,6 +119,20 @@
       </div>
       <div id="status-body"></div>
     </aside>
+
+    <div id="cwd-overlay" class="overlay" hidden>
+      <div class="modal cwd-modal">
+        <h3 data-i18n="cwd.title">作業フォルダーを変更</h3>
+        <input id="cwd-input" type="text" spellcheck="false" autocomplete="off" placeholder="/path/to/folder" />
+        <div id="cwd-suggest" class="cwd-suggest"></div>
+        <div class="form-error" hidden></div>
+        <div class="pop-actions">
+          <button id="cwd-browse" type="button" class="ghost link-left" hidden data-i18n="cwd.browse">📁 参照…</button>
+          <button id="cwd-ok" type="button" data-i18n="cwd.ok">設定</button>
+          <button id="cwd-cancel" type="button" class="ghost" data-i18n="cwd.cancel">キャンセル</button>
+        </div>
+      </div>
+    </div>
 
     <div id="settings-overlay" class="overlay" hidden>
     <div class="modal" role="dialog" aria-label="settings">

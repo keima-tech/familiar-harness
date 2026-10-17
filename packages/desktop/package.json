@@ -24,6 +24,7 @@
   "artifactName": "familiar-${version}-${os}-${arch}.${ext}",
     "files": [
       "main.js",
+      "preload.js",
       "package.json"
     ],
     "extraResources": [

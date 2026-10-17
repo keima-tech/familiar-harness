@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import type {
   ChatMessage,
@@ -314,6 +315,8 @@ export class AgentServer {
         return this.modelsList(params);
       case "models.probe":
         return this.modelsProbe(params);
+      case "fs.dirs":
+        return this.fsDirs(params);
       case "session.create":
         return this.createSession(params);
       case "session.list":
@@ -496,6 +499,31 @@ export class AgentServer {
         error: `${baseUrl}: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
+  }
+
+  /**
+   * List existing subdirectories of `path` (working-folder suggestions in the
+   * GUI). Read-only; the server already exposes full filesystem access through
+   * the agent tools, so this adds no new capability. Empty path = home dir.
+   */
+  private fsDirs(params: Record<string, unknown>): { dirs: string[]; home: string } {
+    const raw = (str(params, "path") ?? "").trim();
+    let target: string;
+    if (raw === "" || raw === "~") target = os.homedir();
+    else if (raw.startsWith("~/") || raw.startsWith("~\\"))
+      target = path.join(os.homedir(), raw.slice(2));
+    else target = path.resolve(raw);
+    let dirs: string[];
+    try {
+      dirs = fs
+        .readdirSync(target, { withFileTypes: true })
+        .filter((e) => e.isDirectory() && !e.name.startsWith("."))
+        .map((e) => path.join(target, e.name))
+        .sort((a, b) => a.localeCompare(b));
+    } catch {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, `cannot list directory: ${target}`);
+    }
+    return { dirs, home: os.homedir() };
   }
 
   private async createSession(params: Record<string, unknown>): Promise<SessionRecord> {

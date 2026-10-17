@@ -79,7 +79,16 @@ user text
 - トークン解決の優先順位: `auth.api_key`(永続化禁止配置のみ)→ `auth.api_key_file` → `auth.env`(環境変数名)。
   いずれも `resolveAuthSecret()` で統一処理し、ファイルパスは `~` 展開対応。
 - `config.get` RPC はシークレットをサニタイズして返す(`***`(値非表示)マーカ)。
-- サーバーは `127.0.0.1` バインドのみ(M1)。トークン認証オプションは `server.auth_token_file`(M2)。
+- サーバーは既定 `127.0.0.1` バインドのみ。**M2 実装済み: `server.auth_token_file` を設定すると
+  `/rpc`・`/ws`・UI 静的ファイルのすべてが Bearer トークンを要求する**(`/healthz` のみ開放)。
+  - トークンは `familiar token --write` で `~/.familiar/server.token`(0600)に保存し config へ参照を書く
+    (`familiar token` で発行、`familiar token --clear` で無効化)。
+  - 照合は `crypto.timingSafeEqual`。値はログに出さない。設定済みだがファイルが読めない場合は
+    **fail-closed**(起動を中止)。
+  - UI は `?token=` で受け取り sessionStorage に保持し、以降 `Authorization: Bearer` と
+    `/ws?token=` に付与(アドレスバーに残さない)。デスクトップは `/healthz` の `tokenFile`
+    からローカルで同じトークンを読んで自動で付与する。
+  - CLI のリモートモード(`--server URL`)も同じく `Authorization` ヘッダを付与する。
 
 ## 8. Windows / Linux 両対応指針(コード規約)
 

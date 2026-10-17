@@ -6,7 +6,7 @@
 |---|---|---|
 | M0 | spec fix / リポジトリ初期化 | 完了 |
 | M1 | agent loop + 基本ツール(read/write/edit/glob/grep/bash) + SQLite セッション + CLI(run -p / chat / serve / sessions / model list / init / doctor) + mock provider スモーク | 完了 |
-| **M2** | **Google provider・fallback 連鎖・plan モード・動的承認 RPC(permission.request/respond + CLI リモートモード)・webfetch/websearch/todo/task・worktree コマンド** | **完了 ✅** |
+| **M2** | **Google provider・fallback 連鎖・plan モード・動的承認 RPC(permission.request/respond + CLI リモートモード)・webfetch/websearch/todo/task・worktree コマンド・Bearer トークン認証(`server.auth_token_file`)** | **完了 ✅** |
 | **M3** | **memory + skills + background self-review + write_approval(自己改善ループ第1版)** — staging/CAS・usage 統計・lint・`familiar memory|skills` コマンド・`improvement.staged`/`memory.truncation` イベント ✅(compaction 要約(aux)は簡易 drop 版のまま、要約版は M4 へ繰り越し) | **完了 ✅** |
 | M3 | memory + skills + background self-review + write_approval(自己改善ループ第1版) ✅ |
 | M4 | compaction 要約(aux)・curator(Phase1 自動遷移 + opt-in 統合 + ledger/snapshot + scheduler)・Web UI(`familiar serve` が同一ポートで静的配信)・**Desktop α(Electron シェル: serve を spawn/検出して Web UI を読み込む)** ✅(electron-builder によるインストーラは M6) |
@@ -135,3 +135,20 @@
   (`closeAllPops()` に `plus-pop` が欠落していた)。
 - **虫眼鏡・歯車アイコン**: 16→18px・パディング拡大で視認性を向上。
 - smoke シナリオ I に provider.set の HTTP e2e(永続化・秘匿・入力検証)を追加。
+
+## v1.1 の実装メモ⑤(2026-10-17 深夜、リモートアクセスの認証)
+
+- **`server.auth_token_file` を実装(M2 設計の実現)**: 設定すると `/rpc`・`/ws`・
+  UI 静的ファイルがすべて Bearer トークンを要求(`/healthz` のみ開放)。
+  照合は `crypto.timingSafeEqual`、値は非ログ、ファイルが読めない場合は fail-closed。
+- **`familiar token [--write|--clear]`**: トークン発行・`~/.familiar/server.token`(0600)
+  への保存と config への `auth_token_file` 設定を一括で行う。
+- **UI**: `?token=` → sessionStorage に保持 → `Authorization: Bearer` と `/ws?token=`
+  (アドレスバーには残さない)。トークンなしで 401 になった場合は専用ヒントを表示。
+- **デスクトップ**: `/healthz` の `tokenFile` からローカルでトークンを読み、
+  `?token=` 付きで UI を開くため設定変更でデスクトップが壊れない。
+- **CLI リモートモード**: `--server` 使用時に `Authorization` を自動付与。
+- `familiar serve --bind ADDR` フラグ追加(config の `server.bind` を上書き)。
+- spec 01 §7 / 05(リモートアクセス手順: トークン + ファイアウォール + SSH トンネル)更新。
+- 副産物の修正: リモートモードで `RemoteFamiliarClient.close()` がソケットを実際に閉じておらず
+  `familiar run --server …` が turn.end 後に終了しない既存バグを修正(LAN 利用時に直結)。

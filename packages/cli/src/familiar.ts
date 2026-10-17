@@ -13,12 +13,17 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
+import crypto from "node:crypto";
 import type { AgentEvent, SessionRecord } from "@familiar/protocol";
 import {
   CONFIG_TEMPLATE,
   loadConfig,
   familiarPaths,
   describeAuthSource,
+  resolveServerAuthToken,
+  writeServerAuthConfig,
+  defaultAuthTokenFile,
   ProviderRegistry,
   SqliteSessionStore,
   ensureDir,
@@ -36,7 +41,8 @@ Usage:
   familiar run [-p "prompt"] [--provider ID] [--model ID] [--session ID] [--new]
             [--cwd DIR] [--max-steps N] [-y] [--plan] [--json] [--title S]
   familiar chat [--session ID] [--provider ID] [--model ID] [--cwd DIR] [-y]
-  familiar serve [--port N] [--config PATH]
+  familiar serve [--port N] [--bind ADDR] [--config PATH]
+  familiar token [--write] [--clear]   # M2 bearer token for familiar serve
   familiar sessions list | show <id> [--messages] | delete <id>
   familiar model list [provider]
   familiar memory [list] | pending | approve <id> | reject <id> | approval on|off
@@ -73,6 +79,7 @@ const STRING_FLAGS = new Set([
   "--session",
   "--max-steps",
   "--port",
+  "--bind",
   "--profile",
   "--title",
   "--server",
@@ -95,6 +102,8 @@ const BOOL_FLAGS = new Set([
   "--force",
   "--consolidate",
   "--dry-run",
+  "--write",
+  "--clear",
 ]);
 
 export interface ParsedArgs {
@@ -233,7 +242,11 @@ async function openRunTransport(
     return { transport: localTransport(server) };
   }
   const baseUrl = flag(flags, "server") ?? `http://${cfg.server.bind}:${cfg.server.port}`;
-  if (await RemoteFamiliarClient.probe(baseUrl)) {
+  // M2: remote mode sends the configured bearer token when the server has
+  // server.auth_token_file set. A missing local token file is only a warning
+  // here (the server stays fail-closed) — the server answers 401 otherwise.
+  const authToken = resolveClientToken(cfg);
+  if (await RemoteFamiliarClient.probe(baseUrl, 700, authToken)) {
     let sink: ((ev: AgentEvent) => void) | undefined = serverEventPrettyPrinter();
     const approval = interactive ? new CliApprovalAdapter() : undefined;
     const client = new RemoteFamiliarClient(
@@ -242,6 +255,7 @@ async function openRunTransport(
         ? (req) => approval.request({ tool: req.tool, summary: req.summary, detail: req.detail })
         : undefined,
       (ev) => sink?.(ev),
+      authToken,
     );
     return {
       transport: {
@@ -462,13 +476,27 @@ async function cmdChat(flags: Record<string, string | boolean>): Promise<void> {
 async function cmdServe(flags: Record<string, string | boolean>): Promise<void> {
   const cfg = loadCliConfig(flags);
   const port = toNumber(flag(flags, "port")) ?? cfg.server.port;
+  const bind = typeof flag(flags, "bind") === "string" ? (flag(flags, "bind") as string) : cfg.server.bind;
+  // M2: fail closed — a configured-but-unreadable token file aborts startup.
+  const authTokenFile = cfg.server.auth_token_file;
+  const authToken = resolveServerAuthToken(authTokenFile);
   const server = new AgentServer({ config: cfg, rpcApprovals: true });
-  const transport = await startHttpTransport(server, { port, bind: cfg.server.bind });
+  const transport = await startHttpTransport(server, {
+    port,
+    bind,
+    authToken,
+    authTokenFile: authTokenFile ? path.resolve(authTokenFile.replace(/^~(?=$|[\\/])/, os.homedir())) : undefined,
+  });
   await server.mcpReady();
   server.startCuratorScheduler();
   server.startCronScheduler();
   process.stdout.write(cyan(`familiar server listening on ${transport.url}\n`));
   process.stdout.write(dim(`  rpc:   POST ${transport.url}/rpc\n  events: WS ${transport.url}/ws\n  ui:    GET ${transport.url}/\n`));
+  if (authToken) {
+    process.stdout.write(dim(`  auth:  bearer token required (file: ${authTokenFile})\n`));
+  } else {
+    process.stdout.write(dim(`  auth:  off — only bind to a trusted network or set server.auth_token_file\n`));
+  }
   const mcpServers = server.mcp?.status() ?? [];
   if (mcpServers.length > 0) {
     const ready = mcpServers.filter((s) => s.state === "ok").length;
@@ -562,6 +590,58 @@ async function cmdInit(): Promise<void> {
     process.stdout.write(green(`wrote ${cfgFile}\n`));
   }
   process.stdout.write(dim(`home:   ${familiarPaths.home()}\nstate:  ${familiarPaths.stateDb()}\n`));
+}
+
+// ---------------------------------------------------------------------------
+// server auth token (M2) — `familiar token`
+// ---------------------------------------------------------------------------
+
+/**
+ * Token for the *client* side of remote mode: `FAMILIAR_SERVER_TOKEN` wins
+ * (handy for LAN clients that don't share the server's home dir), otherwise
+ * the local config's auth_token_file is read. Missing files warn, not abort —
+ * the server remains fail-closed.
+ */
+function resolveClientToken(cfg: ReturnType<typeof loadCliConfig>): string | undefined {
+  const envToken = process.env["FAMILIAR_SERVER_TOKEN"];
+  if (envToken) return envToken;
+  try {
+    return resolveServerAuthToken(cfg.server.auth_token_file);
+  } catch (err) {
+    log.warn(`server token: ${err instanceof Error ? err.message : String(err)}`);
+    return undefined;
+  }
+}
+
+/** Generate / persist the bearer token used by `familiar serve` (M2).
+ *   familiar token            print a fresh token
+ *   familiar token --write    write it to the configured token file (0600)
+ *                           and enable server.auth_token_file in config.yaml
+ *   familiar token --clear     remove the setting (auth off)
+ */
+async function cmdToken(flags: Record<string, string | boolean>): Promise<void> {
+  const cfg = loadCliConfig(flags);
+  const write = flagBool(flags, "write");
+  const clear = flagBool(flags, "clear");
+  if (clear) {
+    writeServerAuthConfig(undefined);
+    process.stdout.write(dim(`server.auth_token_file cleared — token auth is off\n`));
+    return;
+  }
+  const token = crypto.randomBytes(24).toString("base64url");
+  const file = cfg.server.auth_token_file ?? defaultAuthTokenFile();
+  if (!write) {
+    process.stdout.write(`${token}\n`);
+    process.stdout.write(dim(`hint: familiar token --write persists this to ${file} and enables auth\n`));
+    return;
+  }
+  const expanded = file.startsWith("~") ? path.join(os.homedir(), file.slice(1)) : file;
+  fs.mkdirSync(path.dirname(expanded), { recursive: true });
+  fs.writeFileSync(expanded, `${token}\n`, { mode: 0o600 });
+  writeServerAuthConfig(expanded);
+  process.stdout.write(green(`wrote token file ${expanded} (0600)\n`));
+  process.stdout.write(`${token}\n`);
+  process.stdout.write(dim(`server.auth_token_file is set — restart familiar serve to enforce it\n`));
 }
 
 // ---------------------------------------------------------------------------
@@ -971,6 +1051,9 @@ async function main(): Promise<void> {
         break;
       case "init":
         await cmdInit();
+        break;
+      case "token":
+        await cmdToken(flags);
         break;
       case "doctor":
         await cmdDoctor();

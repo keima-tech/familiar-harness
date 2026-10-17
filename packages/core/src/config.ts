@@ -336,6 +336,52 @@ export function describeAuthSource(
   return { source: "none", resolved: false };
 }
 
+/**
+ * M2 server auth: read the bearer token from `server.auth_token_file`.
+ * Fail-closed — a configured but unreadable file throws (never silently
+ * expose an unauthenticated server). The value is never logged.
+ */
+export function resolveServerAuthToken(file: string | undefined): string | undefined {
+  if (!file) return undefined;
+  const expanded = expandHome(file);
+  if (!fs.existsSync(expanded)) {
+    throw new Error(`server auth token file not found: ${expanded}`);
+  }
+  const value = fs.readFileSync(expanded, "utf8").trim();
+  if (value === "") throw new Error(`server auth token file is empty: ${expanded}`);
+  return value;
+}
+
+/** Default token file for `familiar token --write` when config doesn't set one. */
+export function defaultAuthTokenFile(): string {
+  return path.join(familiarHome(), "server.token");
+}
+
+/** Persist `server.auth_token_file` in config.yaml (opt-in auth). */
+export function writeServerAuthConfig(
+  authTokenFile: string | undefined,
+  options: LoadConfigOptions = {},
+): void {
+  const file = configFilePath(options.configFile);
+  let doc: Record<string, unknown> = {};
+  if (fs.existsSync(file)) {
+    const parsed = parseYaml(fs.readFileSync(file, "utf8"));
+    if (parsed !== null && parsed !== undefined) {
+      if (!isPlainObject(parsed)) throw new Error(`config file must be a YAML mapping: ${file}`);
+      doc = parsed;
+    }
+  }
+  const server = isPlainObject(doc["server"]) ? { ...(doc["server"] as Record<string, unknown>) } : {};
+  if (authTokenFile) server["auth_token_file"] = authTokenFile;
+  else delete server["auth_token_file"];
+  doc["server"] = server;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(tmp, stringifyYaml(doc), { mode: 0o600 });
+  fs.renameSync(tmp, file);
+  log.info(`server.auth_token_file ${authTokenFile ? "set" : "cleared"} in ${file}`);
+}
+
 export interface LoadConfigOptions {
   configFile?: string;
   /** e.g. { default_provider } from CLI flags */

@@ -87,7 +87,10 @@ context:
 server:
   port: 46210
   bind: 127.0.0.1
-  # auth_token_file: ~/.familiar/server.token   (M2)
+  # M2 実装済み: 設定すると /rpc・/ws・UI がすべて Bearer トークンを要求する。
+  # トークン本体はこのファイルに書かず、familiar token --write で
+  # ~/.familiar/server.token (0600) に保存してここへ参照を書く。
+  # auth_token_file: ~/.familiar/server.token
 
 sessions:
   # store は固定で node:sqlite (`~/.familiar/state.db`)
@@ -156,3 +159,44 @@ lsp:
 
 優先順: `auth.api_key`(即値;設定共有に向かないので非推奨)→ `auth.api_key_file` → `auth.env`。
 `~` 展開対応。解決不能で provider 使用時のみエラー。(トークンはメモリ上のみで保持)
+
+---
+
+## リモートアクセス(他のマシンから familiar serve に接続)
+
+既定は `127.0.0.1` バインドなので LAN からは届きません。他の Windows マシンから使うには:
+
+```bash
+# 1) トークンを発行・保存し config に有効化(サーバ側)
+familiar token --write
+
+# 2) バインドを開く(config.yaml; 特定 IP に絞るのが安全)
+server:
+  bind: 0.0.0.0        # または LAN の固定 IP
+
+# 3) ポートを許可(サーバ側・管理者 PowerShell、プライベートネットのみ)
+New-NetFirewallRule -DisplayName "familiar serve" -Direction Inbound -Protocol TCP -LocalPort 46210 -Action Allow -Profile Private
+
+# 4) クライアントは http://<サーバのLAN-IP>:46210/?token=<トークン> をブラウザで開く
+#    CLI の場合: familiar --server http://<LAN-IP>:46210   (トークンは config から自動付与)
+```
+
+**ポート開放を避ける方法(推奨)**: SSH トンネルなら loopback のまま使えます。
+
+```powershell
+# クライアント側
+ssh -L 46210:127.0.0.1:46210 <user>@<server-host>
+# その後 http://127.0.0.1:46210/  (トークンなしでよい)
+```
+
+トークンなしで `bind` を `0.0.0.0` に開けると、到達できる人が任意のシェルコマンドを実行できます
+(ファイル読み書き・削除・全セッション閲覧・承認操作)。信頼できるネットワーク以外では必ず
+`auth_token_file` を設定してください。通信は平文 HTTP/WS です。
+
+### クライアント側のトークン指定
+
+- `familiar --server http://<host>:<port>` は config の `server.auth_token_file` を読んで
+  `Authorization: Bearer` を自動付与します。**サーバとホームディレクトリを共有しない
+  LAN クライアントでは**、環境変数 `FAMILIAR_SERVER_TOKEN=<トークン>` を使えます
+  (サーバ側とは別マシンでもよい)。ファイルが無い場合は警告のみで続行し、
+  サーバが 401 を返します(サーバ側は fail-closed)。

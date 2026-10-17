@@ -787,6 +787,60 @@ console.log("— scenario O: lsp_diagnostics —");
   );
 }
 
+console.log("— scenario P: serve bearer-token auth (M2) —");
+{
+  const homeP = path.join(tmpBase, "home-auth");
+  fs.mkdirSync(homeP, { recursive: true });
+  const token = "smoke-token-abc123";
+  const tokenFile = path.join(homeP, "server.token");
+  fs.writeFileSync(tokenFile, `${token}\n`, { mode: 0o600 });
+  fs.writeFileSync(
+    path.join(homeP, "config.yaml"),
+    `version: 1
+default_provider: mock
+providers:
+  mock:
+    kind: mock
+server:
+  port: 46299
+  bind: 127.0.0.1
+  auth_token_file: ${tokenFile}
+`,
+  );
+  const PORT = 46299;
+  const serveP = spawn(process.execPath, [familiarBin, "serve", "--port", String(PORT)], {
+    cwd: project,
+    env: env(homeP),
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let up = false;
+  for (let i = 0; i < 50 && !up; i++) {
+    await new Promise((r) => setTimeout(r, 200));
+    try {
+      const h = await fetch(`http://127.0.0.1:${PORT}/healthz`).then((r) => r.json());
+      up = h.ok === true && h.auth === "required" && typeof h.tokenFile === "string";
+    } catch {
+      up = false;
+    }
+  }
+  assert(up, "serve /healthz reports auth required + tokenFile");
+  const rpc = (headers) => fetch(`http://127.0.0.1:${PORT}/rpc`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...headers },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping", params: {} }),
+  });
+  assert((await fetch(`http://127.0.0.1:${PORT}/rpc`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).status === 401, "POST /rpc without token -> 401");
+  assert((await rpc({ authorization: `Bearer wrong-token` })).status === 401, "POST /rpc with wrong token -> 401");
+  assert((await rpc({ authorization: `Bearer ${token}` })).status === 200, "POST /rpc with bearer token -> 200");
+  assert((await rpc({ "x-familiar-token": token })).status === 401, "non-bearer header is not accepted");
+  assert((await fetch(`http://127.0.0.1:${PORT}/`)).status === 401, "GET / without token -> 401");
+  assert((await fetch(`http://127.0.0.1:${PORT}/?token=${token}`)).status === 200, "GET /?token=... -> 200");
+  assert((await fetch(`http://127.0.0.1:${PORT}/?token=nope`)).status === 401, "GET /?token=nope -> 401");
+  const secretLeak = await fetch(`http://127.0.0.1:${PORT}/?token=${token}`).then((r) => r.text());
+  assert(!secretLeak.includes(token), "served UI never contains the token value");
+  serveP.kill("SIGTERM");
+}
+
 console.log(
   failures === 0 ? "\nsmoke: all checks passed" : `\nsmoke: ${failures} failure(s)`,
 );

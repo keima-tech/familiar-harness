@@ -12,15 +12,49 @@
 // ---------------------------------------------------------------------------
 const $ = (sel) => document.querySelector(sel);
 
+/** M2 server auth: the token arrives once via ?token= and is kept in
+ * sessionStorage so the address bar/history never carries it. */
+let serverToken = "";
+try {
+  serverToken = sessionStorage.getItem("familiar.token") ?? "";
+} catch { /* storage unavailable */ }
+{
+  const q = new URLSearchParams(location.search).get("token");
+  if (q) {
+    serverToken = q;
+    try { sessionStorage.setItem("familiar.token", q); } catch { /* ignore */ }
+    history.replaceState(null, "", location.pathname);
+  }
+}
+
 async function rpc(method, params = {}) {
+  const headers = { "Content-Type": "application/json" };
+  if (serverToken) headers["Authorization"] = `Bearer ${serverToken}`;
   const res = await fetch("/rpc", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({ jsonrpc: "2.0", id: crypto.randomUUID(), method, params }),
   });
-  const body = await res.json();
+  const body = await res.json().catch(() => ({}));
+  if (res.status === 401) {
+    showAuthHint();
+    throw new Error("unauthorized");
+  }
   if (body.error) throw new Error(body.error.message ?? JSON.stringify(body.error));
   return body.result;
+}
+
+/** Rendered when the server requires a bearer token we do not have. */
+function showAuthHint() {
+  const tr = $("#transcript");
+  if (tr.querySelector(".auth-hint")) return;
+  tr.innerHTML = "";
+  const div = document.createElement("div");
+  div.className = "empty-state auth-hint";
+  div.innerHTML = `
+    <div class="glyph">🔒</div>
+    <h3>${esc(t("auth.required"))}</h3>
+    <div class="hint">${esc(t("auth.hint"))}</div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -112,6 +146,8 @@ const STR = {
     "turn.done": "✓ 完了 ({0})",
     "turn.thinking": "考えています…",
     "taskDone": "タスクが完了しました",
+    "auth.required": "トークン認証が必要です",
+    "auth.hint": "このサーバーはBearerトークンを要求しています。 familiar token --write で発行し、URL に ?token=... を付けて開き直してください。",
     "home.title": "まだメッセージがありません",
     "home.hint": "何でも聞いてください — ファイルの読み取り・コマンド実行・コード編集ができます。",
     "approval.needed": "承認が必要: {0}",
@@ -323,6 +359,8 @@ const STR = {
     "turn.done": "✓ done ({0})",
     "turn.thinking": "thinking…",
     "taskDone": "Task completed",
+    "auth.required": "Token authentication required",
+    "auth.hint": "This server requires a bearer token. Generate one with `familiar token --write` and reopen the URL with ?token=...",
     "home.title": "No messages yet",
     "home.hint": "Ask anything — familiar can read files, run commands, and edit code in this workspace.",
     "approval.needed": "approval needed: {0}",
@@ -1402,7 +1440,8 @@ function setTurnEndLabel(text) {
 // ---------------------------------------------------------------------------
 function connectEvents() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  const suffix = serverToken ? `?token=${encodeURIComponent(serverToken)}` : "";
+  const ws = new WebSocket(`${proto}://${location.host}/ws${suffix}`);
   const retry = () => setTimeout(connectEvents, 1500);
   ws.addEventListener("close", retry);
   ws.addEventListener("error", retry);

@@ -29,7 +29,7 @@ function probeOnce(port) {
         res.on("end", () => {
           try {
             const parsed = JSON.parse(body);
-            resolve(parsed.ok === true ? port : false);
+            resolve(parsed.ok === true ? { port, tokenFile: parsed.tokenFile } : false);
           } catch {
             resolve(false);
           }
@@ -45,17 +45,29 @@ function probeOnce(port) {
   });
 }
 
+/** M2: when the server requires a bearer token, /healthz tells us which file
+ * holds it (the value itself is never exposed). Read it and pass it to the
+ * UI via ?token= so the local desktop app works without manual setup. */
+function readServerToken(tokenFile) {
+  if (!tokenFile || !fs.existsSync(tokenFile)) return "";
+  try {
+    return fs.readFileSync(tokenFile, "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
 async function findOrSpawnServer() {
   for (const port of CFG.ports) {
     const live = await probeOnce(port);
-    if (live) return { url: `http://127.0.0.1:${live}`, spawned: false };
+    if (live) return { url: `http://127.0.0.1:${live.port}`, token: readServerToken(live.tokenFile), spawned: false };
   }
   const port = CFG.spawnPort;
   child = spawnServe(port);
   // wait for healthz
   for (let i = 0; i < 100; i++) {
     const live = await probeOnce(port);
-    if (live) return { url: `http://127.0.0.1:${port}`, spawned: true };
+    if (live) return { url: `http://127.0.0.1:${port}`, token: readServerToken(live.tokenFile), spawned: true };
     await new Promise((r) => setTimeout(r, 200));
   }
   return null;
@@ -135,7 +147,7 @@ if (!gotLock) {
       app.quit();
       return;
     }
-    createWindow(server.url);
+    createWindow(server.token ? `${server.url}/?token=${encodeURIComponent(server.token)}` : server.url);
   });
 
   app.on("window-all-closed", () => {

@@ -1,4 +1,5 @@
 import { createServer, type Server } from "node:http";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,6 +19,14 @@ import { log } from "@familiar/core";
 export interface HttpTransportOptions {
   port: number;
   bind: string;
+  /**
+   * M2: when set, every endpoint except /healthz requires this bearer token
+   * (Authorization: Bearer <token> header or ?token= query, e.g. for /ws).
+   */
+  authToken?: string;
+  /** Path the token was read from — reported by /healthz so local clients
+   * (the desktop shell) can pick it up. Never the value itself. */
+  authTokenFile?: string;
 }
 
 export interface HttpTransport {
@@ -40,11 +49,55 @@ function publicDir(): string {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
 }
 
+/** Length-independent comparison for bearer tokens (avoids timing leaks). */
+function safeEqual(a: string, b: string): boolean {
+  const ba = Buffer.from(a, "utf8");
+  const bb = Buffer.from(b, "utf8");
+  if (ba.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ba, bb);
+}
+
 export function startHttpTransport(
   agent: AgentServer,
   opts: HttpTransportOptions,
 ): Promise<HttpTransport> {
   const clients = new Set<WebSocket>();
+
+  const authRequired = typeof opts.authToken === "string" && opts.authToken !== "";
+
+  /** Constant-time comparison against the configured bearer token. */
+  const authorized = (req: { headers: Record<string, unknown>; url?: string }): boolean => {
+    if (!authRequired) return true;
+    const header = req.headers["authorization"];
+    if (typeof header === "string" && header.startsWith("Bearer ")) {
+      if (safeEqual(header.slice("Bearer ".length).trim(), opts.authToken ?? "")) return true;
+    }
+    const queryToken = new URL(req.url ?? "/", "http://localhost").searchParams.get("token");
+    if (queryToken !== null && safeEqual(queryToken, opts.authToken ?? "")) return true;
+    return false;
+  };
+
+  const sendUnauthorized = (
+    req: { method?: string; headers: Record<string, unknown> },
+    res: import("node:http").ServerResponse,
+    url: string,
+  ): void => {
+    if (url === "/" || url === "/index.html") {
+      // human-friendly page for someone who opened the URL without a token
+      res.writeHead(401, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(
+        "<!doctype html><title>familiar — authentication required</title>" +
+          "<meta charset=\"utf-8\"><body style=\"font-family:system-ui;padding:40px\">" +
+          "<h2>familiar server is running — token required</h2>" +
+          "<p>This server requires a bearer token. Open it as:<br>" +
+          "<code>http://" + (req.headers["host"] ?? "127.0.0.1") + "/?token=&lt;your-token&gt;</code></p>" +
+          "<p>Generate one with <code>familiar token --write</code> and set <code>server.auth_token_file</code> in config.yaml.</p></body>",
+      );
+      return;
+    }
+    res.writeHead(401, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "unauthorized" }));
+  };
 
   const broadcast = (sessionId: string, event: AgentEvent | unknown): void => {
     const frame = JSON.stringify({ type: "event", sessionId, event });
@@ -58,7 +111,18 @@ export function startHttpTransport(
     if (req.method === "GET" || req.method === "HEAD") {
       if (url === "/healthz") {
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: true, protocol: "familiar/1" }));
+        res.end(
+          JSON.stringify({
+            ok: true,
+            protocol: "familiar/1",
+            auth: authRequired ? "required" : "off",
+            ...(authRequired && opts.authTokenFile ? { tokenFile: opts.authTokenFile } : {}),
+          }),
+        );
+        return;
+      }
+      if (!authorized(req)) {
+        sendUnauthorized(req, res, url);
         return;
       }
       const asset = STATIC_FILES[url];
@@ -81,8 +145,17 @@ export function startHttpTransport(
       }
     }
     if (req.method !== "POST" || url !== "/rpc") {
+      if (!authorized(req)) {
+        sendUnauthorized(req, res, url);
+        return;
+      }
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "not found" }));
+      return;
+    }
+    if (!authorized(req)) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "unauthorized" }));
       return;
     }
     const chunks: Buffer[] = [];
@@ -104,7 +177,7 @@ export function startHttpTransport(
   const wss = new WebSocketServer({ noServer: true });
   httpServer.on("upgrade", (req, socket, head) => {
     const url = (req.url ?? "").split("?")[0];
-    if (url === "/ws") {
+    if (url === "/ws" && authorized(req)) {
       wss.handleUpgrade(req, socket, head, (ws) => {
         clients.add(ws);
         ws.on("close", () => clients.delete(ws));

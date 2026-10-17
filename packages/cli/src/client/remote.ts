@@ -7,6 +7,7 @@ import type { AgentEvent } from "@familiar/protocol";
  * - approvals: server-level permission.request → local handler → respond RPC
  */
 export class RemoteFamiliarClient {
+  private socket?: WebSocket;
   private socketPromise?: Promise<WebSocket>;
   private sessionHandlers = new Map<string, (event: AgentEvent) => void>();
   private closed = false;
@@ -15,14 +16,26 @@ export class RemoteFamiliarClient {
     readonly baseUrl: string,
     private readonly approval?: (req: { requestId: string; tool: string; summary: string; detail?: string }) => Promise<boolean>,
     private readonly onServerEvent?: (event: AgentEvent) => void,
+    /** M2 bearer token (when the server sets server.auth_token_file). */
+    private readonly token?: string,
   ) {}
 
+  private get headers(): Record<string, string> {
+    return {
+      "content-type": "application/json",
+      ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
+    };
+  }
+
   /** Probe a running server (POST /rpc ping). */
-  static async probe(baseUrl: string, timeoutMs = 700): Promise<boolean> {
+  static async probe(baseUrl: string, timeoutMs = 700, token?: string): Promise<boolean> {
     try {
       const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/rpc`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ jsonrpc: "2.0", id: "probe", method: "ping" }),
         signal: AbortSignal.timeout(timeoutMs),
       });
@@ -46,7 +59,7 @@ export class RemoteFamiliarClient {
     await this.ensureSocket();
     const res = await fetch(`${this.baseUrl.replace(/\/+$/, "")}/rpc`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: this.headers,
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
       signal: AbortSignal.timeout(600_000),
     });
@@ -61,13 +74,22 @@ export class RemoteFamiliarClient {
   close(): void {
     this.closed = true;
     this.socketPromise = undefined;
+    // Actually release the socket — without this the open WebSocket keeps the
+    // Node event loop alive and `familiar run --server …` never exits.
+    try {
+      this.socket?.close();
+    } catch {
+      // already closed
+    }
   }
 
   private ensureSocket(): Promise<WebSocket> {
     if (this.socketPromise && !this.closed) return this.socketPromise;
     this.socketPromise = new Promise<WebSocket>((resolve) => {
-      const wsUrl = this.baseUrl.replace(/^http/, "ws").replace(/\/+$/, "") + "/ws";
+      const base = this.baseUrl.replace(/^http/, "ws").replace(/\/+$/, "");
+      const wsUrl = this.token ? `${base}/ws?token=${encodeURIComponent(this.token)}` : `${base}/ws`;
       const socket = new WebSocket(wsUrl);
+      this.socket = socket;
       socket.onopen = () => resolve(socket);
       socket.onmessage = (msg: MessageEvent) => {
         let frame:

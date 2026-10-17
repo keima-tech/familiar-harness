@@ -394,6 +394,77 @@ console.log("— scenario H: curator —");
   );
 }
 
+// ---------------------------------------------------------------------------
+// Scenario I: familiar serve web UI (static assets + WS event stream)
+// ---------------------------------------------------------------------------
+console.log("— scenario I: web ui transport —");
+{
+  const { createRequire } = await import("node:module");
+  const { WebSocket } = createRequire(import.meta.filename)("ws");
+  const PORT = 46219;
+  const serve = spawn(process.execPath, [familiarBin, "serve", "--port", String(PORT)], {
+    cwd: project,
+    env: env(familiarHome),
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let serveLog = "";
+  serve.stdout.on("data", (d) => (serveLog += d));
+  serve.stderr.on("data", (d) => (serveLog += d));
+
+  let health = false;
+  for (let i = 0; i < 50 && !health; i++) {
+    await new Promise((r) => setTimeout(r, 200));
+    try {
+      health = (await fetch(`http://127.0.0.1:${PORT}/healthz`).then((r) => r.json())).ok === true;
+    } catch {
+      health = false;
+    }
+  }
+  assert(health, "serve /healthz responds");
+  const page = await fetch(`http://127.0.0.1:${PORT}/`).then((r) => r.text());
+  assert(page.includes("app.js"), "web UI index served", page.slice(0, 120));
+  const appJs = await fetch(`http://127.0.0.1:${PORT}/app.js`).then((r) => r.text());
+  assert(appJs.includes("session.send"), "web UI app.js served");
+
+  const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+  const frames = [];
+  await new Promise((res) => ws.once("open", res));
+  ws.on("message", (d) => {
+    const f = JSON.parse(d.toString());
+    if (f.type === "event") frames.push(f);
+  });
+  await new Promise((r) => setTimeout(r, 250));
+  const created = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "session.create", params: {} }),
+  }).then((r) => r.json());
+  assert(!!created.result?.id, "session.create over HTTP", JSON.stringify(created.error ?? {}).slice(0, 120));
+  await fetch(`http://127.0.0.1:${PORT}/rpc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "session.send",
+      params: { id: created.result.id, text: "hi from the web ui" },
+    }),
+  }).then((r) => r.json());
+  await new Promise((r) => setTimeout(r, 400));
+  const streamed = frames
+    .filter((f) => f.sessionId === created.result.id && f.event.type === "text.delta")
+    .map((f) => f.event.text)
+    .join("");
+  assert(
+    streamed.includes("mock: hi from the web ui"),
+    "turn events streamed over WS",
+    JSON.stringify(frames.map((f) => f.event.type)).slice(0, 160),
+  );
+  ws.close();
+  serve.kill("SIGTERM");
+  await new Promise((r) => setTimeout(r, 300));
+}
+
 console.log(
   failures === 0 ? "\nsmoke: all checks passed" : `\nsmoke: ${failures} failure(s)`,
 );

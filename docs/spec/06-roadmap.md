@@ -70,3 +70,25 @@
 - **CLI リッチ化(diff 描画・スピナー・TTY TUI)** は本筋の設計が要るため別工程
   (roadmap v1.1 以降で検討)。RPC/イベントには影響なし。
 - **ツール結果の画像表示**: 現行ツール群はテキスト出力のみのため未対応(画像ツール追加時に)。
+
+## v1.1 の実装メモ②(2026-10-17 後半、GUI 利便性)
+
+- **⚙ 設定ドロワー**: 配色(ライト/ダーク/**システム** — matchMedia 追従)・
+  **テーマ 10 種 × light/dark = 20 パレット**(Tokyon Night / Catppuccin / Nord /
+  Dracula / Rosé Pine / Kanagawa / Everforest / Gruvbox / Solarized / One Dark)。
+  カラーパレットは JS が `:root` の CSS 変数に書込む方式(stylesheet の既定値 =
+  Tokyo Night dark が JS 起動前のフォールバック)。選択は localStorage
+  (`familiar.theme` / `familiar.mode`)。
+- **provider カタログ**(設定内・読取専用): `config.get` の sanitized 値から
+  kind / default_model / api key 解決状態を表示。設定変更は CLI 側 config.yaml。
+- **セッション一覧の右クリックメニュー**: リネーム(openSession 後に topbar タイトルを
+  インライン編集)/ Export / Delete。`#ctx-menu` は fixed + viewport 内にクランプ、
+  外側クリック・スクロール・Esc で閉じる。
+- **composer の popover 修正**: `.pop.up`(bottom 起点の上開き)で下見切れを解消。
+  **「＋」メニュー**: ファイル添付(隠し file input — Electron は `file.path` を取得し
+  `@<path>` を挿入)/ `@ `(コンテキスト)/ `! `(シェル実行依頼)挿入。
+- **コンテキスト使用量リング**(topbar): 直近 turn の promptTokens ≒ コンテキスト
+  現在値 × `models.list` の contextTokens → SVG リング + % 表示(不明時は
+  トークン数 or —)。クリックで **session info ドロワー**(セッション情報・メッセージ
+  カウント・コンテキスト使用率・this visit のトークン・raw メッセージ一覧)。
+  旧 usage chip(gauge に統合)は削除。

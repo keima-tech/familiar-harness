@@ -218,6 +218,10 @@ const state = {
   draft: { provider: "", model: "" },
   /** tokens seen this browsing session, per session id (turn.end events). */
   usageBySession: {},
+  /** last turn's prompt tokens per session ≈ current context size. */
+  lastPromptTokensBySession: {},
+  /** cached context window sizes (provider/model → tokens|null). */
+  modelCtxCache: {},
   toolCounter: 0,
 };
 
@@ -228,6 +232,90 @@ const ns = {
   defaultModel: null,
   loaded: false,
 };
+
+// ---------------------------------------------------------------------------
+// appearance: 10 themes × (dark|light) palettes + light/dark/system mode
+// Selected values are written to `:root` as CSS custom properties, falling
+// back to the stylesheet defaults (= Tokyo Night dark) before JS loads.
+// ---------------------------------------------------------------------------
+const THEMES = {
+  "Tokyo Night": {
+    dark: { bg: "#101014", panel: "#151519", panel2: "#1b1b21", text: "#e8e8ea", dim: "#85858e", accent: "#6c8cff", ok: "#7dc98f", warn: "#d9a35f", err: "#e46a6a", border: "#26262c", bubble: "#3948e0", hover: "#232329", codebg: "#121216" },
+    light: { bg: "#e9eaf2", panel: "#f5f6fa", panel2: "#ffffff", text: "#3b4261", dim: "#8990b3", accent: "#2e7de9", ok: "#4a8a3f", warn: "#b07d1e", err: "#c6435c", border: "#d3d6e4", bubble: "#2e7de9", hover: "#dfe2ee", codebg: "#f2f3f9" },
+  },
+  Catppuccin: {
+    dark: { bg: "#1e1e2e", panel: "#181825", panel2: "#313244", text: "#cdd6f4", dim: "#6c7086", accent: "#89b4fa", ok: "#a6e3a1", warn: "#f9e2af", err: "#f38ba8", border: "#454758", bubble: "#585b70", hover: "#37394f", codebg: "#1d1d29" },
+    light: { bg: "#eef1f6", panel: "#fbfcfe", panel2: "#ffffff", text: "#4c4f69", dim: "#8c8fa1", accent: "#1e66f5", ok: "#40a02b", warn: "#df8e1d", err: "#d20f39", border: "#ccd0da", bubble: "#1e66f5", hover: "#e4e7ef", codebg: "#f5f6fa" },
+  },
+  Nord: {
+    dark: { bg: "#2e3440", panel: "#292f3a", panel2: "#3b4252", text: "#eceff4", dim: "#77839c", accent: "#88c0d0", ok: "#a3be8c", warn: "#ebcb8b", err: "#bf616a", border: "#434c5e", bubble: "#5e81ac", hover: "#3f4a5e", codebg: "#272c36" },
+    light: { bg: "#eceff4", panel: "#f6f8fa", panel2: "#ffffff", text: "#2e3440", dim: "#6b7590", accent: "#5e81ac", ok: "#56831d", warn: "#9a6f16", err: "#8c4351", border: "#d8dee9", bubble: "#5e81ac", hover: "#e2e7ef", codebg: "#f2f4f7" },
+  },
+  Dracula: {
+    dark: { bg: "#282a36", panel: "#21222c", panel2: "#343746", text: "#f8f8f2", dim: "#6272a4", accent: "#bd93f9", ok: "#50fa7b", warn: "#f1fa8c", err: "#ff5555", border: "#44475a", bubble: "#6272a4", hover: "#3d4059", codebg: "#242634" },
+    light: { bg: "#f0eff6", panel: "#faf9fc", panel2: "#ffffff", text: "#3d3a50", dim: "#7a7a96", accent: "#8a56c2", ok: "#1e9a52", warn: "#a58505", err: "#d73a49", border: "#dcdbe8", bubble: "#8a56c2", hover: "#e6e4f0", codebg: "#f5f4fa" },
+  },
+  "Rosé Pine": {
+    dark: { bg: "#191724", panel: "#1f1d2e", panel2: "#26233a", text: "#e0def4", dim: "#908caa", accent: "#c4a7e7", ok: "#9ccfd8", warn: "#f6c177", err: "#eb6f92", border: "#403d52", bubble: "#31748f", hover: "#2a2740", codebg: "#1c1a28" },
+    light: { bg: "#faf4ed", panel: "#fffaf3", panel2: "#ffffff", text: "#575279", dim: "#9893a5", accent: "#907aa9", ok: "#56949f", warn: "#ea9d34", err: "#b4637a", border: "#e0dad6", bubble: "#907aa9", hover: "#f2e9e4", codebg: "#fdf9f3" },
+  },
+  Kanagawa: {
+    dark: { bg: "#1f1f28", panel: "#16161d", panel2: "#2a2a37", text: "#dcd7ba", dim: "#727169", accent: "#7e9cd8", ok: "#98bb6c", warn: "#ffa066", err: "#e46876", border: "#2f3139", bubble: "#2d4f67", hover: "#26262f", codebg: "#1c1c24" },
+    light: { bg: "#f2ecbc", panel: "#f8f0d8", panel2: "#fdf6e3", text: "#43436a", dim: "#8b8a80", accent: "#426e9c", ok: "#5d714a", warn: "#c4754c", err: "#c14b4a", border: "#ddd6ac", bubble: "#426e9c", hover: "#e9e2b4", codebg: "#f4eed0" },
+  },
+  Everforest: {
+    dark: { bg: "#2d352b", panel: "#262a25", panel2: "#343934", text: "#d3c6aa", dim: "#859289", accent: "#a7c080", ok: "#83b09a", warn: "#dbbc7f", err: "#e67e80", border: "#3d453c", bubble: "#5a7a6a", hover: "#31372f", codebg: "#292e28" },
+    light: { bg: "#fdf6e3", panel: "#f6f1dc", panel2: "#ffffff", text: "#5c6a72", dim: "#98a49b", accent: "#8da101", ok: "#35a77c", warn: "#dfa000", err: "#f85552", border: "#e5dfc5", bubble: "#8da101", hover: "#efe9d2", codebg: "#faf5e4" },
+  },
+  Gruvbox: {
+    dark: { bg: "#282828", panel: "#1d2021", panel2: "#3c3836", text: "#ebdbb2", dim: "#928374", accent: "#83a598", ok: "#b8bb26", warn: "#fabd2f", err: "#fb4934", border: "#504945", bubble: "#83a598", hover: "#3a3532", codebg: "#242220" },
+    light: { bg: "#fbf1c7", panel: "#f6ecc6", panel2: "#ffffff", text: "#3c3836", dim: "#7c6f64", accent: "#076678", ok: "#79740e", warn: "#b57614", err: "#9d0006", border: "#d5c4a1", bubble: "#076678", hover: "#ece4b8", codebg: "#f7edc6" },
+  },
+  Solarized: {
+    dark: { bg: "#002b36", panel: "#073642", panel2: "#0e4653", text: "#eee8d5", dim: "#657b83", accent: "#268bd2", ok: "#859900", warn: "#b58900", err: "#dc322f", border: "#0a444f", bubble: "#268bd2", hover: "#0a3e4a", codebg: "#06333f" },
+    light: { bg: "#fdf6e3", panel: "#eee8d5", panel2: "#fbf4de", text: "#657b83", dim: "#93a1a1", accent: "#268bd2", ok: "#859900", warn: "#b58900", err: "#dc322f", border: "#dcd6c1", bubble: "#268bd2", hover: "#e9e1cc", codebg: "#f6efdd" },
+  },
+  "One Dark": {
+    dark: { bg: "#282c34", panel: "#21252b", panel2: "#2f343e", text: "#d7dae0", dim: "#636d83", accent: "#61afef", ok: "#98c379", warn: "#d19a66", err: "#e06c75", border: "#3e4451", bubble: "#4c78cc", hover: "#373c46", codebg: "#232730" },
+    light: { bg: "#f2f3f5", panel: "#fafbfc", panel2: "#ffffff", text: "#383a42", dim: "#82899a", accent: "#4078f2", ok: "#50a14f", warn: "#c18401", err: "#e45649", border: "#dcdfe4", bubble: "#4078f2", hover: "#e8eaed", codebg: "#f4f5f7" },
+  },
+};
+
+const DEFAULT_THEME = "Tokyo Night";
+
+function currentThemeName() {
+  return localStorage.getItem("familiar.theme") ?? DEFAULT_THEME;
+}
+
+function currentModePref() {
+  return localStorage.getItem("familiar.mode") ?? "system";
+}
+
+/** Resolve the effective light/dark palette and write it onto :root. */
+function applyTheme() {
+  const name = THEMES[currentThemeName()] ? currentThemeName() : DEFAULT_THEME;
+  const pref = currentModePref();
+  const eff = pref === "system"
+    ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+    : pref;
+  const pal = THEMES[name][eff] ?? THEMES[name].dark;
+  for (const [k, v] of Object.entries(pal)) {
+    document.documentElement.style.setProperty(`--${k}`, v);
+  }
+  document.documentElement.dataset.theme = name;
+  document.documentElement.dataset.mode = eff;
+  document.documentElement.dataset.modePref = pref;
+}
+
+function setModePref(pref) {
+  localStorage.setItem("familiar.mode", pref);
+  applyTheme();
+}
+
+function setThemeName(name) {
+  localStorage.setItem("familiar.theme", name);
+  applyTheme();
+}
 
 // ---------------------------------------------------------------------------
 // sessions sidebar
@@ -292,6 +380,29 @@ function ulSessionsClick() {
     const li = ev.target.closest("li");
     if (li?.dataset.id) void openSession(li.dataset.id);
   });
+  // right-click menu: rename / export / delete for any session
+  $("#sessions").addEventListener("contextmenu", (ev) => {
+    const li = ev.target.closest("li");
+    if (!li?.dataset.id) return;
+    openCtxMenu(ev, li.dataset.id);
+  });
+  $("#ctx-menu").addEventListener("click", (ev) => {
+    const btn = ev.target.closest("button[data-act]");
+    if (!btn) return;
+    const id = $("#ctx-menu").dataset.id;
+    hideCtxMenu();
+    if (!id) return;
+    if (btn.dataset.act === "rename") {
+      void openSession(id).then(() => {
+        void startRename();
+        toast("edit the title in the topbar, Enter to save", "info");
+      });
+    } else if (btn.dataset.act === "export") {
+      void exportMarkdown(id);
+    } else if (btn.dataset.act === "delete") {
+      void deleteSession(id);
+    }
+  });
 }
 
 function formatTokens(n) {
@@ -301,16 +412,55 @@ function formatTokens(n) {
   return String(n);
 }
 
-function renderUsageChip() {
-  const u = state.usageBySession[state.sessionId];
-  const chip = $("#usage-chip");
-  if (!u || (!u.prompt && !u.completion)) {
-    chip.hidden = true;
-    return;
+/** Ring gauge for the current context size (= the most recent turn's prompt
+ * tokens, since every call re-sends the full context) against the model's
+ * context window from models.list. Unknown values show an em-dash. */
+function updateContextGauge() {
+  const btn = $("#ctx-gauge");
+  const textEl = btn.querySelector("text");
+  const bar = btn.querySelector(".gauge-bar");
+  let used = state.lastPromptTokensBySession[state.sessionId];
+  let win = state.modelCtxCache[`${state.currentSession?.provider}/${state.currentSession?.model}`];
+  const finish = () => {
+    if (used === undefined) {
+      textEl.textContent = "—";
+      btn.title = "context usage — unknown yet (sends after the next turn)";
+      bar.style.display = "none";
+      return;
+    }
+    bar.style.display = "";
+    if (win) {
+      const pct = Math.min(1, used / win);
+      const c = 2 * Math.PI * 8;
+      bar.style.strokeDasharray = `${c}`;
+      bar.style.strokeDashoffset = `${c * (1 - pct)}`;
+      textEl.textContent = `${Math.round(pct * 100)}%`;
+      btn.title = `context: ${formatTokens(used)} / ${formatTokens(win)} tok (${Math.round(pct * 100)}%) — click for session info`;
+    } else {
+      bar.style.strokeDashoffset = `${2 * Math.PI * 8 * 0.5}`;
+      textEl.textContent = formatTokens(used);
+      btn.title = `context: ${formatTokens(used)} tok (window unknown) — click for session info`;
+    }
+  };
+  if (used !== undefined && win === undefined && state.currentSession) {
+    void contextWindowFor(state.currentSession.provider, state.currentSession.model).then(finish);
   }
-  chip.hidden = false;
-  chip.textContent = `↑${formatTokens(u.prompt)} ↓${formatTokens(u.completion)} tok`;
-  chip.title = "prompt / completion tokens seen since this page was opened";
+  finish();
+}
+
+async function contextWindowFor(provider, model) {
+  const key = `${provider}/${model}`;
+  if (!(key in state.modelCtxCache)) {
+    try {
+      const res = await rpc("models.list", { provider });
+      const list = res.models ?? [];
+      const info = list.find((m) => m.id === model) ?? list.find((m) => Boolean(m.contextTokens));
+      state.modelCtxCache[key] = info?.contextTokens ?? null;
+    } catch {
+      state.modelCtxCache[key] = null;
+    }
+  }
+  return state.modelCtxCache[key];
 }
 
 async function openSession(id) {
@@ -328,7 +478,7 @@ async function openSession(id) {
   if (s.profile) bits.push(`profile: ${s.profile}`);
   $("#session-meta").textContent = bits.join(" · ");
   renderModelChip();
-  renderUsageChip();
+  updateContextGauge();
   closeAllPops();
   renderTranscript(data.messages ?? []);
   applyTranscriptFilter();
@@ -348,7 +498,8 @@ async function deleteSession(id) {
     state.sessionId = null;
     state.currentSession = null;
     delete state.usageBySession[id];
-    renderUsageChip();
+    delete state.lastPromptTokensBySession[id];
+    updateContextGauge();
     renderModelChip();
     $("#session-title").textContent = "no session";
     $("#session-meta").textContent = "";
@@ -548,14 +699,14 @@ function startRename() {
   input.addEventListener("blur", () => void commit());
 }
 
-async function exportMarkdown() {
-  if (!state.sessionId) {
+async function exportMarkdown(targetId = state.sessionId) {
+  if (!targetId) {
     toast("no session to export", "err");
     return;
   }
   let data;
   try {
-    data = await rpc("session.get", { id: state.sessionId });
+    data = await rpc("session.get", { id: targetId });
   } catch (err) {
     toast(`export failed: ${err.message}`, "err");
     return;
@@ -818,11 +969,14 @@ function onEvent(sessionId, e) {
       rec.prompt += u.promptTokens ?? 0;
       rec.completion += u.completionTokens ?? 0;
       state.usageBySession[sessionId] = rec;
+      if (u.promptTokens !== undefined) {
+        state.lastPromptTokensBySession[sessionId] = u.promptTokens;
+      }
       const toks = u.promptTokens !== undefined
         ? ` · ↑${u.promptTokens} ↓${u.completionTokens ?? 0} tok` : "";
       setBusy(false);
       setTurnEndLabel(`✓ done in ${state.lastElapsed ?? ""}${toks}`);
-      renderUsageChip();
+      updateContextGauge();
       state.pendingEvents.delete(sessionId);
       refreshSessions();
       loadInbox();
@@ -939,12 +1093,14 @@ function proposalNode(kind, item, act) {
 // status drawer (curator / MCP / cron)
 // ---------------------------------------------------------------------------
 function openDrawer(which) {
-  const inbox = $("#inbox");
-  const status = $("#status");
-  inbox.hidden = which !== "inbox";
-  status.hidden = which !== "status";
+  const drawers = ["inbox", "status", "settings", "session-info"];
+  for (const id of drawers) {
+    $(`#${id}`).hidden = id !== which;
+  }
   if (which === "inbox") void loadInbox();
   if (which === "status") void loadStatus();
+  if (which === "settings") void loadSettings();
+  if (which === "session-info") void loadSessionInfo();
 }
 
 function sectionCard(title, rows, note) {
@@ -1007,6 +1163,178 @@ async function loadStatus() {
   } catch (err) {
     body.appendChild(sectionError("cron scheduler", err));
   }
+}
+
+// ---------------------------------------------------------------------------
+// settings drawer (appearance / providers / stored UI prefs)
+// ---------------------------------------------------------------------------
+function segButton(label, value, active, onClick) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = `seg${active ? " active" : ""}`;
+  b.textContent = label;
+  b.addEventListener("click", onClick);
+  return b;
+}
+
+function loadSettings() {
+  const body = $("#settings-body");
+  body.innerHTML = "";
+
+  // -- appearance: light / dark / system -------------------------------------
+  const appearance = document.createElement("div");
+  appearance.className = "card";
+  appearance.innerHTML = `<h4>appearance</h4>`;
+  const seg = document.createElement("div");
+  seg.className = "seg-row";
+  const pref = currentModePref();
+  for (const [label, value] of [["ライト", "light"], ["ダーク", "dark"], ["システム", "system"]]) {
+    seg.appendChild(segButton(label, value, pref === value, () => {
+      setModePref(value);
+      loadSettings();
+    }));
+  }
+  appearance.appendChild(seg);
+
+  // -- appearance: theme grid --------------------------------------------------
+  const grid = document.createElement("div");
+  grid.className = "theme-grid";
+  const cur = currentThemeName();
+  for (const [name, pal] of Object.entries(THEMES)) {
+    const preview = pal[pref === "light" ? "light" : pref === "dark" ? "dark" : (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")];
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = `theme-card${name === cur ? " selected" : ""}`;
+    card.innerHTML = `
+      <span class="sw" style="background:${preview.bg};border-color:${preview.border}">
+        <i style="background:${preview.accent}"></i><i style="background:${preview.ok}"></i><i style="background:${preview.err}"></i>
+      </span><span class="tname">${esc(name)}</span>`;
+    card.addEventListener("click", () => {
+      setThemeName(name);
+      loadSettings();
+      toast(`theme: ${name}`, "ok");
+    });
+    grid.appendChild(card);
+  }
+  appearance.appendChild(grid);
+  body.appendChild(appearance);
+
+  // -- providers (read-only catalog from the sanitized config) ----------------
+  void (async () => {
+    try {
+      await ensureNsConfig();
+      const card = document.createElement("div");
+      card.className = "card";
+      card.innerHTML = `<h4>providers</h4><div class="note">provider の追加・API key の設定は config.yaml(CLI 側)で行います。ここでは接続状態を表示します。</div>`;
+      const pc = ns.providers;
+      for (const name of Object.keys(pc).sort((a, b) => (a === ns.defaultProvider ? -1 : b === ns.defaultProvider ? 1 : a.localeCompare(b)))) {
+        const conf = pc[name] ?? {};
+        const hint = providerAuthLabel(conf);
+        const row = document.createElement("div");
+        row.className = "pair";
+        row.innerHTML = `<span class="k">${esc(name)}</span><span class="v">${esc(conf.kind ?? "?")}${conf.default_model ? ` · ${esc(conf.default_model)}` : ""}${hint ? ` · ${esc(hint)}` : ""}</span>`;
+        card.appendChild(row);
+      }
+      body.appendChild(card);
+    } catch { /* config.get 失敗時は無音 */ }
+  })();
+
+  // -- stored UI preferences ---------------------------------------------------
+  const data = document.createElement("div");
+  data.className = "card";
+  data.innerHTML = `<h4>UI preferences</h4>`;
+  const resetBtn = document.createElement("button");
+  resetBtn.textContent = "テーマ設定をリセット";
+  resetBtn.className = "ghost small";
+  resetBtn.addEventListener("click", () => {
+    localStorage.removeItem("familiar.theme");
+    localStorage.removeItem("familiar.mode");
+    applyTheme();
+    loadSettings();
+    toast("appearance reset", "ok");
+  });
+  data.appendChild(resetBtn);
+  body.appendChild(data);
+}
+
+// ---------------------------------------------------------------------------
+// session info drawer (context usage + counts, OpenCode 実装準拠の概要)
+// ---------------------------------------------------------------------------
+async function loadSessionInfo() {
+  const body = $("#info-body");
+  body.innerHTML = "";
+  if (!state.sessionId) {
+    body.innerHTML = `<div class="empty">no session</div>`;
+    return;
+  }
+  let data;
+  try {
+    data = await rpc("session.get", { id: state.sessionId });
+  } catch (err) {
+    body.innerHTML = `<div class="status-err">${esc(err.message)}</div>`;
+    return;
+  }
+  const s = data.session;
+  const msgs = (data.messages ?? []).filter((m) => m.meta?.ephemeral !== true);
+  const counts = { user: 0, assistant: 0, tool: 0 };
+  for (const m of msgs) counts[m.role === "system" ? "user" : m.role] = (counts[m.role] ?? 0) + 1;
+  body.appendChild(sectionCard("session", [
+    ["title", s.title || s.id.slice(0, 8)],
+    ["id", s.id],
+    ["provider / model", `${s.provider}${s.model ? ` / ${s.model}` : ""}`],
+    ["profile", s.profile ?? "(none)"],
+    ["cwd", s.cwd],
+    ["created", fmtTime(s.createdAt)],
+    ["updated", fmtTime(s.updatedAt)],
+  ]));
+  body.appendChild(sectionCard("messages", [
+    ["user", counts.user],
+    ["assistant", counts.assistant],
+    ["tool calls", counts.tool],
+    ["total", msgs.length],
+  ]));
+  const used = state.lastPromptTokensBySession[s.id];
+  const tot = state.usageBySession[s.id] ?? { prompt: 0, completion: 0 };
+  const win = await contextWindowFor(s.provider, s.model).catch(() => null);
+  body.appendChild(sectionCard("context", [
+    ["current context", used !== undefined ? `${formatTokens(used)} tok` : "(not measured yet)"],
+    ["context window", win ? `${formatTokens(win)} tok` : "(unknown)"],
+    ["usage", win && used !== undefined ? `${Math.round(Math.min(1, used / win) * 100)}%` : "—"],
+  ]));
+  body.appendChild(sectionCard("usage (this visit)", [
+    ["input", `${formatTokens(tot.prompt)} tok`],
+    ["output", `${formatTokens(tot.completion)} tok`],
+  ]));
+  const list = document.createElement("div");
+  list.className = "card";
+  list.innerHTML = `<h4>raw messages</h4>`;
+  for (const m of msgs.slice(-14)) {
+    const line = document.createElement("div");
+    line.className = "rawmsg";
+    const preview = String(m.content ?? "").replace(/\s+/g, " ").trim().slice(0, 90);
+    line.innerHTML = `<span class="r ${esc(m.role)}">${esc(m.role === "tool" ? (m.name ?? "tool") : m.role)}</span>${esc(preview)}`;
+    list.appendChild(line);
+  }
+  body.appendChild(list);
+}
+
+// ---------------------------------------------------------------------------
+// session list context menu (right click)
+// ---------------------------------------------------------------------------
+function hideCtxMenu() {
+  $("#ctx-menu").hidden = true;
+}
+
+function openCtxMenu(ev, sessionId) {
+  ev.preventDefault();
+  const menu = $("#ctx-menu");
+  menu.dataset.id = sessionId ?? "";
+  menu.hidden = false;
+  const pad = 4;
+  const x = Math.min(ev.clientX, window.innerWidth - menu.offsetWidth - pad);
+  const y = Math.min(ev.clientY, window.innerHeight - menu.offsetHeight - pad);
+  menu.style.left = `${Math.max(pad, x)}px`;
+  menu.style.top = `${Math.max(pad, y)}px`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1269,12 +1597,52 @@ function autoSize(ta) {
   ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
 }
 
+/** Append text at the composer cursor and keep the caret visible. */
+function insertIntoComposer(text) {
+  const ta = $("#input");
+  ta.focus();
+  const start = ta.selectionStart ?? ta.value.length;
+  ta.setRangeText(text, start, ta.selectionEnd ?? start, "end");
+  autoSize(ta);
+}
+
 // ---------------------------------------------------------------------------
 // boot
 // ---------------------------------------------------------------------------
 function boot() {
+  applyTheme();
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    if (currentModePref() === "system") applyTheme();
+  });
+
   $("#new-session").addEventListener("click", () => void openNewSessionPanel());
-  $("#composer-new").addEventListener("click", () => void openNewSessionPanel());
+  $("#composer-new").addEventListener("click", () => {
+    const opening = $("#plus-pop").hidden;
+    closeAllPops();
+    $("#plus-pop").hidden = !opening;
+  });
+  $("#plus-pop").addEventListener("click", (ev) => {
+    const btn = ev.target.closest("button[data-ins]");
+    if (!btn) return;
+    $("#plus-pop").hidden = true;
+    const kind = btn.dataset.ins;
+    if (kind === "file") {
+      $("#file-attach").click();
+    } else if (kind === "ctx") {
+      insertIntoComposer("@ ");
+    } else if (kind === "shell") {
+      insertIntoComposer("! ");
+      toast("'!' で始めるとシェルコマンドの実行をエージェントに依頼します", "info");
+    }
+  });
+  $("#file-attach").addEventListener("change", () => {
+    const f = $("#file-attach").files?.[0];
+    $("#file-attach").value = "";
+    if (!f) return;
+    const ref = f.path || f.name; // Electron exposes the full path
+    insertIntoComposer(`@${ref} `);
+    toast(`attached: ${ref}`, "ok");
+  });
   $("#ns-cancel").addEventListener("click", () => {
     $("#new-session-panel").hidden = true;
   });
@@ -1284,10 +1652,18 @@ function boot() {
   $("#session-filter").addEventListener("input", applySessionFilter);
   ulSessionsClick();
 
-  // topbar: search + session menu
+  // topbar: search + gauge + settings + session menu
   $("#search-toggle").addEventListener("click", () => toggleSearch());
   $("#search-close").addEventListener("click", () => toggleSearch(false));
   $("#transcript-search").addEventListener("input", applyTranscriptFilter);
+  $("#ctx-gauge").addEventListener("click", () => openDrawer("session-info"));
+  $("#open-settings").addEventListener("click", () => openDrawer("settings"));
+  $("#close-settings").addEventListener("click", () => {
+    $("#settings").hidden = true;
+  });
+  $("#close-info").addEventListener("click", () => {
+    $("#session-info").hidden = true;
+  });
   $("#session-menu-btn").addEventListener("click", () => {
     const opening = $("#session-menu-pop").hidden;
     closeAllPops();
@@ -1320,10 +1696,15 @@ function boot() {
     $("#model-pop").hidden = true;
   });
 
-  // close popovers on outside click
+  // close popovers / context menu on outside click, scroll or resize
   document.addEventListener("click", (ev) => {
     if (!ev.target.closest(".menu-wrap")) closeAllPops();
+    if (!ev.target.closest("#ctx-menu") && !ev.target.closest("#sessions")) hideCtxMenu();
   });
+  for (const evt of ["scroll", "resize"]) {
+    $("#transcript").addEventListener(evt, hideCtxMenu, { passive: true });
+    window.addEventListener(evt, hideCtxMenu, { passive: true });
+  }
 
   $("#composer").addEventListener("submit", (ev) => {
     ev.preventDefault();
@@ -1359,6 +1740,7 @@ function boot() {
       return;
     }
     if (ev.key === "Escape") {
+      hideCtxMenu();
       closeAllPops();
       if (!$("#search-bar").hidden) {
         toggleSearch(false);
@@ -1370,13 +1752,18 @@ function boot() {
       }
       const status = $("#status");
       const inbox = $("#inbox");
-      if (!status.hidden) status.hidden = true;
-      else if (!inbox.hidden) inbox.hidden = true;
+      const settings = $("#settings");
+      const info = $("#session-info");
+      if (!status.hidden) openDrawer("none");
+      else if (!inbox.hidden) openDrawer("none");
+      else if (!settings.hidden) openDrawer("none");
+      else if (!info.hidden) openDrawer("none");
     }
   });
 
   setMode("build");
   renderModelChip();
+  updateContextGauge();
   void refreshSessions();
   void loadInbox();
   autoSize(input);

@@ -85,6 +85,20 @@ Get-CimInstance Win32_Process |
   ForEach-Object { Stop-Process -Id $_.ProcessId }
 ```
 
+## リモートアクセス(SSH トンネル)
+
+`familiar serve` は既定で `127.0.0.1` にのみバインドするため、ルータやファイアウォールのポート開放は不要です。別 PC から使う場合は SSH のローカルフォワード(`-L`)を推奨します:
+
+```bash
+# 手元の PC で実行(サーバーの 46210 を手元に転送)
+ssh -L 46210:127.0.0.1:46210 ユーザー名@サーバーIPアドレス
+```
+
+この状態で手元のブラウザから **http://localhost:46210** を開くと、サーバ本体と同じ Web UI が使えます。Windows の標準 OpenSSH クライアントや PuTTY(「Connection → SSH → Tunnels」)でも同じ転送を設定できる。
+
+- トークン認証を有効にしている場合(`familiar token --write`)、初回は URL に `?token=<トークン>` を付けるとブラウザの sessionStorage に記憶される。トークンはサーバ側で `cat ~/.familiar/server.token` で確認できる
+- トンネルを使わず LAN に直接公開する場合のみ `familiar serve --bind 0.0.0.0` を使いますが、通信は平文になるため**トークン認証(`familiar token --write`)を必ず先に設定**すること。公網にさらす場合は TLS リバースプロキシ(nginx / Caddy 等)を挟む
+
 ## 構成
 
 ```

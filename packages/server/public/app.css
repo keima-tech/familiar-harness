@@ -282,9 +282,8 @@ button.small { padding: 5px 12px; font-size: 12px; }
   display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
   background: var(--panel); border: 1px solid var(--border); color: var(--text);
   border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 12px;
-  cursor: pointer; text-align: left;
+  text-align: left;
 }
-.pf-modelrow:hover { border-color: var(--accent); background: var(--hover); }
 .pf-modelrow .pm-name { font-family: var(--mono, monospace); word-break: break-all; }
 .pf-modelrow .pm-meta { color: var(--dim); font-size: 11px; flex: none; }
 .form-error {
@@ -465,7 +464,10 @@ button.small { padding: 5px 12px; font-size: 12px; }
 .mf-copy {
   background: transparent; border: none; color: var(--dim); cursor: pointer;
   font-size: 13px; line-height: 1; padding: 3px 5px; border-radius: 6px;
+  min-width: 22px; text-align: center;
 }
+.mf-copy.copied { color: var(--ok); }
+.mf-copy.copy-fail { color: var(--err); }
 .msg:hover .mf-copy { color: var(--text); }
 .mf-copy:hover { background: var(--hover); color: var(--text); }
 .mf-meta { letter-spacing: 0.2px; }

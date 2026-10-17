@@ -119,8 +119,6 @@ const STR = {
     "session.empty": "空のセッション",
     "toast.titleEdit": "タイトルは上部バーで編集できます(Enter で確定)",
     "toast.deleteFailed": "削除に失敗しました: {0}",
-    "toast.copied": "メッセージをコピーしました",
-    "toast.copyFailed": "コピーに失敗しました",
     "toast.renamed": "名前を変更しました",
     "toast.renameFailed": "名前変更に失敗しました: {0}",
     "toast.noExport": "出力するセッションがありません",
@@ -248,8 +246,6 @@ const STR = {
     "prov.kind": "種類",
     "prov.endpoint": "エンドポイント",
     "prov.endpointPh": "https://api.openai.com/v1",
-    "prov.defaultModel": "既定モデル",
-    "prov.defaultModelPh": "例: gpt-5.2",
     "prov.apiKey": "API キー",
     "prov.keySet": "設定済み(変更する場合のみ入力)",
     "prov.keyUnset": "未設定",
@@ -266,7 +262,6 @@ const STR = {
     "prov.probing": "取得中…",
     "prov.probeEmpty": "モデルが見つかりませんでした",
     "prov.probeOk": "{0} 件のモデル",
-    "prov.probePicked": "選択: {0}",
     "prov.probeMock": "mock はモデル一覧の取得が不要です",
     "mp.settings": "プロバイダー設定…",
     "ns.modelDefault": "プロバイダーの既定",
@@ -342,8 +337,6 @@ const STR = {
     "session.empty": "empty session",
     "toast.titleEdit": "edit the title in the topbar, Enter to save",
     "toast.deleteFailed": "delete failed: {0}",
-    "toast.copied": "message copied",
-    "toast.copyFailed": "copy failed",
     "toast.renamed": "renamed",
     "toast.renameFailed": "rename failed: {0}",
     "toast.noExport": "no session to export",
@@ -471,8 +464,6 @@ const STR = {
     "prov.kind": "kind",
     "prov.endpoint": "endpoint",
     "prov.endpointPh": "https://api.openai.com/v1",
-    "prov.defaultModel": "default model",
-    "prov.defaultModelPh": "e.g. gpt-5.2",
     "prov.apiKey": "API key",
     "prov.keySet": "set (enter only to change)",
     "prov.keyUnset": "not set",
@@ -489,7 +480,6 @@ const STR = {
     "prov.probing": "fetching…",
     "prov.probeEmpty": "no models found",
     "prov.probeOk": "{0} model(s)",
-    "prov.probePicked": "selected: {0}",
     "prov.probeMock": "mock needs no model probe",
     "mp.settings": "Provider settings…",
     "ns.modelDefault": "provider default",
@@ -1169,9 +1159,17 @@ function addMsgFooter(bubbleNode, raw, bits) {
     `<button class="mf-copy" type="button" title="${esc(t("msg.copy"))}">⧉</button>` +
     (bits && bits.length ? `<span class="mf-meta">${esc(bits.join(" · "))}</span>` : "");
   msg.appendChild(foot);
-  foot.querySelector(".mf-copy").addEventListener("click", () => {
-    void copyText(raw).then((ok) =>
-      ok ? toast(t("toast.copied"), "ok") : toast(t("toast.copyFailed"), "err"));
+  foot.querySelector(".mf-copy").addEventListener("click", (ev) => {
+    const btn = ev.currentTarget;
+    void copyText(raw).then((ok) => {
+      btn.textContent = ok ? "✓" : "✕";
+      btn.classList.toggle("copied", ok);
+      btn.classList.toggle("copy-fail", !ok);
+      setTimeout(() => {
+        btn.textContent = "⧉";
+        btn.classList.remove("copied", "copy-fail");
+      }, 1200);
+    });
   });
 }
 
@@ -2181,8 +2179,6 @@ function providerForm(name, pc, isNew) {
         <option value="mock">mock</option>
       </select></div>
     <div class="field-row"><label>${esc(t("prov.endpoint"))}</label><input class="pf-url" type="text" spellcheck="false" placeholder="${esc(t("prov.endpointPh"))}" /></div>
-    <datalist class="pf-dl" hidden></datalist>
-    <div class="field-row"><label>${esc(t("prov.defaultModel"))}</label><input class="pf-model" type="text" spellcheck="false" placeholder="${esc(t("prov.defaultModelPh"))}" /></div>
     <div class="field-row"><label>${esc(t("prov.apiKey"))}</label><input class="pf-key" type="password" autocomplete="new-password" placeholder="${auth.resolved ? esc(t("prov.keySet")) : esc(t("prov.keyUnset"))}" /></div>
     <label class="pf-clear"><input type="checkbox" class="pf-clearbox" /> ${esc(t("prov.clearKey"))}</label>
     <div class="pf-probe-row">
@@ -2197,7 +2193,6 @@ function providerForm(name, pc, isNew) {
     </div>`;
   const kindSel = form.querySelector(".pf-kind");
   const urlInput = form.querySelector(".pf-url");
-  const modelInput = form.querySelector(".pf-model");
   const keyInput = form.querySelector(".pf-key");
   const probeBtn = form.querySelector(".pf-probe");
   const probeStatus = form.querySelector(".pf-probe-status");
@@ -2205,7 +2200,6 @@ function providerForm(name, pc, isNew) {
   const errBox = form.querySelector(".form-error");
   kindSel.value = pc?.kind ?? "openai_compatible";
   urlInput.value = pc?.base_url ?? "";
-  modelInput.value = pc?.default_model ?? "";
   const nameInput = form.querySelector(".pf-name");
   if (nameInput) nameInput.value = name ?? "";
 
@@ -2250,25 +2244,18 @@ function providerForm(name, pc, isNew) {
         setError(res.error);
         return;
       }
-      const dl = form.querySelector(".pf-dl");
-      dl.innerHTML = models.map((m) => `<option value="${esc(m.id)}"></option>`).join("");
       if (models.length === 0) {
         probeStatus.textContent = t("prov.probeEmpty");
         return;
       }
       probeStatus.textContent = t("prov.probeOk", models.length);
       for (const m of models) {
-        const row = document.createElement("button");
-        row.type = "button";
+        // informational only: the model is chosen in the composer picker, not here
+        const row = document.createElement("div");
         row.className = "pf-modelrow";
         const ctxBits = [];
         if (m.contextTokens) ctxBits.push(`${Math.round(m.contextTokens / 1000)}k`);
         row.innerHTML = `<span class="pm-name">${esc(m.id)}</span><span class="pm-meta">${esc(ctxBits.join(" · "))}</span>`;
-        row.addEventListener("click", () => {
-          modelInput.value = m.id;
-          setError("");
-          probeStatus.textContent = t("prov.probePicked", m.id);
-        });
         modelsBox.appendChild(row);
       }
     } catch (err) {
@@ -2311,11 +2298,12 @@ function providerForm(name, pc, isNew) {
       toast(t("prov.badUrl"), "err");
       return;
     }
+    // default_model is intentionally not sent: the model is picked per session
+    // in the composer picker (omitting the key preserves any existing value)
     const payload = {
       name: finalName,
       kind: kindSel.value,
       base_url: url,
-      default_model: modelInput.value.trim(),
     };
     const key = keyInput.value.trim();
     if (key !== "") payload.api_key = key;
@@ -2606,12 +2594,14 @@ async function openNewSessionPanel() {
 }
 
 /** Fill a model <select> from models.list, keeping `want` selectable. */
-async function fillModelSelect(sel, provider, want) {
+async function fillModelSelect(sel, provider, want, hasDefault) {
   sel.innerHTML = "";
-  const def = document.createElement("option");
-  def.value = "";
-  def.textContent = t("ns.modelDefault");
-  sel.appendChild(def);
+  if (hasDefault) {
+    const def = document.createElement("option");
+    def.value = "";
+    def.textContent = t("ns.modelDefault");
+    sel.appendChild(def);
+  }
   try {
     const res = await rpc("models.list", { provider });
     for (const m of res.models ?? []) {
@@ -2623,20 +2613,28 @@ async function fillModelSelect(sel, provider, want) {
   } catch {
     /* provider unreachable — only the default option remains */
   }
-  if (want && ![...sel.options].some((o) => o.value === want)) {
+  const found = want && [...sel.options].some((o) => o.value === want);
+  if (want && !found) {
     const opt = document.createElement("option");
     opt.value = want;
     opt.textContent = want;
     sel.appendChild(opt);
   }
-  sel.value = want ?? "";
+  if (want) sel.value = want;
+  else if (hasDefault) sel.value = "";
+  else if (sel.options.length > 0) sel.selectedIndex = 0; // preselect first model
+}
+
+/** Does this provider have a usable fallback model when none is picked? */
+function providerHasDefaultModel(pc) {
+  return pc?.kind === "mock" || !!(pc?.default_model || ns.defaultModel);
 }
 
 async function refreshModelList() {
   const provider = $("#ns-provider").value;
   const pc = ns.providers[provider] ?? {};
   $("#ns-auth").textContent = `${provider} · ${pc.kind ?? "?"}${providerAuthLabel(pc) ? " · " + providerAuthLabel(pc) : ""}`;
-  await fillModelSelect($("#ns-model"), provider, "");
+  await fillModelSelect($("#ns-model"), provider, "", providerHasDefaultModel(pc));
 }
 
 // ---------------------------------------------------------------------------
@@ -2690,7 +2688,7 @@ async function openModelPopover() {
     box.className = "mp-grp";
     box.innerHTML = `<div class="mp-group">${esc(name)}</div>`;
     list.appendChild(box);
-    mpRow(box, name, "", cur);
+    if (providerHasDefaultModel(ns.providers[name])) mpRow(box, name, "", cur);
     // progressive: fill the group as soon as this provider answers
     rpc("models.list", { provider: name })
       .then((res) => {

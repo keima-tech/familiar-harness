@@ -24,7 +24,11 @@ export type AgentEvent =
   | { type: "compaction"; dropped: number; kept: number }
   /** M2 dynamic approval (serve mode): broadcast, wait for permission.respond */
   | { type: "permission.request"; requestId: string; tool: string; summary: string; detail?: string }
-  | { type: "permission.resolved"; requestId: string; approved: boolean };
+  | { type: "permission.resolved"; requestId: string; approved: boolean }
+  /** M3 self-improvement: staged proposals count after a reviewed turn */
+  | { type: "improvement.staged"; memoryCount: number; skillCount: number }
+  /** M3: memory entries dropped from the prompt injection due to the char cap */
+  | { type: "memory.truncation"; dropped: number };
 
 export const isTerminalEvent = (e: AgentEvent): boolean =>
   e.type === "turn.end" || e.type === "turn.error";

@@ -92,3 +92,40 @@ export interface TodoStore {
   get(sessionId: string): TodoItem[];
   set(sessionId: string, items: TodoItem[]): void;
 }
+
+// ---------------------------------------------------------------------------
+// M3: self-improvement (memory + skills)
+// ---------------------------------------------------------------------------
+
+export type MemorySource = "foreground" | "background";
+
+export interface MemoryEntry {
+  id: string;
+  namespace: string;
+  content: string;
+  tags: string[];
+  createdAt: number;
+  updatedAt: number;
+  source: MemorySource;
+}
+
+/** Staged write waiting under ~/.familiar/pending/{memory,skills}/ (write_approval). */
+export interface PendingWrite {
+  id: string;
+  kind: "create" | "patch" | "remove";
+  /** memory: entry id / skill: name */
+  target?: string;
+  summary: string;
+  reason?: string;
+  warnings?: string[];
+  createdAt: number;
+}
+
+export interface SkillCatalogEntry {
+  name: string;
+  description: string;
+  bodyChars: number;
+  useCount: number;
+  lastUsedAt?: number;
+  createdAt?: number;
+}

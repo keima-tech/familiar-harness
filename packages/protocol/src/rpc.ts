@@ -84,6 +84,16 @@ export const RPC_METHODS = [
   "session.delete",
   "session.send",
   "permission.respond",
+  "memory.list",
+  "memory.pending",
+  "memory.approve",
+  "memory.reject",
+  "memory.approval",
+  "skills.list",
+  "skills.view",
+  "skills.pending",
+  "skills.approve",
+  "skills.reject",
 ] as const;
 
 export type RpcMethod = (typeof RPC_METHODS)[number];

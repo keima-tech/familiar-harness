@@ -196,3 +196,21 @@
   `Build` / `Plan` のまま表示する(説明文は日本語のまま)。
 - **アプリ名を "Familiar Harness" に**: ブラウザタブタイトル・サイドバーのロゴ・
   Electron のウィンドウ title / productName。
+## v1.1 の実装メモ⑨(2026-10-17 深夜、過程の可視化・コピー・tok/s・モデルピッカー)
+
+- **思考過程の可視化**: プロバイダの reasoning チャンクを新イベント
+  `reasoning.delta`(protocol/events.ts)としてループが送出し、assistant メッセージの
+  `meta.reasoning` に永続化。UI はストリーミング中は展開した「💭 思考」ブロック
+  (`details.thinking`)を回答の上に表示し、turn 終了時に折り畳む。
+  永続トランスクリプトでも折り畳みで再表示できる。mock プロバイダも
+  `mock-thinking:` を出すようにし smoke で WS 配信・永続化の両方を検証。
+- **回答フッター + コピー**: 各 assistant メッセージの下に `.msg-foot`
+  (コピーアイコン ⧉ + `Build · provider/model · 秒 · tok/s`)。ライブの turn では
+  turn.end で最後のバブルに付与、永続分はモデル名付き。従来の hover 時 copy ボタンは廃止。
+- **出力速度**: turn.end の usage.completionTokens と経過秒から **tok/s** を算出し、
+  turn 完了ラベルとフッターに表示。
+- **モデルピッカー刷新**: composer のモデルチップのポップオーバーを
+  **検索付きリスト**に変更(イメージ: OpenCode)。プロバイダ別にグループ化、
+  各グループ先頭に「プロバイダーの既定」、モデル行はクリック即適用、現選択は ✓、
+  コンテキスト長はバッジ表示、到達不可プロバイダは注記。下部「⚙ モデルを管理」で
+  設定 > プロバイダーへ。各プロバイダの models.list は並列・逐次反映。

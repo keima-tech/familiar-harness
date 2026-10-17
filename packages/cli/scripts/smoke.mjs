@@ -533,6 +533,32 @@ console.log("— scenario I: web ui transport —");
     "turn events streamed over WS",
     JSON.stringify(frames.map((f) => f.event.type)).slice(0, 160),
   );
+  // reasoning stream: the mock emits a reasoning chunk before its reply
+  const reasoning = frames
+    .filter((f) => f.sessionId === created.result.id && f.event.type === "reasoning.delta")
+    .map((f) => f.event.text)
+    .join("");
+  assert(
+    reasoning.startsWith("mock-thinking:"),
+    "reasoning.delta events streamed over WS",
+    JSON.stringify(reasoning).slice(0, 120),
+  );
+  const persisted = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 27,
+      method: "session.get",
+      params: { id: created.result.id },
+    }),
+  }).then((r) => r.json());
+  const asst = (persisted.result?.messages ?? []).filter((m) => m.role === "assistant").pop();
+  assert(
+    typeof asst?.meta?.reasoning === "string" && asst.meta.reasoning.startsWith("mock-thinking:"),
+    "reasoning persisted on the assistant message meta",
+    JSON.stringify(asst?.meta ?? {}).slice(0, 120),
+  );
   const del = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

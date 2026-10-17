@@ -224,6 +224,9 @@ export class MockProvider implements Provider {
       return { stopReason: "tool_calls" };
     }
 
+    // Default reply: emit a deterministic reasoning chunk first so the UI's
+    // "thinking" block is exercised end-to-end without a real reasoning model.
+    onChunk({ type: "reasoning", text: `mock-thinking: ${userText.slice(0, 40)}` });
     streamText(`mock: ${userText}`, onChunk);
     return { stopReason: "end_turn", usage: { promptTokens: 1, completionTokens: 2 } };
   }

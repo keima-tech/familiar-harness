@@ -9,6 +9,8 @@ export type AgentEvent =
   | { type: "step.start"; turnId: string; index: number }
   | { type: "message.start"; messageId: string; role: "assistant" }
   | { type: "text.delta"; messageId: string; text: string }
+  /** reasoning ("thinking") stream from providers that emit it (o-series, claude thinking, ...) */
+  | { type: "reasoning.delta"; messageId: string; text: string }
   | { type: "message.end"; messageId: string; stopReason?: string; usage?: Usage }
   | { type: "tool.call"; messageId: string; toolCall: ToolCall }
   | {

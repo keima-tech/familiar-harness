@@ -109,19 +109,11 @@
           <div class="menu-wrap">
             <button id="model-chip" type="button" title="セッションのモデル" data-i18n-title="chip.model">モデル ▾</button>
             <div id="model-pop" class="pop up wide" hidden>
-              <div class="field-row">
-                <label for="mp-provider" data-i18n="ns.provider">プロバイダー</label>
-                <select id="mp-provider"></select>
+              <div class="mp-search">
+                <input id="mp-search" type="search" placeholder="モデルを検索…" data-i18n-ph="mp.search" autocomplete="off" spellcheck="false" />
               </div>
-              <div class="field-row">
-                <label for="mp-model" data-i18n="ns.model">モデル</label>
-                <select id="mp-model"></select>
-              </div>
-              <div class="pop-actions">
-                <button id="mp-settings" type="button" class="ghost link-left" data-i18n="mp.settings">プロバイダー設定…</button>
-                <button id="mp-apply" type="button" data-i18n="mp.apply">適用</button>
-                <button id="mp-cancel" type="button" class="ghost" data-i18n="mp.cancel">キャンセル</button>
-              </div>
+              <div id="mp-list" class="mp-list"></div>
+              <button id="mp-settings" type="button" class="mp-foot">⚙ <span data-i18n="mp.manage">モデルを管理</span></button>
             </div>
           </div>
           <button id="send" type="submit" title="送信 (Enter)">↑</button>

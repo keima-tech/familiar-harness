@@ -329,6 +329,42 @@ button.small { padding: 5px 12px; font-size: 12px; }
 }
 .pop[hidden] { display: none; }
 .pop.wide { min-width: 240px; padding: 12px; gap: 8px; }
+
+/* ---- model picker popover (searchable, grouped) ---- */
+#model-pop {
+  display: flex; flex-direction: column; gap: 4px;
+  min-width: 320px; max-width: 400px; padding: 6px;
+}
+.mp-search input {
+  width: 100%; background: var(--panel); border: 1px solid var(--border);
+  color: var(--text); border-radius: 8px; padding: 7px 10px; font: inherit;
+  font-size: 12.5px; outline: none;
+}
+.mp-search input:focus { border-color: var(--accent); }
+.mp-list { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; }
+.mp-grp { display: flex; flex-direction: column; }
+.mp-group {
+  color: var(--dim); font-size: 10.5px; font-weight: 600; letter-spacing: 0.6px;
+  text-transform: uppercase; padding: 8px 10px 3px;
+}
+#model-pop .mp-row {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  background: transparent; border: none; color: var(--text); text-align: left;
+  padding: 7px 10px; font: inherit; font-size: 12.5px; border-radius: 7px; cursor: pointer;
+}
+#model-pop .mp-row:hover { background: var(--hover); }
+.mp-row .mp-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-badge {
+  flex: none; font-size: 10px; color: var(--dim); border: 1px solid var(--border);
+  border-radius: 5px; padding: 1px 6px;
+}
+.mp-check { flex: none; width: 14px; color: var(--accent); font-size: 12px; }
+.mp-note { color: var(--dim); font-size: 11px; padding: 4px 10px 6px; font-style: italic; }
+#model-pop .mp-foot {
+  border-top: 1px solid var(--border); border-radius: 0 0 9px 9px;
+  margin-top: 4px; padding: 9px 10px; font-size: 12px; color: var(--dim);
+}
+#model-pop .mp-foot:hover { color: var(--text); }
 .pop button {
   background: transparent; border: none; color: var(--text); text-align: left;
   padding: 7px 10px; font: inherit; font-size: 13px; border-radius: 6px; cursor: pointer;
@@ -419,13 +455,32 @@ button.small { padding: 5px 12px; font-size: 12px; }
 }
 .codeblock pre code { background: none; border: none; padding: 0; font-size: 12px; }
 
-.msg-copy {
-  position: absolute; right: 0; top: -16px; font-size: 10px; padding: 2px 8px;
-  opacity: 0; border: 1px solid var(--border); background: var(--panel2);
-  color: var(--dim); border-radius: 6px; cursor: pointer; font-weight: 400;
+/* assistant message footer: copy button + meta (mode · model · time · tok/s) */
+.msg-foot {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 4px; color: var(--dim); font-size: 11.5px;
 }
-.msg:hover .msg-copy { opacity: 1; }
-.msg-copy:hover { color: var(--text); }
+.mf-copy {
+  background: transparent; border: none; color: var(--dim); cursor: pointer;
+  font-size: 13px; line-height: 1; padding: 3px 5px; border-radius: 6px;
+}
+.msg:hover .mf-copy { color: var(--text); }
+.mf-copy:hover { background: var(--hover); color: var(--text); }
+.mf-meta { letter-spacing: 0.2px; }
+
+/* reasoning ("thinking") block — visible during streaming, collapsed after */
+details.thinking {
+  margin: 0 0 8px; border-left: 2px solid var(--border);
+  padding-left: 10px; font-size: 12px; color: var(--dim);
+}
+details.thinking summary {
+  cursor: pointer; font-style: italic; user-select: none; list-style: none;
+}
+details.thinking summary::-webkit-details-marker { display: none; }
+details.thinking .th-text {
+  margin: 6px 0 0; white-space: pre-wrap; word-break: break-word;
+  font-family: inherit; font-style: italic; max-height: 220px; overflow-y: auto;
+}
 
 /* ---- OpenCode-style inline tool rows ---- */
 .toolwrap { margin: 10px 0; border-left: 2px solid var(--ok); border-radius: 3px; }

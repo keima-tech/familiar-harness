@@ -186,6 +186,7 @@ export class AgentRunner {
         opts.onEvent({ type: "message.start", messageId: assistantId, role: "assistant" });
 
         const textParts: string[] = [];
+        const reasoningParts: string[] = [];
         let stepStopReason: string | undefined;
         let stepToolCalls: ToolCall[] = [];
 
@@ -215,7 +216,8 @@ export class AgentRunner {
             } else if (chunk.type === "tool_call_start" || chunk.type === "tool_call_delta") {
               observeProviderChunk(assistantId, chunk);
             } else if (chunk.type === "reasoning") {
-              if (process.env["FAMILIAR_DEBUG"]) log.debug("reasoning:", chunk.text);
+              reasoningParts.push(chunk.text);
+              opts.onEvent({ type: "reasoning.delta", messageId: assistantId, text: chunk.text });
             }
           },
         );
@@ -248,7 +250,10 @@ export class AgentRunner {
           content: textParts.join(""),
           createdAt: Date.now(),
           toolCalls: stepToolCalls.length > 0 ? stepToolCalls : undefined,
-          meta: { stopReason: stepStopReason ?? result.stopReason },
+          meta: {
+            stopReason: stepStopReason ?? result.stopReason,
+            ...(reasoningParts.length > 0 ? { reasoning: reasoningParts.join("") } : {}),
+          },
         };
         this.store.appendMessage(session.id, assistantMsg);
         opts.onEvent({

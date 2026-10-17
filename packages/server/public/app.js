@@ -97,8 +97,11 @@ const STR = {
     "mode.plan": "Plan",
     "mode.planDesc": "読み取り専用ツール",
     "chip.modelLabel": "モデル",
-    "mp.apply": "適用",
-    "mp.cancel": "キャンセル",
+    "mp.search": "モデルを検索…",
+    "mp.manage": "モデルを管理",
+    "mp.unreachable": "一覧取得失敗",
+    "msg.copy": "回答をコピー",
+    "msg.thinking": "思考",
     "send.enter": "送信 (Enter)",
     "send.ctrlEnter": "送信 (Ctrl+Enter)",
     "composer.phEnter": "何でも聞いてください (Enter で送信 / Shift+Enter で改行)",
@@ -317,8 +320,11 @@ const STR = {
     "mode.plan": "Plan",
     "mode.planDesc": "read-only tools",
     "chip.modelLabel": "model",
-    "mp.apply": "Apply",
-    "mp.cancel": "Cancel",
+    "mp.search": "Search models…",
+    "mp.manage": "Manage models",
+    "mp.unreachable": "unreachable",
+    "msg.copy": "Copy answer",
+    "msg.thinking": "Thinking",
     "send.enter": "send (Enter)",
     "send.ctrlEnter": "send (Ctrl+Enter)",
     "composer.phEnter": "Ask anything… (Enter to send / Shift+Enter for a new line)",
@@ -748,6 +754,8 @@ const state = {
   turnStartedAt: null,
   turnTimer: null,
   lastElapsed: null,
+  /** live assistant bubbles of the running turn (thinking collapse + footer). */
+  turnBubbles: [],
   mode: "build", // "build" | "plan" — passed per send (plan => read-only tools)
   /** pending provider/model change before the next turn (applied + persisted). */
   draft: { provider: "", model: "" },
@@ -1086,11 +1094,16 @@ function renderTranscript(messages) {
     t.appendChild(emptyStateNode());
     return;
   }
+  const cur = state.currentSession;
+  const modelBits = [cur?.provider, cur?.model].filter(Boolean).join("/");
   for (const m of visible) {
     if (m.role === "user") {
       appendMessage("user", m.content, null);
     } else if (m.role === "assistant") {
-      appendMessage("assistant", m.content, null);
+      appendMessage("assistant", m.content, null, {
+        reasoning: typeof m.meta?.reasoning === "string" ? m.meta.reasoning : undefined,
+        footBits: modelBits ? [modelBits] : [],
+      });
     } else {
       const call = Array.isArray(m.toolCalls) ? m.toolCalls[0] : undefined;
       const duration = m.meta?.durationMs;
@@ -1116,35 +1129,50 @@ function emptyStateNode() {
   return div;
 }
 
-/** User / assistant bubbles. */
-function appendMessage(role, content, toolCalls) {
-  const t = $("#transcript");
+/** User / assistant bubbles. opts: { reasoning, footBits, foot } */
+function appendMessage(role, content, toolCalls, opts = {}) {
+  const tr = $("#transcript");
   const div = document.createElement("div");
   div.className = `msg ${role}`;
-  const copyBtn = role === "assistant" ? `<button class="msg-copy ghost" title="copy message">copy</button>` : "";
-  div.innerHTML = `<div class="bubble"></div>${copyBtn}`;
+  div.innerHTML = `<div class="bubble"></div>`;
   const bubble = div.querySelector(".bubble");
   if (role === "assistant") {
-    bubble.innerHTML = mdRender(content);
-    wireBubble(div, bubble, String(content ?? ""));
+    if (opts.reasoning) {
+      const det = document.createElement("details");
+      det.className = "thinking";
+      det.innerHTML = `<summary>💭 ${esc(t("msg.thinking"))}</summary><pre class="th-text"></pre>`;
+      det.querySelector(".th-text").textContent = String(opts.reasoning);
+      bubble.appendChild(det);
+    }
+    const contentEl = document.createElement("div");
+    contentEl.className = "md";
+    contentEl.innerHTML = mdRender(content);
+    bubble.appendChild(contentEl);
+    if (opts.foot !== false) addMsgFooter(bubble, String(content ?? ""), opts.footBits);
+    wireCodeButtons(div);
   } else {
     bubble.textContent = content ?? "";
   }
   void toolCalls;
-  t.appendChild(div);
+  tr.appendChild(div);
   scrollBottom();
   return bubble;
 }
 
-function wireBubble(div, bubble, raw) {
-  const btn = div.querySelector(".msg-copy");
-  if (btn) {
-    btn.addEventListener("click", () => {
-      void copyText(raw).then((ok) =>
-        ok ? toast(t("toast.copied"), "ok") : toast(t("toast.copyFailed"), "err"));
-    });
-  }
-  wireCodeButtons(div, bubble);
+/** Footer under an assistant bubble: copy button + meta bits (mode · model · time · tok/s). */
+function addMsgFooter(bubbleNode, raw, bits) {
+  const msg = bubbleNode.closest(".msg");
+  if (!msg || msg.querySelector(".msg-foot")) return;
+  const foot = document.createElement("div");
+  foot.className = "msg-foot";
+  foot.innerHTML =
+    `<button class="mf-copy" type="button" title="${esc(t("msg.copy"))}">⧉</button>` +
+    (bits && bits.length ? `<span class="mf-meta">${esc(bits.join(" · "))}</span>` : "");
+  msg.appendChild(foot);
+  foot.querySelector(".mf-copy").addEventListener("click", () => {
+    void copyText(raw).then((ok) =>
+      ok ? toast(t("toast.copied"), "ok") : toast(t("toast.copyFailed"), "err"));
+  });
 }
 
 function wireCodeButtons(scope) {
@@ -1400,12 +1428,17 @@ function liveBubble(sessionId) {
   if (sessionId !== state.sessionId) return null;
   let entry = state.pendingEvents.get(sessionId);
   if (!entry) {
-    const bubble = appendMessage("assistant", "");
-    entry = { bubble, text: "" };
+    const bubble = appendMessage("assistant", "", null, { foot: false });
+    bubble.innerHTML = "";
+    const contentEl = document.createElement("div");
+    contentEl.className = "md";
+    const caret = document.createElement("span");
+    caret.className = "caret";
+    bubble.appendChild(contentEl);
+    bubble.appendChild(caret);
+    entry = { bubble, contentEl, text: "", reasoningEl: null, reasoning: "" };
     state.pendingEvents.set(sessionId, entry);
-    const live = document.createElement("span");
-    live.className = "caret";
-    bubble.appendChild(live);
+    state.turnBubbles.push(entry);
   }
   return entry;
 }
@@ -1486,6 +1519,7 @@ function onEvent(sessionId, e) {
 
   switch (e.type) {
     case "turn.start":
+      state.turnBubbles = [];
       setBusy(true);
       break;
     case "message.start":
@@ -1495,9 +1529,25 @@ function onEvent(sessionId, e) {
       const live = liveBubble(sessionId);
       if (live) {
         live.text += e.text;
-        const caret = live.bubble.querySelector(".caret");
-        live.bubble.innerHTML = mdRender(live.text);
-        if (caret) live.bubble.appendChild(caret);
+        live.contentEl.innerHTML = mdRender(live.text);
+        scrollBottom();
+      }
+      break;
+    }
+    case "reasoning.delta": {
+      const live = liveBubble(sessionId);
+      if (live) {
+        if (!live.reasoningEl) {
+          const det = document.createElement("details");
+          det.className = "thinking";
+          det.open = true;
+          det.innerHTML = `<summary>💭 ${esc(t("msg.thinking"))}</summary><pre class="th-text"></pre>`;
+          live.bubble.insertBefore(det, live.contentEl);
+          live.reasoningEl = det.querySelector(".th-text");
+          live.thinkingEl = det;
+        }
+        live.reasoning += e.text;
+        live.reasoningEl.textContent = live.reasoning;
         scrollBottom();
       }
       break;
@@ -1533,10 +1583,26 @@ function onEvent(sessionId, e) {
       if (u.promptTokens !== undefined) {
         state.lastPromptTokensBySession[sessionId] = u.promptTokens;
       }
-      const toks = u.promptTokens !== undefined
-        ? ` · ↑${u.promptTokens} ↓${u.completionTokens ?? 0} tok` : "";
       setBusy(false);
+      const secs = parseFloat(state.lastElapsed ?? "") || 0;
+      const tps = secs > 0 && (u.completionTokens ?? 0) > 0
+        ? Math.round((u.completionTokens ?? 0) / secs) : 0;
+      const toks = u.promptTokens !== undefined
+        ? ` · ↑${u.promptTokens} ↓${u.completionTokens ?? 0} tok${tps ? ` (${tps} tok/s)` : ""}` : "";
       setTurnEndLabel(t("turn.done", `${state.lastElapsed ?? ""}${toks}`));
+      // collapse thinking blocks; stamp copy/meta footer on the last bubble
+      for (const b of state.turnBubbles) if (b.thinkingEl) b.thinkingEl.open = false;
+      const lastBubble = state.turnBubbles[state.turnBubbles.length - 1];
+      if (lastBubble) {
+        const s = state.currentSession;
+        const bits = [t(state.mode === "plan" ? "mode.plan" : "mode.build")];
+        const modelBits = [s?.provider, s?.model].filter(Boolean).join("/");
+        if (modelBits) bits.push(modelBits);
+        if (secs > 0) bits.push(`${secs.toFixed(1)}s`);
+        if (tps) bits.push(`${tps} tok/s`);
+        addMsgFooter(lastBubble.bubble, lastBubble.text, bits);
+      }
+      state.turnBubbles = [];
       updateContextGauge();
       maybeNotify();
       state.pendingEvents.delete(sessionId);
@@ -2571,6 +2637,11 @@ function renderModelChip() {
   $("#model-chip").textContent = `${provider ?? t("chip.modelLabel")}${model ? "/" + model : ""} ▾`;
 }
 
+// ---------------------------------------------------------------------------
+// model picker popover — searchable list grouped by provider (OpenCode-style)
+// ---------------------------------------------------------------------------
+let mpFilterBound = false;
+
 async function openModelPopover() {
   const pop = $("#model-pop");
   if (!pop.hidden) {
@@ -2579,32 +2650,80 @@ async function openModelPopover() {
   }
   closeAllPops();
   if (!(await ensureNsConfig())) return;
-  const sel = $("#mp-provider");
-  sel.innerHTML = "";
+  const list = $("#mp-list");
+  list.innerHTML = "";
+  $("#mp-search").value = "";
+  const cur = {
+    provider: state.draft.provider || state.currentSession?.provider || ns.defaultProvider || "",
+    model: state.draft.model || state.currentSession?.model || "",
+  };
   const names = Object.keys(ns.providers).sort((a, b) =>
     a === ns.defaultProvider ? -1 : b === ns.defaultProvider ? 1 : a.localeCompare(b));
   for (const name of names) {
-    const pc = ns.providers[name] ?? {};
-    const hint = providerAuthLabel(pc);
-    const opt = document.createElement("option");
-    opt.value = name;
-    opt.textContent = hint ? `${name} (${hint})` : name;
-    sel.appendChild(opt);
+    const box = document.createElement("div");
+    box.className = "mp-grp";
+    box.innerHTML = `<div class="mp-group">${esc(name)}</div>`;
+    list.appendChild(box);
+    mpRow(box, name, "", cur);
+    // progressive: fill the group as soon as this provider answers
+    rpc("models.list", { provider: name })
+      .then((res) => {
+        for (const m of res.models ?? []) mpRow(box, name, m.id, cur, m.contextTokens);
+        applyMpFilter();
+      })
+      .catch(() => {
+        const note = document.createElement("div");
+        note.className = "mp-note";
+        note.textContent = t("mp.unreachable");
+        box.appendChild(note);
+        applyMpFilter();
+      });
   }
-  const current = state.draft.provider || state.currentSession?.provider || ns.defaultProvider || names[0];
-  sel.value = names.includes(current) ? current : names[0] ?? "";
+  if (!mpFilterBound) {
+    mpFilterBound = true;
+    $("#mp-search").addEventListener("input", applyMpFilter);
+  }
+  applyMpFilter();
   pop.hidden = false;
-  await refreshModelPopover(state.draft.model || state.currentSession?.model || "");
+  $("#mp-search").focus();
 }
 
-async function refreshModelPopover(want = "") {
-  const provider = $("#mp-provider").value;
-  await fillModelSelect($("#mp-model"), provider, want);
+function mpRow(box, provider, model, cur, contextTokens) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "mp-row";
+  const label = model === "" ? t("ns.modelDefault") : model;
+  const selected = provider === cur.provider && model === cur.model;
+  b.innerHTML =
+    `<span class="mp-name">${esc(label)}</span>` +
+    (contextTokens ? `<span class="mp-badge">${Math.round(contextTokens / 1000)}k</span>` : "") +
+    `<span class="mp-check">${selected ? "✓" : ""}</span>`;
+  b.dataset.search = `${provider} ${model}`.toLowerCase();
+  b.addEventListener("click", () => void applyModelChoice(provider, model));
+  box.appendChild(b);
+  return b;
 }
 
-async function applyModelPopover() {
-  const provider = $("#mp-provider").value || ns.defaultProvider || "mock";
-  const model = $("#mp-model").value.trim();
+function applyMpFilter() {
+  const q = ($("#mp-search").value || "").trim().toLowerCase();
+  for (const box of $("#mp-list").children) {
+    let any = false;
+    for (const row of box.querySelectorAll(".mp-row")) {
+      const hit = q === "" || (row.dataset.search ?? "").includes(q);
+      row.hidden = !hit;
+      if (hit) any = true;
+    }
+    const note = box.querySelector(".mp-note");
+    if (note) {
+      note.hidden = q !== "";
+      if (!note.hidden) any = true;
+    }
+    box.hidden = !any;
+  }
+}
+
+/** Apply a provider/model choice immediately (click = select, no Apply button). */
+async function applyModelChoice(provider, model) {
   const prevChip = $("#model-chip").textContent;
   $("#model-pop").hidden = true;
   state.draft.provider = provider;
@@ -2626,7 +2745,7 @@ async function applyModelPopover() {
     $("#session-meta").textContent = bits.join(" · ");
     renderModelChip();
     refreshSessions();
-    toast(t("toast.modelSet", `${updated.provider}/${updated.model}`), "ok");
+    toast(t("toast.modelSet", bits.join("/")), "ok");
   } catch (err) {
     $("#model-chip").textContent = prevChip;
     toast(t("toast.modelFailed", err.message), "err");
@@ -2822,13 +2941,8 @@ function boot() {
     setMode(btn.dataset.mode);
   });
   $("#model-chip").addEventListener("click", () => void openModelPopover());
-  $("#mp-provider").addEventListener("change", () => void refreshModelPopover(""));
   $("#mp-settings").addEventListener("click", () => openSettingsModal("providers"));
   $("#ns-settings").addEventListener("click", () => openSettingsModal("providers"));
-  $("#mp-apply").addEventListener("click", () => void applyModelPopover());
-  $("#mp-cancel").addEventListener("click", () => {
-    $("#model-pop").hidden = true;
-  });
 
   // close popovers / context menu on outside click, scroll or resize
   document.addEventListener("click", (ev) => {

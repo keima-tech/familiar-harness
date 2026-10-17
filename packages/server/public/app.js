@@ -1782,13 +1782,19 @@ function maybeNotify() {
   } catch { /* notification API quirks */ }
 }
 
-function segButton(label, value, active, onClick) {
-  const b = document.createElement("button");
-  b.type = "button";
-  b.className = `seg${active ? " active" : ""}`;
-  b.textContent = label;
-  b.addEventListener("click", onClick);
-  return b;
+/** Dropdown control for settings rows (replaces the old segmented buttons). */
+function selectControl(items, current, onChange) {
+  const sel = document.createElement("select");
+  sel.className = "select-control";
+  for (const [label, value] of items) {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = label;
+    if (value === current) opt.selected = true;
+    sel.appendChild(opt);
+  }
+  sel.addEventListener("change", () => onChange(sel.value));
+  return sel;
 }
 
 /** Settings row: label + description on the left, control on the right. */
@@ -1896,17 +1902,10 @@ function renderGeneralSection(content) {
   c.appendChild(settingRow(
     t("set.lang"),
     t("set.langDesc"),
-    (() => {
-      const seg = document.createElement("div");
-      seg.className = "seg-row";
-      for (const [label, value] of [["日本語", "ja"], ["English", "en"]]) {
-        seg.appendChild(segButton(label, value, lang === value, () => {
-          setLang(value);
-          renderSettingsSection("general");
-        }));
-      }
-      return seg;
-    })(),
+    selectControl([["日本語", "ja"], ["English", "en"]], lang, (value) => {
+      setLang(value);
+      renderSettingsSection("general");
+    }),
   ));
   content.appendChild(c);
 
@@ -1946,15 +1945,19 @@ function renderGeneralSection(content) {
 function renderAppearanceSection(content) {
   const pref = currentModePref();
   const c = card(t("set.colors"), t("set.appearanceDesc"));
-  const seg = document.createElement("div");
-  seg.className = "seg-row";
-  for (const [label, value] of [[t("set.light"), "light"], [t("set.dark"), "dark"], [t("set.system"), "system"]]) {
-    seg.appendChild(segButton(label, value, pref === value, () => {
-      setModePref(value);
-      renderSettingsSection("appearance");
-    }));
-  }
-  c.appendChild(seg);
+  const modeRow = document.createElement("div");
+  modeRow.className = "select-row";
+  modeRow.appendChild(
+    selectControl(
+      [[t("set.light"), "light"], [t("set.dark"), "dark"], [t("set.system"), "system"]],
+      pref,
+      (value) => {
+        setModePref(value);
+        renderSettingsSection("appearance");
+      },
+    ),
+  );
+  c.appendChild(modeRow);
 
   const grid = document.createElement("div");
   grid.className = "theme-grid";
@@ -1981,24 +1984,30 @@ function renderAppearanceSection(content) {
   content.appendChild(c);
 
   const c2 = card(t("set.display"));
-  const sizeSeg = document.createElement("div");
-  sizeSeg.className = "seg-row";
-  for (const [label, value] of [[t("size.s"), "s"], [t("size.m"), "m"], [t("size.l"), "l"], [t("size.xl"), "xl"]]) {
-    sizeSeg.appendChild(segButton(label, value, prefs.fontSize === value, () => {
-      savePrefs({ fontSize: value });
-      renderSettingsSection("appearance");
-    }));
-  }
-  c2.appendChild(settingRow(t("set.fontSize"), t("set.fontSizeDesc"), sizeSeg));
-  const widthSeg = document.createElement("div");
-  widthSeg.className = "seg-row";
-  for (const [label, value] of [[t("size.normal"), "normal"], [t("size.wide"), "wide"], [t("size.full"), "full"]]) {
-    widthSeg.appendChild(segButton(label, value, prefs.width === value, () => {
-      savePrefs({ width: value });
-      renderSettingsSection("appearance");
-    }));
-  }
-  c2.appendChild(settingRow(t("set.width"), t("set.widthDesc"), widthSeg));
+  c2.appendChild(settingRow(
+    t("set.fontSize"),
+    t("set.fontSizeDesc"),
+    selectControl(
+      [[t("size.s"), "s"], [t("size.m"), "m"], [t("size.l"), "l"], [t("size.xl"), "xl"]],
+      prefs.fontSize,
+      (value) => {
+        savePrefs({ fontSize: value });
+        renderSettingsSection("appearance");
+      },
+    ),
+  ));
+  c2.appendChild(settingRow(
+    t("set.width"),
+    t("set.widthDesc"),
+    selectControl(
+      [[t("size.normal"), "normal"], [t("size.wide"), "wide"], [t("size.full"), "full"]],
+      prefs.width,
+      (value) => {
+        savePrefs({ width: value });
+        renderSettingsSection("appearance");
+      },
+    ),
+  ));
   const reset = document.createElement("button");
   reset.textContent = t("set.reset");
   reset.className = "ghost small";

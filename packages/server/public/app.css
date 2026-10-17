@@ -134,15 +134,18 @@ body {
   bottom: calc(100% + 8px);
 }
 
-/* ---- settings drawer ---- */
-.seg-row { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin: 8px 0 12px; }
-.seg {
-  flex: 1; background: transparent; border: none; color: var(--dim);
-  padding: 7px 0; font: inherit; font-size: 12.5px; cursor: pointer;
+/* ---- settings controls ---- */
+/* native widgets (select, scrollbars) follow the active palette */
+html[data-mode="dark"] { color-scheme: dark; }
+html[data-mode="light"] { color-scheme: light; }
+.select-row { margin: 8px 0 12px; }
+.select-control {
+  background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+  border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 12.5px;
+  cursor: pointer; outline: none; min-width: 130px;
 }
-.seg + .seg { border-left: 1px solid var(--border); }
-.seg.active { background: var(--hover); color: var(--text); font-weight: 600; }
-.seg:hover { color: var(--text); }
+.select-control:hover { border-color: var(--accent); }
+.select-control:focus { border-color: var(--accent); }
 .theme-grid {
   display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;
 }

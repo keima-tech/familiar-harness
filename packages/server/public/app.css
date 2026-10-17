@@ -328,6 +328,8 @@ button.small { padding: 5px 12px; font-size: 12px; }
   display: flex; flex-direction: column;
 }
 .pop[hidden] { display: none; }
+/* the hidden attribute must win over any display rule (flex/grid overrides it) */
+[hidden] { display: none !important; }
 .pop.wide { min-width: 240px; padding: 12px; gap: 8px; }
 
 /* ---- model picker popover (searchable, grouped) ---- */

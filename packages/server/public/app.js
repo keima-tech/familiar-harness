@@ -2147,6 +2147,27 @@ function providerAuthLabel(pc) {
   return auth.resolved ? t("prov.keyOk") : t("prov.keyMissing");
 }
 
+/**
+ * Providers worth offering in pickers: mock, endpoints that need no auth
+ * (Ollama / local servers) or ones whose API key actually resolves.
+ * Placeholder entries like "openai" without a key are hidden.
+ */
+function isProviderUsable(pc) {
+  const src = pc?.auth?.source ?? "none";
+  // "none" (or legacy "env:none") = key-less endpoint like Ollama; mock always ok.
+  return (
+    pc?.kind === "mock" || src === "none" || src === "env:none" || pc?.auth?.resolved === true
+  );
+}
+
+/** Usable provider names (default first); falls back to all when none qualify. */
+function usableProviderNames() {
+  let names = Object.keys(ns.providers).filter((n) => isProviderUsable(ns.providers[n]));
+  if (names.length === 0) names = Object.keys(ns.providers);
+  return names.sort((a, b) =>
+    a === ns.defaultProvider ? -1 : b === ns.defaultProvider ? 1 : a.localeCompare(b));
+}
+
 function providerForm(name, pc, isNew) {
   const form = document.createElement("div");
   form.className = "pform";
@@ -2557,8 +2578,7 @@ async function openNewSessionPanel() {
   }
   const selProvider = $("#ns-provider");
   selProvider.innerHTML = "";
-  const names = Object.keys(ns.providers).sort();
-  names.sort((a, b) => (a === ns.defaultProvider ? -1 : b === ns.defaultProvider ? 1 : a.localeCompare(b)));
+  const names = usableProviderNames();
   for (const name of names) {
     const pc = ns.providers[name] ?? {};
     const hint = providerAuthLabel(pc);
@@ -2657,8 +2677,14 @@ async function openModelPopover() {
     provider: state.draft.provider || state.currentSession?.provider || ns.defaultProvider || "",
     model: state.draft.model || state.currentSession?.model || "",
   };
-  const names = Object.keys(ns.providers).sort((a, b) =>
-    a === ns.defaultProvider ? -1 : b === ns.defaultProvider ? 1 : a.localeCompare(b));
+  const names = usableProviderNames();
+  const addNote = (box) => {
+    const note = document.createElement("div");
+    note.className = "mp-note";
+    note.textContent = t("mp.unreachable");
+    box.appendChild(note);
+    applyMpFilter();
+  };
   for (const name of names) {
     const box = document.createElement("div");
     box.className = "mp-grp";
@@ -2668,16 +2694,13 @@ async function openModelPopover() {
     // progressive: fill the group as soon as this provider answers
     rpc("models.list", { provider: name })
       .then((res) => {
-        for (const m of res.models ?? []) mpRow(box, name, m.id, cur, m.contextTokens);
-        applyMpFilter();
+        if (res.error) addNote(box);
+        else {
+          for (const m of res.models ?? []) mpRow(box, name, m.id, cur, m.contextTokens);
+          applyMpFilter();
+        }
       })
-      .catch(() => {
-        const note = document.createElement("div");
-        note.className = "mp-note";
-        note.textContent = t("mp.unreachable");
-        box.appendChild(note);
-        applyMpFilter();
-      });
+      .catch(() => addNote(box));
   }
   if (!mpFilterBound) {
     mpFilterBound = true;

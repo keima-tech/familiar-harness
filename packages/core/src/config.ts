@@ -332,7 +332,8 @@ export function describeAuthSource(
   if (auth.api_key) return { source: "inline", resolved: true };
   if (auth.api_key_file)
     return { source: `file:${expandHome(auth.api_key_file)}`, resolved: true };
-  if (auth.env) return { source: `env:${auth.env}`, resolved: !!resolveAuthSecret(auth) };
+  if (auth.env && auth.env !== "none")
+    return { source: `env:${auth.env}`, resolved: !!resolveAuthSecret(auth) };
   return { source: "none", resolved: false };
 }
 

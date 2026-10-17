@@ -264,6 +264,14 @@ const STR = {
     "cwd.ok": "設定",
     "cwd.cancel": "キャンセル",
     "cwd.noMatch": "一致するフォルダーがありません",
+    "cmd.new": "新しいセッション",
+    "cmd.model": "モデルを選択",
+    "cmd.plan": "Plan モードへ切替",
+    "cmd.build": "Build モードへ切替",
+    "cmd.export": "Markdown で出力",
+    "cmd.retry": "直前のターンを再実行",
+    "cmd.settings": "設定を開く",
+    "cmd.search": "トランスクリプト内検索",
     "toast.cwdSet": "作業フォルダー: {0}",
     "toast.cwdFailed": "フォルダーを変更できませんでした: {0}",
     "prov.badUrl": "エンドポイントは http:// か https:// で始めてください",
@@ -274,6 +282,10 @@ const STR = {
     "ext.mcp": "MCP サーバー",
     "ext.mcpDesc": "mcp.status より(n. = そのサーバーの公開ツール数)。設定は config.yaml の mcp.servers です。",
     "ext.lsp": "LSP サーバー",
+    "ext.skills": "スキル (Skills)",
+    "ext.skillsDesc": "~/.familiar/skills/<名前>/SKILL.md。チャットで「〜するスキルを作って」と依頼すると skill_manage ツールが提案を作り、承認後に有効になります。",
+    "ext.noSkills": "スキルはまだありません",
+    "ext.skillUses": "使用 {0} 回 · {1} 文字",
     "ext.lspDesc": "lsp_diagnostics が使用する言語サーバー。設定は config.yaml の lsp.servers です。",
     "ext.enabled": "有効",
     "ext.disabled": "無効",
@@ -483,6 +495,14 @@ const STR = {
     "cwd.ok": "Set",
     "cwd.cancel": "Cancel",
     "cwd.noMatch": "no matching folders",
+    "cmd.new": "new session",
+    "cmd.model": "pick a model",
+    "cmd.plan": "switch to Plan mode",
+    "cmd.build": "switch to Build mode",
+    "cmd.export": "export as markdown",
+    "cmd.retry": "retry the last turn",
+    "cmd.settings": "open settings",
+    "cmd.search": "search the transcript",
     "toast.cwdSet": "working folder: {0}",
     "toast.cwdFailed": "could not change folder: {0}",
     "prov.badUrl": "endpoint must start with http:// or https://",
@@ -493,6 +513,10 @@ const STR = {
     "ext.mcp": "MCP servers",
     "ext.mcpDesc": "from mcp.status (n. = tools exposed by that server). Configure in config.yaml [mcp.servers].",
     "ext.lsp": "LSP servers",
+    "ext.skills": "Skills",
+    "ext.skillsDesc": "~/.familiar/skills/<name>/SKILL.md. Ask in chat to create one — the skill_manage tool stages a proposal that activates after approval.",
+    "ext.noSkills": "no skills yet",
+    "ext.skillUses": "used {0}× · {1} chars",
     "ext.lspDesc": "language servers used by lsp_diagnostics. Configure in config.yaml [lsp.servers].",
     "ext.enabled": "enabled",
     "ext.disabled": "disabled",
@@ -1326,8 +1350,58 @@ function applyTranscriptFilter() {
 // ---------------------------------------------------------------------------
 // topbar session menu (rename / export / delete)
 // ---------------------------------------------------------------------------
+/** Composer slash commands (OpenCode-style): type "/" to list, Enter to run. */
+const COMMANDS = [
+  { cmd: "/new", key: "cmd.new", run: () => void newSession() },
+  { cmd: "/model", key: "cmd.model", run: () => void openModelPopover() },
+  { cmd: "/plan", key: "cmd.plan", run: () => setMode("plan") },
+  { cmd: "/build", key: "cmd.build", run: () => setMode("build") },
+  { cmd: "/export", key: "cmd.export", run: () => void exportMarkdown() },
+  { cmd: "/retry", key: "cmd.retry", run: () => retryLastTurn() },
+  { cmd: "/settings", key: "cmd.settings", run: () => openSettingsModal() },
+  { cmd: "/search", key: "cmd.search", run: () => toggleSearch() },
+];
+
+function matchingCommands(value) {
+  const v = value.trim().toLowerCase();
+  if (v === "" || v.includes(" ")) return [];
+  return COMMANDS.filter((c) => c.cmd.startsWith(v));
+}
+
+function refreshCmdPop() {
+  const pop = $("#cmd-pop");
+  const list = $("#cmd-list");
+  const items = matchingCommands($("#input").value);
+  list.innerHTML = "";
+  pop.hidden = items.length === 0;
+  for (const c of items) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "mp-row";
+    row.dataset.cmd = c.cmd;
+    row.innerHTML =
+      `<span class="mp-name"><span class="cmd-syntax">${esc(c.cmd)}</span>` +
+      `<span class="cmd-desc">${esc(t(c.key))}</span></span>`;
+    row.addEventListener("click", () => {
+      $("#cmd-pop").hidden = true;
+      $("#input").value = "";
+      c.run();
+    });
+    list.appendChild(row);
+  }
+}
+
+function runFirstCommand() {
+  const items = matchingCommands($("#input").value);
+  if (items.length === 0) return false;
+  $("#cmd-pop").hidden = true;
+  $("#input").value = "";
+  items[0].run();
+  return true;
+}
+
 function closeAllPops() {
-  for (const id of ["session-menu-pop", "mode-pop", "model-pop", "plus-pop"]) {
+  for (const id of ["session-menu-pop", "mode-pop", "model-pop", "plus-pop", "cmd-pop"]) {
     $(`#${id}`).hidden = true;
   }
 }
@@ -2477,6 +2551,23 @@ async function renderProvidersSection(content) {
 }
 
 async function renderExtensionsSection(content) {
+  // Skills (M3 self-improvement catalog)
+  const skillCard = card(t("ext.skills"), t("ext.skillsDesc"));
+  content.appendChild(skillCard);
+  try {
+    const res = await rpc("skills.list");
+    const skills = res.skills ?? [];
+    if (skills.length === 0) skillCard.appendChild(pairRow("—", t("ext.noSkills")));
+    for (const sk of skills) {
+      const meta = t("ext.skillUses", sk.useCount ?? 0, sk.bodyChars ?? 0);
+      skillCard.appendChild(pairRow(sk.name, `${sk.description ?? ""}${sk.description ? " · " : ""}${meta}`));
+    }
+  } catch (err) {
+    const row = document.createElement("div");
+    row.className = "status-err";
+    row.textContent = err.message;
+    skillCard.appendChild(row);
+  }
   // MCP servers
   const mcpCard = card(t("ext.mcp"), t("ext.mcpDesc"));
   content.appendChild(mcpCard);
@@ -3009,6 +3100,15 @@ function boot() {
   });
   const input = $("#input");
   input.addEventListener("keydown", (ev) => {
+    // slash command pop takes priority: Enter runs, Escape dismisses
+    if (!$("#cmd-pop").hidden && (ev.key === "Enter" || ev.key === "Escape")) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (ev.key === "Escape") $("#cmd-pop").hidden = true;
+      else runFirstCommand();
+      return;
+    }
+    if (!$("#cmd-pop").hidden && ev.key === "Tab") $("#cmd-pop").hidden = true;
     const wantsSend = prefs.sendWithEnter
       ? ev.key === "Enter" && !ev.shiftKey
       : ev.key === "Enter" && (ev.ctrlKey || ev.metaKey);
@@ -3017,7 +3117,10 @@ function boot() {
       void send();
     }
   });
-  input.addEventListener("input", () => autoSize(input));
+  input.addEventListener("input", () => {
+    autoSize(input);
+    refreshCmdPop();
+  });
 
   $("#toggle-inbox").addEventListener("click", () => openDrawer("inbox"));
   $("#close-inbox").addEventListener("click", () => {

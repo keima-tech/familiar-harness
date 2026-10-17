@@ -281,3 +281,16 @@
 - **承認インボックス / ステータスの起動ボタンをトップバーへ**: 左下 side-foot から
   `✎`(承認、バッジ付き)と `ⓘ`(ステータス)のアイコンボタンとして右上に移動。
   side-foot は「⚙ 設定」のみに。ドロワー本体とワイヤリング(id)は不変。
+## v1.1 の実装メモ⑯(2026-10-18、cwd モーダル余白・スラッシュコマンド・Skills UI)
+
+- **cwd モーダルの余白を整理**: 基底 `.modal` の固定高さ(min(600px, 84vh))と
+  padding ゼロが原因で窮屈に見えていた。`.cwd-modal` は `height: auto` +
+  padding 18px + gap 12px に。
+- **スラッシュコマンド(OpenCode 互換)**: 入力欄が `/` で始まるとコマンド候補
+  (`#cmd-pop`)を出す。Enter で先頭候補を実行、Escape で閉じる。実装: /new /model
+  /plan /build /export /retry /settings /search。
+- **設定 > 拡張機能に「スキル (Skills)」カード**: 既存 `skills.list` RPC を表示。
+  名前・説明・使用回数・本文文字数。スキルは chat で依頼(skill_manage)または
+  ~/.familiar/skills/<名前>/SKILL.md 手動で追加できる。
+- 比較で残る今後候補: ツール行の diff 表示、todo パネル(todo.list RPC 未実装)、
+  @ ファイル補完、メッセージ時刻表示。

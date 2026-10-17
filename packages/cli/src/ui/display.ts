@@ -93,29 +93,141 @@ export class ThinkingFilter {
   }
 }
 
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+/**
+ * Single-line spinner with elapsed seconds ("⠙ working… 3.2s"). Pauses while
+ * real output is printed so streams never interleave. No-op without a TTY.
+ */
+export class Spinner {
+  private frame = 0;
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private startedAt = 0;
+  private paused = false;
+  private shown = false;
+
+  constructor(
+    private readonly enabled: boolean,
+    private readonly label = "working",
+  ) {}
+
+  start(): void {
+    if (!this.enabled) return;
+    this.startedAt = Date.now();
+    this.paused = false;
+    if (this.timer) clearInterval(this.timer);
+    this.timer = setInterval(() => this.paint(), 120);
+    this.paint();
+  }
+
+  private paint(): void {
+    if (!this.enabled || this.paused) return;
+    const secs = ((Date.now() - this.startedAt) / 1000).toFixed(1);
+    const glyph = SPINNER_FRAMES[this.frame % SPINNER_FRAMES.length] ?? "⠋";
+    this.frame += 1;
+    process.stdout.write(`\r${c.faint(`${glyph} ${this.label}… ${secs}s`)}`);
+    this.shown = true;
+  }
+
+  /** Erase the spinner line so real output can be printed. */
+  pause(): void {
+    if (!this.enabled || !this.shown) return;
+    process.stdout.write("\r\x1b[2K");
+    this.shown = false;
+  }
+
+  resume(): void {
+    if (!this.enabled || this.paused) return;
+    this.paint();
+  }
+
+  stop(): void {
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+    if (this.shown) {
+      process.stdout.write("\r\x1b[2K");
+      this.shown = false;
+    }
+  }
+}
+
+/** Render a unified diff with ANSI colors (bounded to `maxLines`). */
+export function renderDiff(diff: string, maxLines = 40): string {
+  const lines = diff.split("\n");
+  const out: string[] = [];
+  let truncated = false;
+  for (const ln of lines) {
+    if (out.length >= maxLines) {
+      truncated = true;
+      break;
+    }
+    if (ln.startsWith("+") && !ln.startsWith("+++")) out.push(c.ok(ln));
+    else if (ln.startsWith("-") && !ln.startsWith("---")) out.push(c.err(ln));
+    else if (ln.startsWith("@@")) out.push(c.key(ln));
+    else out.push(c.faint(ln));
+  }
+  if (truncated) out.push(c.faint("  … (diff truncated)"));
+  return out.join("\n");
+}
+
 /**
  * Pretty printer for AgentEvents (human mode).
- * Text deltas stream live; tool activity gets status lines.
+ * Text deltas stream live; tool activity gets status lines; a spinner tracks
+ * the turn between outputs; edit/write diffs render in color.
  */
 export function createPrettyPrinter(): (event: AgentEvent) => void {
   const think = new ThinkingFilter();
+  const spinner = new Spinner(process.stdout.isTTY === true && process.env["NO_COLOR"] === undefined);
+  let turnStartedAt = 0;
+  let toolCount = 0;
+  let inThinking = false;
   return (event: AgentEvent) => {
     switch (event.type) {
+      case "turn.start":
+        turnStartedAt = Date.now();
+        toolCount = 0;
+        spinner.start();
+        break;
       case "text.delta": {
         const visible = think.push(event.text);
-        if (visible) process.stdout.write(visible);
+        if (visible) {
+          if (inThinking) {
+            inThinking = false;
+            spinner.pause();
+            process.stdout.write("\n");
+          }
+          spinner.pause();
+          process.stdout.write(visible);
+        }
+        break;
+      }
+      case "reasoning.delta": {
+        if (!inThinking) {
+          inThinking = true;
+          spinner.pause();
+          process.stdout.write(`\n${c.faint("💭 thinking…")}\n`);
+        }
+        spinner.pause();
+        process.stdout.write(c.faint(event.text));
         break;
       }
       case "message.start":
+        spinner.pause();
         process.stdout.write("\n");
         break;
       case "tool.call": {
+        toolCount += 1;
+        spinner.pause();
         process.stdout.write(
-          `\n${c.key("⏺")} ${c.faint(toolCallSummary(event.toolCall.name, event.toolCall.arguments))}\n`,
+          `\n${c.key(`⏺ ${toolCount}`)} ${c.faint(toolCallSummary(event.toolCall.name, event.toolCall.arguments))}\n`,
         );
+        spinner.resume();
         break;
       }
-      case "tool.result":
+      case "tool.result": {
+        spinner.pause();
         if (event.isError) {
           const first = event.content.split("\n")[0] ?? "";
           process.stdout.write(`  ${c.err(`⚠ ${first.slice(0, 240)}`)}\n`);
@@ -124,21 +236,50 @@ export function createPrettyPrinter(): (event: AgentEvent) => void {
         } else {
           process.stdout.write(c.faint(`  ↳ ok (${event.durationMs}ms)\n`));
         }
+        if (!event.isError && event.diff) {
+          process.stdout.write(`  ${renderDiff(event.diff)}\n\n`);
+        }
+        spinner.resume();
         break;
+      }
       case "compaction":
         process.stdout.write(c.faint(`\n  … compacted ${event.dropped} older messages\n`));
         break;
       case "turn.error":
+        spinner.stop();
         process.stdout.write(`\n${c.err(`✖ ${event.error}`)}\n`);
         break;
       case "message.end": {
         const tail = think.finish();
-        if (tail) process.stdout.write(tail);
+        if (tail) {
+          spinner.pause();
+          process.stdout.write(tail);
+        }
+        if (inThinking) {
+          inThinking = false;
+          process.stdout.write("\n");
+        }
         break;
       }
-      case "turn.end":
-        process.stdout.write("\n");
+      case "turn.end": {
+        spinner.stop();
+        if (inThinking) {
+          inThinking = false;
+          process.stdout.write("\n");
+        }
+        const bits: string[] = [];
+        const secs = turnStartedAt ? (Date.now() - turnStartedAt) / 1000 : 0;
+        if (secs > 0) bits.push(`${secs.toFixed(1)}s`);
+        const u = event.usage ?? {};
+        if (u.completionTokens !== undefined || u.promptTokens !== undefined) {
+          bits.push(`↑${u.promptTokens ?? 0} ↓${u.completionTokens ?? 0} tok`);
+          if (secs > 0 && (u.completionTokens ?? 0) > 0) {
+            bits.push(`${Math.round((u.completionTokens ?? 0) / secs)} tok/s`);
+          }
+        }
+        process.stdout.write(`${c.ok("✓")} ${c.faint(bits.join(" · "))}\n`);
         break;
+      }
       case "improvement.staged": {
         const parts: string[] = [];
         if (event.memoryCount > 0) parts.push(`${event.memoryCount} memory`);

@@ -257,4 +257,6 @@ function streamText(text: string, onChunk: (chunk: ProviderChunk) => void): void
   const parts = text.match(/.{1,12}/g) ?? [];
   for (const part of parts) onChunk({ type: "text", text: part });
   onChunk({ type: "stop", finishReason: "end_turn" });
+  // deterministic usage so the turn summary (tok/s) is exercised end-to-end
+  onChunk({ type: "usage", usage: { promptTokens: 1, completionTokens: 2 } });
 }

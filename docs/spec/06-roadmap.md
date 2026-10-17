@@ -311,3 +311,20 @@
   分け。
 - **メッセージ時刻**: assistant フッターの末尾に hh:mm(ライブは turn 完了時刻、
   永続メッセージは createdAt)。
+## v1.1 の実装メモ⑱(2026-10-18 夜、CLI/TUI リッチ化)
+
+roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコマンド)」を実装:
+
+- **スピナー + 経過秒**: `Spinner`(TTY/NO_COLOR 判定、10 フレーム `⠋⠙…`)。
+  テキスト/ツール出力の前後で一時消去(`\r\x1b[2K`)してストリームと分離。
+- **diff 描画**: `tool.result` の `diff` を ANSI 色付き(green/red/cyan hunk、
+  最大 40 行)でツール行の直下に表示。
+- **番号付きツール行**: GUI と同じく `⏺ 1 edit: …`。**turn サマリー**: turn.end で
+  `✓ 4.2s · ↑1k ↓210 tok (50 tok/s)` を表示(mock も usage chunk を出すようにし
+  たため tok/s が常時検証できる)。
+- **思考(reasoning.delta)表示**: `💭 thinking…` に続けて dim ストリーム。
+- **REPL スラッシュコマンド拡張**: `/retry`(直前メッセージ再送)/ `/todo` /
+  `/cwd <path>`(session.update)/ `/export [file]`(markdown ダンプ)/ `/clear`、
+  `/model` はセッション作り直しではなく `session.update` で反映。
+- **入力の逐次化**: readline の line をキューイングし、turn 中のコマンドや
+  再送が並走しないよう drain ループで直列処理(パイプ入力でも順序が保たれる)。

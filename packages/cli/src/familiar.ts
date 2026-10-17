@@ -15,7 +15,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
-import type { AgentEvent, SessionRecord } from "@familiar/protocol";
+import type { AgentEvent, ChatMessage, SessionRecord } from "@familiar/protocol";
 import {
   CONFIG_TEMPLATE,
   loadConfig,
@@ -399,17 +399,56 @@ async function cmdChat(flags: Record<string, string | boolean>): Promise<void> {
 
   rl.setPrompt("❯ ");
   rl.prompt();
+  let busy = false;
+  const pending: string[] = [];
   rl.on("line", (line: string) => {
-    void handleLine(line.trim());
+    pending.push(line.trim());
+    void drain();
   });
+
+  /** Serialize input: turns and commands never overlap (queued, not dropped). */
+  async function drain(): Promise<void> {
+    if (busy) return;
+    busy = true;
+    try {
+      while (pending.length > 0) {
+        const next = pending.shift() ?? "";
+        try {
+          await handleLine(next);
+        } catch (err) {
+          process.stderr.write(red(`error: ${err instanceof Error ? err.message : String(err)}\n`));
+        }
+      }
+    } finally {
+      busy = false;
+      rl.prompt();
+    }
+  }
   rl.on("close", () => {
     process.stdout.write("\nbye\n");
     process.exit(0);
   });
 
+  let lastUser = "";
+
+  async function sendToAgent(text: string): Promise<void> {
+    const s = await ensureSession();
+    const printer = createPrettyPrinter();
+    await transport.dispatch(
+      "session.send",
+      {
+        id: s.id,
+        text,
+        yolo: flagBool(flags, "yolo"),
+        plan: flagBool(flags, "plan"),
+      },
+      { onEvent: (ev) => printer(ev) },
+    );
+    lastUser = text;
+  }
+
   async function handleLine(line: string): Promise<void> {
-    try {
-      if (line === "" || line.startsWith("#")) {
+    if (line === "" || line.startsWith("#")) {
         /* ignore empty lines / comments */
       } else if (line === "/exit" || line === "/quit" || line === "/q") {
         rl.close();
@@ -417,9 +456,73 @@ async function cmdChat(flags: Record<string, string | boolean>): Promise<void> {
       } else if (line === "/help") {
         process.stdout.write(
           dim(
-            "commands: /new /sessions /session <id> /model <id|reset> /plan [off] /help /exit\n(any other text is sent to the agent)\n",
+            "commands:\n" +
+              "  /new                 new session with the configured defaults\n" +
+              "  /sessions           list recent sessions\n" +
+              "  /session <id>       switch to a session\n" +
+              "  /model [p/m]        show or set provider/model for this session\n" +
+              "  /cwd <path>         change the session working folder\n" +
+              "  /todo               show the session task list\n" +
+              "  /plan [off]         toggle plan mode\n" +
+              "  /retry              resend the previous message\n" +
+              "  /export [file]      dump the transcript as markdown\n" +
+              "  /clear              clear the screen\n" +
+              "  /exit               quit\n" +
+              "(any other text is sent to the agent)\n",
           ),
         );
+      } else if (line === "/clear") {
+        process.stdout.write("\x1b[2J\x1b[H");
+      } else if (line === "/retry") {
+        if (!lastUser) {
+          process.stderr.write(red("nothing to retry\n"));
+        } else {
+          await sendToAgent(lastUser);
+        }
+      } else if (line === "/todo") {
+        if (!session) {
+          process.stderr.write(red("no session yet\n"));
+        } else {
+          const res = (await transport.dispatch("todo.list", { id: session.id })) as {
+            items: Array<{ title: string; status: string }>;
+          };
+          if ((res.items ?? []).length === 0) {
+            process.stdout.write(dim("(no todos)\n"));
+          }
+          for (const it of res.items ?? []) {
+            const icon = it.status === "done" ? "●" : it.status === "in_progress" ? "◐" : "○";
+            const strike = it.status === "done" ? "~~" : "";
+            process.stdout.write(`${icon} ${strike}${it.title}${strike}\n`);
+          }
+        }
+      } else if (line.startsWith("/cwd")) {
+        const value = line.slice("/cwd".length).trim();
+        if (!session) {
+          process.stderr.write(red("no session yet\n"));
+        } else if (!value) {
+          process.stdout.write(dim(`${session.cwd}\n`));
+        } else {
+          const updated = (await transport.dispatch("session.update", {
+            id: session.id,
+            cwd: value,
+          })) as SessionRecord;
+          session = updated;
+          process.stdout.write(dim(`(cwd: ${updated.cwd})\n`));
+        }
+      } else if (line.startsWith("/export")) {
+        if (!session) {
+          process.stderr.write(red("no session yet\n"));
+        } else {
+          const file = line.slice("/export".length).trim();
+          const text = await transcriptMarkdown(transport, session.id);
+          if (file) {
+            const fs = await import("node:fs");
+            fs.writeFileSync(file, text, "utf8");
+            process.stdout.write(dim(`(exported to ${file})\n`));
+          } else {
+            process.stdout.write(text + "\n");
+          }
+        }
       } else if (line === "/new") {
         session = null;
         const s = await ensureSession();
@@ -443,34 +546,62 @@ async function cmdChat(flags: Record<string, string | boolean>): Promise<void> {
         process.stdout.write(dim(`(plan mode ${flags["plan"] ? "ON" : "OFF"} for the next messages)\n`));
       } else if (line.startsWith("/model")) {
         const value = line.slice("/model".length).trim();
-        // start a fresh session with the new model (model is per-session)
-        session = null;
-        if (value && value !== "reset") flags["model"] = value;
-        else delete flags["model"];
-        const s = await ensureSession();
-        process.stdout.write(dim(`(model: ${s.provider}/${s.model})\n`));
+        if (!session && !value) {
+          const s = await ensureSession();
+          process.stdout.write(dim(`(model: ${s.provider}/${s.model})\n`));
+        } else if (!value) {
+          process.stdout.write(dim(`(model: ${session!.provider}/${session!.model})\n`));
+        } else if (value === "reset") {
+          session = null;
+          delete flags["model"];
+          const s = await ensureSession();
+          process.stdout.write(dim(`(model: ${s.provider}/${s.model})\n`));
+        } else {
+          const [provider, model] = value.includes("/") ? value.split("/", 2) : [session?.provider, value];
+          const updated = (await transport.dispatch("session.update", {
+            id: (session ?? (await ensureSession())).id,
+            ...(provider ? { provider } : {}),
+            ...(model ? { model } : {}),
+          })) as SessionRecord;
+          session = updated;
+          process.stdout.write(dim(`(model: ${updated.provider}/${updated.model})\n`));
+        }
       } else if (line.startsWith("/")) {
         process.stderr.write(red(`unknown chat command: ${line} (try /help)\n`));
       } else {
-        const s = await ensureSession();
-        const printer = createPrettyPrinter();
-        await transport.dispatch(
-          "session.send",
-          {
-            id: s.id,
-            text: line,
-            yolo: flagBool(flags, "yolo"),
-            plan: flagBool(flags, "plan"),
-          },
-          { onEvent: (ev) => printer(ev) },
-        );
+        await sendToAgent(line);
       }
-    } catch (err) {
-      process.stderr.write(red(`error: ${err instanceof Error ? err.message : String(err)}\n`));
-    } finally {
-      rl.prompt();
+  }
+}
+
+/** Build a markdown transcript of a session (/export in the REPL). */
+async function transcriptMarkdown(
+  transport: FamiliarTransport,
+  sessionId: string,
+): Promise<string> {
+  const got = (await transport.dispatch("session.get", { id: sessionId })) as {
+    session: SessionRecord;
+    messages: ChatMessage[];
+  };
+  const s = got.session;
+  const out: string[] = [
+    `# ${s.title || s.id.slice(0, 8)}`,
+    "",
+    `- provider: ${s.provider}${s.model ? `/${s.model}` : ""}`,
+    `- created: ${new Date(s.createdAt).toISOString()}`,
+    "",
+  ];
+  for (const m of got.messages ?? []) {
+    if ((m.meta as { ephemeral?: boolean } | undefined)?.ephemeral === true) continue;
+    if (m.role === "user") {
+      out.push("## User", "", m.content ?? "", "");
+    } else if (m.role === "assistant") {
+      out.push("## Assistant", "", m.content ?? "", "");
+    } else {
+      out.push(`### ${m.name ?? "tool"}`, "", "```", String(m.content ?? "").slice(0, 4000), "```", "");
     }
   }
+  return out.join("\n");
 }
 
 async function cmdServe(flags: Record<string, string | boolean>): Promise<void> {

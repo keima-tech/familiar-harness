@@ -452,6 +452,29 @@ console.log("— scenario I: web ui transport —");
     }),
   }).then((r) => r.json());
   assert(upd.result?.title === "renamed by smoke", "session.update renames the session", JSON.stringify(upd));
+  // v1.1: session.update cwd (working folder from the chat header)
+  const updCwd = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 28,
+      method: "session.update",
+      params: { id: created.result.id, cwd: "/tmp" },
+    }),
+  }).then((r) => r.json());
+  assert(updCwd.result?.cwd === "/tmp", "session.update sets the working folder", JSON.stringify(updCwd));
+  const updCwdBad = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 29,
+      method: "session.update",
+      params: { id: created.result.id, cwd: "/no/such/dir-xyz" },
+    }),
+  }).then((r) => r.json());
+  assert(!!updCwdBad.error, "session.update rejects a non-existent cwd", JSON.stringify(updCwdBad).slice(0, 140));
   // v1.1: config.provider.set (settings GUI writes kind / endpoint / key)
   const provSet = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
     method: "POST",

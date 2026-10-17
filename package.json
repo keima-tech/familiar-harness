@@ -16,6 +16,7 @@
     "typecheck": "tsc -b . --force",
     "dev:cli": "node packages/cli/dist/familiar.js",
     "smoke": "npm run -w packages/cli smoke",
+    "mdtest": "node packages/server/scripts/md-test.mjs",
     "serve": "npm run -w packages/cli serve"
   },
   "devDependencies": {

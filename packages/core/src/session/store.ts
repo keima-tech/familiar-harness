@@ -25,7 +25,7 @@ export interface SessionStore {
   getMessages(sessionId: string): ChatMessage[];
   /** Set/update the title (used for first user message). */
   renameSession(id: string, title: string): void;
-  /** Patch session options (title / provider / model / profile). Returns the updated record. */
+  /** Patch session options (title / provider / model / profile / cwd). Returns the updated record. */
   updateSession(
     id: string,
     patch: {
@@ -34,6 +34,8 @@ export interface SessionStore {
       model?: string;
       /** `null` clears the profile. */
       profile?: string | null;
+      /** absolute path of the working directory */
+      cwd?: string;
     },
   ): SessionRecord | null;
   deleteSession(id: string): boolean;
@@ -148,6 +150,7 @@ export class SqliteSessionStore implements SessionStore {
       provider?: string;
       model?: string;
       profile?: string | null;
+      cwd?: string;
     },
   ): SessionRecord | null {
     const sets: string[] = [];
@@ -167,6 +170,10 @@ export class SqliteSessionStore implements SessionStore {
     if (patch.profile !== undefined) {
       sets.push("profile = ?");
       values.push(patch.profile);
+    }
+    if (patch.cwd !== undefined) {
+      sets.push("cwd = ?");
+      values.push(patch.cwd);
     }
     if (sets.length === 0) return this.getSession(id);
     sets.push("updated_at = ?");

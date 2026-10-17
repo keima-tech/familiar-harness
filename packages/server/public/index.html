@@ -16,26 +16,6 @@
       <div id="session-search" class="search-row">
         <input id="session-filter" type="search" placeholder="セッションを絞り込み…  (Ctrl+K)" data-i18n-ph="side.filterPh" autocomplete="off" spellcheck="false" />
       </div>
-      <div id="new-session-panel" hidden>
-        <div class="field-row">
-          <label for="ns-provider" data-i18n="ns.provider">プロバイダー</label>
-          <select id="ns-provider"></select>
-          <span id="ns-auth" class="hint"></span>
-        </div>
-        <div class="field-row">
-          <label for="ns-model" data-i18n="ns.model">モデル</label>
-          <select id="ns-model"></select>
-        </div>
-        <div class="field-row">
-          <label for="ns-profile" data-i18n="ns.profile">プロファイル</label>
-          <select id="ns-profile"></select>
-        </div>
-        <div class="panel-row">
-          <button id="ns-settings" class="ghost link-left" type="button" data-i18n="mp.settings">プロバイダー設定…</button>
-          <button id="ns-create" data-i18n="ns.create">作成</button>
-          <button id="ns-cancel" class="ghost" data-i18n="ns.cancel">キャンセル</button>
-        </div>
-      </div>
       <ul id="sessions"></ul>
       <div class="side-foot">
         <button id="toggle-inbox" class="ghost"><span data-i18n="side.inbox">✎ 承認インボックス</span> <span id="inbox-count" class="badge">0</span></button>
@@ -49,7 +29,10 @@
           <span class="ticon">◍</span>
           <div class="title-col">
             <div id="session-title" class="title">no session</div>
-            <div id="session-meta" class="meta"></div>
+            <div class="meta-row">
+              <div id="session-meta" class="meta"></div>
+              <button id="edit-cwd" type="button" class="cwd-btn" title="作業フォルダーを変更" data-i18n-title="cwd.title" hidden>📁</button>
+            </div>
           </div>
         </div>
         <div class="top-actions">

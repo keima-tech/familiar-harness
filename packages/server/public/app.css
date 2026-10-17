@@ -72,21 +72,13 @@ body {
 #sessions li:hover .del { visibility: visible; }
 #sessions li .del:hover { color: var(--err); }
 
-/* ---- new session picker (sidebar panel) ---- */
-#new-session-panel {
-  padding: 12px 14px; border-bottom: 1px solid var(--border);
-  display: flex; flex-direction: column; gap: 8px; background: var(--panel2);
-  border-radius: 0 0 12px 12px;
-}
-#new-session-panel[hidden] { display: none; }
+/* ---- form rows (provider form, popovers) ---- */
 .field-row { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--dim); }
 .field-row select, .field-row input {
   background: var(--panel); border: 1px solid var(--border); color: var(--text);
   border-radius: 8px; padding: 6px 8px; font: inherit; outline: none;
 }
 .field-row select:focus, .field-row input:focus { border-color: var(--accent); }
-#new-session-panel .panel-row { display: flex; gap: 8px; }
-#new-session-panel .panel-row button { padding: 6px 14px; font-size: 12px; }
 .hint { font-size: 11px; color: var(--dim); }
 .side-foot { display: flex; flex-direction: column; gap: 8px; padding: 10px; }
 .badge {
@@ -109,7 +101,14 @@ body {
   background: var(--panel2); border: 1px solid var(--accent); color: var(--text);
   border-radius: 6px; padding: 1px 6px; font: inherit; outline: none; width: min(320px, 40vw);
 }
+.meta-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
 #session-meta { font-size: 11px; color: var(--dim); }
+.cwd-btn {
+  background: transparent; border: 1px solid var(--border); color: var(--dim);
+  border-radius: 6px; padding: 1px 7px; font-size: 10.5px; cursor: pointer;
+  max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: none;
+}
+.cwd-btn:hover { color: var(--text); border-color: var(--accent); }
 .top-actions { display: flex; align-items: center; gap: 10px; }
 /* ---- context gauge (topbar ring) ---- */
 #ctx-gauge {

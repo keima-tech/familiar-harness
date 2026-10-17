@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 import type {
   ChatMessage,
@@ -542,6 +543,7 @@ export class AgentServer {
       provider?: string;
       model?: string;
       profile?: string | null;
+      cwd?: string;
     } = {};
     if (params["title"] !== undefined) {
       patch.title = str(params, "title") ?? "";
@@ -563,6 +565,21 @@ export class AgentServer {
       const fallback =
         this.cfg.providers[provider]?.default_model ?? this.cfg.default_model ?? resolveDefaultModel(this.cfg.providers[provider]?.kind ?? "mock");
       if (fallback) patch.model = fallback;
+    }
+    if (params["cwd"] !== undefined) {
+      const cwd = str(params, "cwd");
+      if (!cwd) throw new RpcError(RPC_ERROR_INVALID_PARAMS, '"cwd" cannot be empty');
+      const resolved = path.resolve(cwd);
+      let isDir = false;
+      try {
+        isDir = fs.statSync(resolved).isDirectory();
+      } catch {
+        /* leave false -> error below */
+      }
+      if (!isDir) {
+        throw new RpcError(RPC_ERROR_INVALID_PARAMS, `"cwd" is not an existing directory: ${cwd}`);
+      }
+      patch.cwd = resolved;
     }
     if (params["profile"] !== undefined) {
       const raw = params["profile"];

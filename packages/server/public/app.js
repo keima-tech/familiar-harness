@@ -66,12 +66,6 @@ const STR = {
     "side.filterPh": "セッションを絞り込み…  (Ctrl+K)",
     "side.inbox": "✎ 承認インボックス",
     "side.status": "⚙ ステータス",
-    "ns.provider": "プロバイダー",
-    "ns.model": "モデル",
-    "ns.profile": "プロファイル",
-    "ns.modelPh": "プロバイダーの既定",
-    "ns.create": "作成",
-    "ns.cancel": "キャンセル",
     "none": "(なし)",
     "top.noSession": "セッションなし",
     "top.gaugeTitle": "コンテキスト使用量 — クリックでセッション情報",
@@ -208,7 +202,7 @@ const STR = {
     "set.lang": "言語",
     "set.langDesc": "インターフェースの表示言語",
     "set.appearance": "配色",
-    "set.appearanceDesc": "OpenCode のように システム / ライト / ダーク に従います",
+    "set.appearanceDesc": "システム / ライト / ダーク に従います",
     "set.colors": "配色",
     "set.light": "ライト",
     "set.dark": "ダーク",
@@ -263,8 +257,11 @@ const STR = {
     "prov.probeEmpty": "モデルが見つかりませんでした",
     "prov.probeOk": "{0} 件のモデル",
     "prov.probeMock": "mock はモデル一覧の取得が不要です",
-    "mp.settings": "プロバイダー設定…",
     "ns.modelDefault": "プロバイダーの既定",
+    "cwd.title": "作業フォルダーを変更",
+    "cwd.prompt": "セッションの作業フォルダー(絶対パス):",
+    "toast.cwdSet": "作業フォルダー: {0}",
+    "toast.cwdFailed": "フォルダーを変更できませんでした: {0}",
     "prov.badUrl": "エンドポイントは http:// か https:// で始めてください",
     "prov.default": "既定",
     "prov.keyOk": "キー ✓",
@@ -284,12 +281,6 @@ const STR = {
     "side.filterPh": "filter sessions…  (Ctrl+K)",
     "side.inbox": "✎ approvals",
     "side.status": "⚙ status",
-    "ns.provider": "provider",
-    "ns.model": "model",
-    "ns.profile": "profile",
-    "ns.modelPh": "provider default",
-    "ns.create": "Create",
-    "ns.cancel": "Cancel",
     "none": "(none)",
     "top.noSession": "no session",
     "top.gaugeTitle": "context usage — click for session info",
@@ -426,7 +417,7 @@ const STR = {
     "set.lang": "Language",
     "set.langDesc": "interface language",
     "set.appearance": "Appearance",
-    "set.appearanceDesc": "follows system / light / dark like OpenCode",
+    "set.appearanceDesc": "follows system / light / dark",
     "set.colors": "Colors",
     "set.light": "Light",
     "set.dark": "Dark",
@@ -481,8 +472,11 @@ const STR = {
     "prov.probeEmpty": "no models found",
     "prov.probeOk": "{0} model(s)",
     "prov.probeMock": "mock needs no model probe",
-    "mp.settings": "Provider settings…",
     "ns.modelDefault": "provider default",
+    "cwd.title": "Change working folder",
+    "cwd.prompt": "Session working folder (absolute path):",
+    "toast.cwdSet": "working folder: {0}",
+    "toast.cwdFailed": "could not change folder: {0}",
     "prov.badUrl": "endpoint must start with http:// or https://",
     "prov.default": "default",
     "prov.keyOk": "key ✓",
@@ -582,7 +576,7 @@ function codeBlockHtml(code, lang) {
   const lineCount = code.split("\n").length;
   const head =
     (lang ? `<span class="lang">${escapeHtml(lang)}</span>` : "") +
-    `<button class="code-copy" type="button">copy</button>` +
+    `<button class="code-copy" type="button" title="copy">⧉</button>` +
     (lineCount > 16 ? `<button class="code-expand" type="button">show all</button>` : "");
   const cls = lineCount > 16 ? " collapsed" : "";
   return (
@@ -1032,11 +1026,41 @@ async function openSession(id) {
   if (s.model) bits.push(s.model);
   if (s.profile) bits.push(`profile: ${s.profile}`);
   $("#session-meta").textContent = bits.join(" · ");
+  renderSessionCwd(s);
   renderModelChip();
   updateContextGauge();
   closeAllPops();
   renderTranscript(data.messages ?? []);
   applyTranscriptFilter();
+}
+
+/** Header chip showing the session's working folder (click to change). */
+function renderSessionCwd(s) {
+  const btn = $("#edit-cwd");
+  if (!btn) return;
+  const cwd = s?.cwd ?? "";
+  btn.hidden = !cwd || !state.sessionId;
+  if (!cwd) { btn.textContent = ""; return; }
+  const base = cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || cwd;
+  btn.textContent = `📁 ${base}`;
+  btn.title = cwd;
+}
+
+async function editSessionCwd() {
+  const s = state.currentSession;
+  if (!s) return;
+  const next = window.prompt(t("cwd.prompt"), s.cwd);
+  if (next === null) return;
+  const trimmed = next.trim();
+  if (trimmed === "") return;
+  try {
+    const updated = await rpc("session.update", { id: s.id, cwd: trimmed });
+    state.currentSession = updated;
+    renderSessionCwd(updated);
+    toast(t("toast.cwdSet", updated.cwd), "ok");
+  } catch (err) {
+    toast(t("toast.cwdFailed", err.message), "err");
+  }
 }
 
 async function deleteSession(id) {
@@ -1179,8 +1203,8 @@ function wireCodeButtons(scope) {
     btn.addEventListener("click", () => {
       const code = btn.closest(".codeblock")?.querySelector("pre code");
       void copyText(code?.textContent ?? "").then((ok) => {
-        btn.textContent = ok ? "copied ✓" : "failed";
-        setTimeout(() => (btn.textContent = "copy"), 1200);
+        btn.textContent = ok ? "✓" : "✕";
+        setTimeout(() => (btn.textContent = "⧉"), 1200);
       });
     });
   }
@@ -2561,90 +2585,6 @@ async function ensureNsConfig() {
   }
 }
 
-async function openNewSessionPanel() {
-  const panel = $("#new-session-panel");
-  if (!panel.hidden) {
-    panel.hidden = true;
-    return;
-  }
-  if (!(await ensureNsConfig())) {
-    panel.hidden = true;
-    void newSession();
-    return;
-  }
-  const selProvider = $("#ns-provider");
-  selProvider.innerHTML = "";
-  const names = usableProviderNames();
-  for (const name of names) {
-    const pc = ns.providers[name] ?? {};
-    const hint = providerAuthLabel(pc);
-    const opt = document.createElement("option");
-    opt.value = name;
-    opt.textContent = hint ? `${name} (${hint})` : name;
-    selProvider.appendChild(opt);
-  }
-  selProvider.value = names.includes(ns.defaultProvider) ? ns.defaultProvider : names[0] ?? "";
-  const selProfile = $("#ns-profile");
-  selProfile.innerHTML = "";
-  const empty = document.createElement("option");
-  empty.value = "";
-  empty.textContent = t("none");
-  selProfile.appendChild(empty);
-  for (const name of Object.keys(ns.profiles).sort()) {
-    const opt = document.createElement("option");
-    opt.value = name;
-    opt.textContent = name;
-    selProfile.appendChild(opt);
-  }
-  $("#ns-model").value = "";
-  panel.hidden = false;
-  await refreshModelList();
-}
-
-/** Fill a model <select> from models.list, keeping `want` selectable. */
-async function fillModelSelect(sel, provider, want, hasDefault) {
-  sel.innerHTML = "";
-  if (hasDefault) {
-    const def = document.createElement("option");
-    def.value = "";
-    def.textContent = t("ns.modelDefault");
-    sel.appendChild(def);
-  }
-  try {
-    const res = await rpc("models.list", { provider });
-    for (const m of res.models ?? []) {
-      const opt = document.createElement("option");
-      opt.value = m.id;
-      opt.textContent = m.contextTokens ? `${m.id} (${Math.round(m.contextTokens / 1000)}k)` : m.id;
-      sel.appendChild(opt);
-    }
-  } catch {
-    /* provider unreachable — only the default option remains */
-  }
-  const found = want && [...sel.options].some((o) => o.value === want);
-  if (want && !found) {
-    const opt = document.createElement("option");
-    opt.value = want;
-    opt.textContent = want;
-    sel.appendChild(opt);
-  }
-  if (want) sel.value = want;
-  else if (hasDefault) sel.value = "";
-  else if (sel.options.length > 0) sel.selectedIndex = 0; // preselect first model
-}
-
-/** Does this provider have a usable fallback model when none is picked? */
-function providerHasDefaultModel(pc) {
-  return pc?.kind === "mock" || !!(pc?.default_model || ns.defaultModel);
-}
-
-async function refreshModelList() {
-  const provider = $("#ns-provider").value;
-  const pc = ns.providers[provider] ?? {};
-  $("#ns-auth").textContent = `${provider} · ${pc.kind ?? "?"}${providerAuthLabel(pc) ? " · " + providerAuthLabel(pc) : ""}`;
-  await fillModelSelect($("#ns-model"), provider, "", providerHasDefaultModel(pc));
-}
-
 // ---------------------------------------------------------------------------
 // composer chips: agent mode + model for the current session
 // ---------------------------------------------------------------------------
@@ -2780,16 +2720,11 @@ async function applyModelChoice(provider, model) {
   }
 }
 
-async function createFromPanel() {
-  const provider = $("#ns-provider").value || ns.defaultProvider || "mock";
-  const model = $("#ns-model").value.trim();
-  const profile = $("#ns-profile").value;
-  const params = { provider };
-  if (model !== "") params.model = model;
-  if (profile !== "") params.profile = profile;
+/** "+" creates a session immediately with the configured defaults; the
+ * provider/model can be changed afterwards via the composer picker. */
+async function newSession() {
   try {
-    const s = await rpc("session.create", params);
-    $("#new-session-panel").hidden = true;
+    const s = await rpc("session.create", {});
     state.sessionId = s.id;
     await refreshSessions();
     await openSession(s.id);
@@ -2797,14 +2732,6 @@ async function createFromPanel() {
   } catch (err) {
     toast(t("toast.createFailed", err.message), "err");
   }
-}
-
-async function newSession() {
-  const s = await rpc("session.create", {});
-  state.sessionId = s.id;
-  await refreshSessions();
-  await openSession(s.id);
-  $("#input").focus();
 }
 
 // ---------------------------------------------------------------------------
@@ -2892,8 +2819,9 @@ function boot() {
     if (currentModePref() === "system") applyTheme();
   });
 
-  $("#new-session").addEventListener("click", () => void openNewSessionPanel());
+  $("#new-session").addEventListener("click", () => void newSession());
   $("#retry").addEventListener("click", retryLastTurn);
+  $("#edit-cwd").addEventListener("click", () => void editSessionCwd());
   $("#composer-new").addEventListener("click", () => {
     const opening = $("#plus-pop").hidden;
     closeAllPops();
@@ -2921,11 +2849,6 @@ function boot() {
     insertIntoComposer(`@${ref} `);
     toast(t("toast.attached", ref), "ok");
   });
-  $("#ns-cancel").addEventListener("click", () => {
-    $("#new-session-panel").hidden = true;
-  });
-  $("#ns-create").addEventListener("click", () => void createFromPanel());
-  $("#ns-provider").addEventListener("change", () => void refreshModelList());
 
   $("#session-filter").addEventListener("input", applySessionFilter);
   ulSessionsClick();
@@ -2970,7 +2893,6 @@ function boot() {
   });
   $("#model-chip").addEventListener("click", () => void openModelPopover());
   $("#mp-settings").addEventListener("click", () => openSettingsModal("providers"));
-  $("#ns-settings").addEventListener("click", () => openSettingsModal("providers"));
 
   // close popovers / context menu on outside click, scroll or resize
   document.addEventListener("click", (ev) => {
@@ -3038,10 +2960,6 @@ function boot() {
       closeAllPops();
       if (!$("#search-bar").hidden) {
         toggleSearch(false);
-        return;
-      }
-      if (!$("#new-session-panel").hidden) {
-        $("#new-session-panel").hidden = true;
         return;
       }
       const status = $("#status");

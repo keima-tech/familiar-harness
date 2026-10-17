@@ -440,7 +440,19 @@ console.log("— scenario I: web ui transport —");
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "session.create", params: {} }),
   }).then((r) => r.json());
   assert(!!created.result?.id, "session.create over HTTP", JSON.stringify(created.error ?? {}).slice(0, 120));
-  await fetch(`http://127.0.0.1:${PORT}/rpc`, {
+  // v1.1: session.update (rename + provider/model patch) over HTTP
+  const upd = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 21,
+      method: "session.update",
+      params: { id: created.result.id, title: "renamed by smoke" },
+    }),
+  }).then((r) => r.json());
+  assert(upd.result?.title === "renamed by smoke", "session.update renames the session", JSON.stringify(upd));
+  const sent = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -450,6 +462,7 @@ console.log("— scenario I: web ui transport —");
       params: { id: created.result.id, text: "hi from the web ui" },
     }),
   }).then((r) => r.json());
+  assert(!sent.error, "session.send accepted over HTTP", JSON.stringify(sent).slice(0, 120));
   await new Promise((r) => setTimeout(r, 400));
   const streamed = frames
     .filter((f) => f.sessionId === created.result.id && f.event.type === "text.delta")

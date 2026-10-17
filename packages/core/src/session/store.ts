@@ -25,6 +25,17 @@ export interface SessionStore {
   getMessages(sessionId: string): ChatMessage[];
   /** Set/update the title (used for first user message). */
   renameSession(id: string, title: string): void;
+  /** Patch session options (title / provider / model / profile). Returns the updated record. */
+  updateSession(
+    id: string,
+    patch: {
+      title?: string;
+      provider?: string;
+      model?: string;
+      /** `null` clears the profile. */
+      profile?: string | null;
+    },
+  ): SessionRecord | null;
   deleteSession(id: string): boolean;
   close(): void;
 }
@@ -128,6 +139,42 @@ export class SqliteSessionStore implements SessionStore {
     this.db
       .prepare(`UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?`)
       .run(title, Date.now(), id);
+  }
+
+  updateSession(
+    id: string,
+    patch: {
+      title?: string;
+      provider?: string;
+      model?: string;
+      profile?: string | null;
+    },
+  ): SessionRecord | null {
+    const sets: string[] = [];
+    const values: Array<string | number | null> = [];
+    if (patch.title !== undefined) {
+      sets.push("title = ?");
+      values.push(patch.title);
+    }
+    if (patch.provider !== undefined) {
+      sets.push("provider = ?");
+      values.push(patch.provider);
+    }
+    if (patch.model !== undefined) {
+      sets.push("model = ?");
+      values.push(patch.model);
+    }
+    if (patch.profile !== undefined) {
+      sets.push("profile = ?");
+      values.push(patch.profile);
+    }
+    if (sets.length === 0) return this.getSession(id);
+    sets.push("updated_at = ?");
+    values.push(Date.now());
+    this.db
+      .prepare(`UPDATE sessions SET ${sets.join(", ")} WHERE id = ?`)
+      .run(...values, id);
+    return this.getSession(id);
   }
 
   deleteSession(id: string): boolean {

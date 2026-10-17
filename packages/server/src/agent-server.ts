@@ -320,6 +320,8 @@ export class AgentServer {
         this.todos.drop(delId);
         return { deleted: true };
       }
+      case "session.update":
+        return this.updateSession(params);
       case "session.send":
         return this.send(params, ctx);
       case "permission.respond": {
@@ -426,6 +428,53 @@ export class AgentServer {
       });
     }
     return created;
+  }
+
+  /** Patch a session's title / provider / model / profile (v1.1 GUI needs). */
+  private updateSession(params: Record<string, unknown>): SessionRecord {
+    const id = str(params, "id");
+    if (!id) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "session id is required");
+    const session = this.requireSession(id);
+    const patch: {
+      title?: string;
+      provider?: string;
+      model?: string;
+      profile?: string | null;
+    } = {};
+    if (params["title"] !== undefined) {
+      patch.title = str(params, "title") ?? "";
+    }
+    let provider = session.provider;
+    if (params["provider"] !== undefined) {
+      provider = str(params, "provider") ?? provider;
+      if (!this.cfg.providers[provider]) {
+        throw new RpcError(RPC_ERROR_INVALID_PARAMS, `unknown provider: ${provider}`);
+      }
+      patch.provider = provider;
+    }
+    if (params["model"] !== undefined) {
+      const model = str(params, "model");
+      if (!model) throw new RpcError(RPC_ERROR_INVALID_PARAMS, '"model" cannot be empty');
+      patch.model = model;
+    } else if (patch.provider !== undefined) {
+      // provider changed without an explicit model — fall back like create does
+      const fallback =
+        this.cfg.providers[provider]?.default_model ?? this.cfg.default_model ?? resolveDefaultModel(this.cfg.providers[provider]?.kind ?? "mock");
+      if (fallback) patch.model = fallback;
+    }
+    if (params["profile"] !== undefined) {
+      const raw = params["profile"];
+      if (raw === null) {
+        patch.profile = null;
+      } else {
+        const profile = str(params, "profile");
+        if (!profile) throw new RpcError(RPC_ERROR_INVALID_PARAMS, '"profile" cannot be empty');
+        patch.profile = profile;
+      }
+    }
+    const updated = this.store.updateSession(id, patch);
+    if (!updated) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "session not found");
+    return updated;
   }
 
   private async send(

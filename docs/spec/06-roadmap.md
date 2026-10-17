@@ -51,3 +51,22 @@
   extraResources は electron-builder の既定フィルタがルート直下の `node_modules` を
   除外するため、packages と node_modules を 2 つの FileSet に分けて投入している。
 - **継続課題**: 独立プラグイン API(hooks + MCP 以外の拡張点)は v1.1 以降の課題として残す。
+
+## v1.1 の実装メモ(2026-10-17、OpenCode Desktop 風 UI)
+
+- **`session.update` RPC**(server): `title` / `provider` / `model` / `profile`(null で解除)を
+  部分更新。provider 変更時に model が無指定なら default model フォールバックは create と同一。
+  store 側は `SqliteSessionStore.updateSession`(動的 SET)。
+- **Web UI を OpenCode Desktop 仕様に刷新**(`packages/server/public/`):
+  - メッセージ: user=右寄せバブル / assistant=ベアテキスト(吹き出し廃止) /
+    ツール呼び出しは **番号付き 1 行ツール行**(`1 read path ✓ 0.3s`)でクリック展開。
+  - composer: 角丸カード内に `+`(新規)/ **Build|Plan モードチップ**(`session.send` の
+    `plan` に マップ)/ **モデルチップ**(provider+model を `session.update` で永続化、
+    未作成なら次回 create に引き継ぎ)/ 円形送信ボタン。
+  - topbar: トークン使用量チップ(turn.end の加算・表示専用)、**⋯ メニュー**
+    (Rename=タイトルインライン編集 / Export as Markdown=クライアント側生成 DL / Delete)、
+    **トランスクリプト検索**(Ctrl+F、クライアント側フィルタ)。
+  - markdown・コードコピーボタン・折り畳み・トーストは v1.0 rich UI から継続。
+- **CLI リッチ化(diff 描画・スピナー・TTY TUI)** は本筋の設計が要るため別工程
+  (roadmap v1.1 以降で検討)。RPC/イベントには影響なし。
+- **ツール結果の画像表示**: 現行ツール群はテキスト出力のみのため未対応(画像ツール追加時に)。

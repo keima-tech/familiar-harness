@@ -14,7 +14,7 @@
         <button id="new-session" title="new session">＋</button>
       </div>
       <div id="session-search" class="search-row">
-        <input id="session-filter" type="search" placeholder="filter sessions…" autocomplete="off" spellcheck="false" />
+        <input id="session-filter" type="search" placeholder="filter sessions…  (Ctrl+K)" autocomplete="off" spellcheck="false" />
       </div>
       <div id="new-session-panel" hidden>
         <div class="field-row">
@@ -46,24 +46,76 @@
     <main id="main">
       <header id="topbar">
         <div class="title-wrap">
-          <div id="session-title" class="title">no session</div>
-          <div id="session-meta" class="meta"></div>
+          <span class="ticon">◍</span>
+          <div class="title-col">
+            <div id="session-title" class="title">no session</div>
+            <div id="session-meta" class="meta"></div>
+          </div>
         </div>
-        <div id="turn-state" class="state"><span id="turn-spinner" class="spinner" hidden></span><span id="turn-label"></span></div>
+        <div class="top-actions">
+          <div id="turn-state" class="state">
+            <span id="turn-spinner" class="spinner" hidden></span><span id="turn-label"></span>
+          </div>
+          <span id="usage-chip" class="usage" hidden></span>
+          <button id="search-toggle" class="iconbtn" title="search in transcript (Ctrl+F)">⌕</button>
+          <div class="menu-wrap">
+            <button id="session-menu-btn" class="iconbtn" title="session actions">⋯</button>
+            <div id="session-menu-pop" class="pop" hidden>
+              <button data-act="rename">Rename…</button>
+              <button data-act="export">Export as Markdown</button>
+              <hr />
+              <button data-act="delete" class="danger">Delete session…</button>
+            </div>
+          </div>
+        </div>
       </header>
+
+      <div id="search-bar" hidden>
+        <input id="transcript-search" type="search" placeholder="search in transcript…" autocomplete="off" spellcheck="false" />
+        <span id="search-count"></span>
+        <button id="search-close" class="iconbtn" title="close search">✕</button>
+      </div>
 
       <section id="transcript"></section>
 
       <div id="approval-dock"></div>
 
-      <form id="composer">
-        <textarea id="input" rows="1" placeholder="message… (Enter to send / Shift+Enter newline)"></textarea>
-        <button id="send" type="submit">Send</button>
+      <form id="composer" autocomplete="off">
+        <textarea id="input" rows="1" placeholder="Ask anything… (Enter to send / Shift+Enter for a new line)"></textarea>
+        <div class="composer-foot">
+          <button id="composer-new" type="button" title="new session">＋</button>
+          <div class="menu-wrap">
+            <button id="mode-chip" type="button" title="agent mode">Build ▾</button>
+            <div id="mode-pop" class="pop" hidden>
+              <button type="button" data-mode="build"><b>Build</b><small>full tool access</small></button>
+              <button type="button" data-mode="plan"><b>Plan</b><small>read-only tools</small></button>
+            </div>
+          </div>
+          <div class="menu-wrap">
+            <button id="model-chip" type="button" title="model for this session">model ▾</button>
+            <div id="model-pop" class="pop wide" hidden>
+              <div class="field-row">
+                <label for="mp-provider">provider</label>
+                <select id="mp-provider"></select>
+              </div>
+              <div class="field-row">
+                <label for="mp-model">model</label>
+                <input id="mp-model" list="mp-models" spellcheck="false" placeholder="provider default" />
+                <datalist id="mp-models"></datalist>
+              </div>
+              <div class="pop-actions">
+                <button id="mp-apply" type="button">Apply</button>
+                <button id="mp-cancel" type="button" class="ghost">Cancel</button>
+              </div>
+            </div>
+          </div>
+          <button id="send" type="submit" title="send (Enter)">↑</button>
+        </div>
       </form>
     </main>
 
     <aside id="inbox" hidden>
-      <div class="inbox-head">
+      <div class="drawer-head">
         <b>approval inbox</b>
         <button id="close-inbox" class="ghost">✕</button>
       </div>
@@ -71,7 +123,7 @@
     </aside>
 
     <aside id="status" hidden>
-      <div class="inbox-head">
+      <div class="drawer-head">
         <b>system status</b>
         <button id="close-status" class="ghost">✕</button>
       </div>

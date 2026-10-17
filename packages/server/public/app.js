@@ -206,12 +206,19 @@ function toast(msg, kind = "info") {
 const state = {
   sessions: [],
   sessionId: null,
+  currentSession: null,
   busy: false,
   pendingEvents: new Map(), // sessionId -> partial assistant render state
   pendingToolCards: [], // live tool.call cards awaiting their result
   turnStartedAt: null,
   turnTimer: null,
   lastElapsed: null,
+  mode: "build", // "build" | "plan" — passed per send (plan => read-only tools)
+  /** pending provider/model change before the next turn (applied + persisted). */
+  draft: { provider: "", model: "" },
+  /** tokens seen this browsing session, per session id (turn.end events). */
+  usageBySession: {},
+  toolCounter: 0,
 };
 
 const ns = {
@@ -287,6 +294,25 @@ function ulSessionsClick() {
   });
 }
 
+function formatTokens(n) {
+  if (n === undefined || n === null) return "0";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
+function renderUsageChip() {
+  const u = state.usageBySession[state.sessionId];
+  const chip = $("#usage-chip");
+  if (!u || (!u.prompt && !u.completion)) {
+    chip.hidden = true;
+    return;
+  }
+  chip.hidden = false;
+  chip.textContent = `↑${formatTokens(u.prompt)} ↓${formatTokens(u.completion)} tok`;
+  chip.title = "prompt / completion tokens seen since this page was opened";
+}
+
 async function openSession(id) {
   state.sessionId = id;
   state.pendingEvents.delete(id);
@@ -295,12 +321,17 @@ async function openSession(id) {
   }
   const data = await rpc("session.get", { id });
   const s = data.session;
+  state.currentSession = s;
   $("#session-title").textContent = s.title || s.id.slice(0, 8);
   const bits = [s.provider];
   if (s.model) bits.push(s.model);
   if (s.profile) bits.push(`profile: ${s.profile}`);
   $("#session-meta").textContent = bits.join(" · ");
+  renderModelChip();
+  renderUsageChip();
+  closeAllPops();
   renderTranscript(data.messages ?? []);
+  applyTranscriptFilter();
 }
 
 async function deleteSession(id) {
@@ -315,6 +346,10 @@ async function deleteSession(id) {
   }
   if (state.sessionId === id) {
     state.sessionId = null;
+    state.currentSession = null;
+    delete state.usageBySession[id];
+    renderUsageChip();
+    renderModelChip();
     $("#session-title").textContent = "no session";
     $("#session-meta").textContent = "";
     $("#transcript").innerHTML = "";
@@ -337,6 +372,7 @@ function renderTranscript(messages) {
   const t = $("#transcript");
   t.innerHTML = "";
   state.pendingToolCards = [];
+  state.toolCounter = 0;
   const visible = messages.filter((m) => m.meta?.ephemeral !== true);
   if (visible.length === 0) {
     t.appendChild(emptyStateNode());
@@ -377,9 +413,8 @@ function appendMessage(role, content, toolCalls) {
   const t = $("#transcript");
   const div = document.createElement("div");
   div.className = `msg ${role}`;
-  const head = role === "user" ? `<div class="role">${esc(role)}</div>` : "";
   const copyBtn = role === "assistant" ? `<button class="msg-copy ghost" title="copy message">copy</button>` : "";
-  div.innerHTML = `${head}<div class="bubble"></div>${copyBtn}`;
+  div.innerHTML = `<div class="bubble"></div>${copyBtn}`;
   const bubble = div.querySelector(".bubble");
   if (role === "assistant") {
     bubble.innerHTML = mdRender(content);
@@ -425,14 +460,149 @@ function wireCodeButtons(scope) {
   }
 }
 
-/** Collapsible tool card. Live cards keep a placeholder result until the
- * matching tool.result event arrives (paired by name below). */
+// ---------------------------------------------------------------------------
+// transcript search (client-side, current session)
+// ---------------------------------------------------------------------------
+function toggleSearch(open) {
+  const bar = $("#search-bar");
+  const show = open !== undefined ? open : bar.hidden;
+  bar.hidden = !show;
+  if (show) {
+    $("#transcript-search").focus();
+  } else {
+    $("#transcript-search").value = "";
+    applyTranscriptFilter();
+  }
+}
+
+function applyTranscriptFilter() {
+  const q = ($("#transcript-search").value || "").trim().toLowerCase();
+  const items = document.querySelectorAll("#transcript .msg, #transcript .toolwrap");
+  if (q === "") {
+    for (const el of items) el.classList.remove("search-hide");
+    $("#search-count").textContent = "";
+    return;
+  }
+  let n = 0;
+  for (const el of items) {
+    const hit = (el.textContent ?? "").toLowerCase().includes(q);
+    el.classList.toggle("search-hide", !hit);
+    if (hit) n += 1;
+  }
+  $("#search-count").textContent = `${n} match${n === 1 ? "" : "es"}`;
+}
+
+// ---------------------------------------------------------------------------
+// topbar session menu (rename / export / delete)
+// ---------------------------------------------------------------------------
+function closeAllPops() {
+  for (const id of ["session-menu-pop", "mode-pop", "model-pop"]) {
+    $(`#${id}`).hidden = true;
+  }
+}
+
+function startRename() {
+  const title = $("#session-title");
+  if (!state.currentSession) return;
+  if (title.querySelector("input")) return;
+  const original = title.textContent;
+  const input = document.createElement("input");
+  input.value = original === "no session" ? "" : original;
+  input.spellcheck = false;
+  title.textContent = "";
+  title.appendChild(input);
+  input.focus();
+  input.select();
+  const commit = async () => {
+    if (input.dataset.done) return;
+    input.dataset.done = "1";
+    const next = input.value.trim();
+    if (!next || next === original) {
+      title.textContent = original;
+      input.remove();
+      return;
+    }
+    title.textContent = next;
+    try {
+      const updated = await rpc("session.update", { id: state.sessionId, title: next });
+      state.currentSession = updated;
+      $("#session-title").textContent = updated.title || next;
+      await refreshSessions();
+      toast("renamed", "ok");
+    } catch (err) {
+      toast(`rename failed: ${err.message}`, "err");
+      title.textContent = original;
+    }
+    input.remove();
+  };
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      ev.stopPropagation();
+      void commit();
+    } else if (ev.key === "Escape") {
+      ev.stopPropagation();
+      title.textContent = original;
+    }
+  });
+  input.addEventListener("blur", () => void commit());
+}
+
+async function exportMarkdown() {
+  if (!state.sessionId) {
+    toast("no session to export", "err");
+    return;
+  }
+  let data;
+  try {
+    data = await rpc("session.get", { id: state.sessionId });
+  } catch (err) {
+    toast(`export failed: ${err.message}`, "err");
+    return;
+  }
+  const s = data.session;
+  const lines = [
+    `# ${s.title || s.id.slice(0, 8)}`,
+    "",
+    `_familiar · ${s.provider}${s.model ? `/${s.model}` : ""}${s.profile ? ` · profile: ${s.profile}` : ""} · ${fmtTime(s.updatedAt)}_`,
+    "",
+  ];
+  for (const m of (data.messages ?? []).filter((x) => x.meta?.ephemeral !== true)) {
+    if (m.role === "tool") {
+      const call = Array.isArray(m.toolCalls) ? m.toolCalls[0] : undefined;
+      const name = m.name ?? call?.name ?? "tool";
+      lines.push(`> **tool · ${name}**${m.meta?.isError ? " (error)" : ""}`, "", "```", String(m.content ?? ""), "```", "");
+    } else if (m.role === "assistant") {
+      lines.push("## assistant", "", String(m.content ?? ""), "");
+    } else {
+      lines.push("## user", "", String(m.content ?? ""), "");
+    }
+  }
+  const md = lines.join("\n");
+  const slug = (s.title || "session").toLowerCase().replace(/[^\w-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "session";
+  const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `familiar-${slug}.md`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  toast("exported as markdown", "ok");
+}
+
+
+/**
+ * OpenCode-style inline tool row: "1  read  planets.txt  ✓ 0.3s" — click the
+ * row to expand the full arguments + result. Live rows wait for their paired
+ * tool.result event (matched by tool name). */
 function appendToolCard(name, args, resultContent, status, opts = {}) {
   const t = $("#transcript");
-  const card = document.createElement("div");
-  card.className = `toolcard ${status === "err" ? "is-error" : status === "run" ? "is-run" : ""}`;
+  const wrap = document.createElement("div");
+  wrap.className = `toolwrap ${status === "err" ? "is-error" : status === "run" ? "is-run" : ""}`;
   const argsText = String(args ?? "");
-  const preview = argsText.replace(/\s+/g, " ").trim().slice(0, 64);
+  const preview = firstArgPreview(argsText);
   let argsPretty = null;
   try {
     const parsed = JSON.parse(argsText);
@@ -441,35 +611,57 @@ function appendToolCard(name, args, resultContent, status, opts = {}) {
     argsPretty = null;
   }
   const argsBlock = argsPretty ?? argsText;
-  const duration = opts.durationMs !== undefined ? ` <span class="tc-dur">${esc((opts.durationMs / 1000).toFixed(1))}s</span>` : "";
-  card.innerHTML = `
-    <div class="tc-head">
+  state.toolCounter += 1;
+  const num = state.toolCounter;
+  const duration = opts.durationMs !== undefined ? (opts.durationMs / 1000).toFixed(1) : "";
+  wrap.innerHTML = `
+    <div class="toolrow">
+      <span class="tn">${num}</span>
+      <span class="toolname">${esc(name)}</span>
+      <span class="targs">${esc(preview)}</span>
+      <span class="tmeta">${esc(duration)}</span>
       <span class="tc-status"></span>
-      <span class="tc-name">${esc(name)}</span>
-      <span class="tc-args">${esc(preview)}</span>${duration}
-      <button class="tc-toggle ghost" type="button">▾</button>
+      <button class="tc-toggle ghost" type="button" title="details">▾</button>
     </div>
     <div class="tc-body" hidden>
       ${argsText !== "" ? `<div class="tc-section"><h5>arguments</h5><pre>${esc(truncate(argsBlock, ARGS_CAP))}</pre></div>` : ""}
       <div class="tc-section tc-result"><h5>${opts.resultLabel ?? "result"}</h5><pre>${status === "run" ? `<span class="dim">running…</span>` : esc(truncate(resultContent, RESULT_CAP))}</pre></div>
     </div>`;
-  card.querySelector(".tc-toggle").addEventListener("click", () => {
-    const body = card.querySelector(".tc-body");
+  wrap.querySelector(".tc-toggle").addEventListener("click", () => {
+    const body = wrap.querySelector(".tc-body");
     body.hidden = !body.hidden;
-    card.classList.toggle("open", !body.hidden);
+    wrap.classList.toggle("open", !body.hidden);
   });
-  t.appendChild(card);
+  t.appendChild(wrap);
   scrollBottom();
   const entry = {
     name,
-    card,
-    statusEl: card.querySelector(".tc-status"),
-    resultEl: card.querySelector(".tc-result pre"),
-    labelEl: card.querySelector(".tc-result h5"),
+    card: wrap,
+    startedAt: status === "run" ? Date.now() : undefined,
+    statusEl: wrap.querySelector(".tc-status"),
+    resultEl: wrap.querySelector(".tc-result pre"),
+    labelEl: wrap.querySelector(".tc-result h5"),
+    metaEl: wrap.querySelector(".tmeta"),
     resultFull: String(resultContent ?? ""),
   };
   if (status === "run") state.pendingToolCards.push(entry);
   return entry;
+}
+
+/** Human one-line preview from a JSON arguments blob ("path"-ish first value). */
+function firstArgPreview(argsText) {
+  try {
+    const parsed = JSON.parse(argsText);
+    if (parsed && typeof parsed === "object") {
+      const vals = Object.values(parsed)
+        .filter((v) => typeof v === "string" || typeof v === "number")
+        .map(String);
+      if (vals.length > 0) return vals.join(" ").slice(0, 72);
+    }
+  } catch {
+    /* raw fallback below */
+  }
+  return argsText.replace(/\s+/g, " ").trim().slice(0, 72);
 }
 
 function completeToolCard(entry, content, isError) {
@@ -478,6 +670,10 @@ function completeToolCard(entry, content, isError) {
   entry.labelEl.textContent = isError ? "error" : "result";
   entry.resultEl.textContent = truncate(content, RESULT_CAP);
   entry.statusEl.textContent = isError ? "✗" : "✓";
+  if (!isError) {
+    const secs = entry.startedAt !== undefined ? (Date.now() - entry.startedAt) / 1000 : null;
+    if (secs !== null && entry.metaEl) entry.metaEl.textContent = `${secs.toFixed(1)}s`;
+  }
   entry.card.classList.remove("is-run");
   entry.card.classList.toggle("is-error", isError);
 }
@@ -570,7 +766,7 @@ function onEvent(sessionId, e) {
     } else {
       const node = document.querySelector(`#approval-dock .dock[data-request-id="${CSS.escape(e.requestId ?? "")}"]`);
       if (node) node.remove();
-      if (document.querySelector("#approval-dock").children.length === 0) $("#turn-state").textContent = "";
+      if (document.querySelector("#approval-dock").children.length === 0) $("#turn-label").textContent = "";
     }
     return;
   }
@@ -618,10 +814,15 @@ function onEvent(sessionId, e) {
     }
     case "turn.end": {
       const u = e.usage ?? {};
+      const rec = state.usageBySession[sessionId] ?? { prompt: 0, completion: 0 };
+      rec.prompt += u.promptTokens ?? 0;
+      rec.completion += u.completionTokens ?? 0;
+      state.usageBySession[sessionId] = rec;
       const toks = u.promptTokens !== undefined
         ? ` · ↑${u.promptTokens} ↓${u.completionTokens ?? 0} tok` : "";
       setBusy(false);
       setTurnEndLabel(`✓ done in ${state.lastElapsed ?? ""}${toks}`);
+      renderUsageChip();
       state.pendingEvents.delete(sessionId);
       refreshSessions();
       loadInbox();
@@ -816,26 +1017,34 @@ function providerAuthLabel(pc) {
   return pc.auth.resolved ? "key ✓" : `missing ${pc.auth.source}`;
 }
 
+/** Load provider/profile catalog once for both the sidebar picker and the
+ * composer model popover. */
+async function ensureNsConfig() {
+  if (ns.loaded) return true;
+  try {
+    const cfg = await rpc("config.get");
+    ns.providers = cfg.providers ?? {};
+    ns.profiles = cfg.profiles ?? {};
+    ns.defaultProvider = cfg.default_provider ?? "mock";
+    ns.defaultModel = cfg.default_model;
+    ns.loaded = true;
+    return true;
+  } catch (err) {
+    toast(`config unavailable: ${err.message}`, "err");
+    return false;
+  }
+}
+
 async function openNewSessionPanel() {
   const panel = $("#new-session-panel");
   if (!panel.hidden) {
     panel.hidden = true;
     return;
   }
-  if (!ns.loaded) {
-    try {
-      const cfg = await rpc("config.get");
-      ns.providers = cfg.providers ?? {};
-      ns.profiles = cfg.profiles ?? {};
-      ns.defaultProvider = cfg.default_provider ?? "mock";
-      ns.defaultModel = cfg.default_model;
-      ns.loaded = true;
-    } catch (err) {
-      panel.hidden = true;
-      toast(`config unavailable, creating a default session: ${err.message}`, "err");
-      void newSession();
-      return;
-    }
+  if (!(await ensureNsConfig())) {
+    panel.hidden = true;
+    void newSession();
+    return;
   }
   const selProvider = $("#ns-provider");
   selProvider.innerHTML = "";
@@ -887,6 +1096,100 @@ async function refreshModelList() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// composer chips: agent mode + model for the current session
+// ---------------------------------------------------------------------------
+function setMode(mode) {
+  state.mode = mode === "plan" ? "plan" : "build";
+  $("#mode-chip").textContent = `${state.mode === "plan" ? "Plan" : "Build"} ▾`;
+  $("#mode-chip").classList.toggle("plan-mode", state.mode === "plan");
+  $("#mode-pop").hidden = true;
+}
+
+function renderModelChip() {
+  const s = state.currentSession;
+  const provider = state.draft.provider || s?.provider || ns.defaultProvider;
+  const model = state.draft.model || s?.model || "";
+  $("#model-chip").textContent = `${provider ?? "?"}${model ? "/" + model : ""} ▾`;
+}
+
+async function openModelPopover() {
+  const pop = $("#model-pop");
+  if (!pop.hidden) {
+    pop.hidden = true;
+    return;
+  }
+  closeAllPops();
+  if (!(await ensureNsConfig())) return;
+  const sel = $("#mp-provider");
+  sel.innerHTML = "";
+  const names = Object.keys(ns.providers).sort((a, b) =>
+    a === ns.defaultProvider ? -1 : b === ns.defaultProvider ? 1 : a.localeCompare(b));
+  for (const name of names) {
+    const pc = ns.providers[name] ?? {};
+    const hint = providerAuthLabel(pc);
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = hint ? `${name} (${hint})` : name;
+    sel.appendChild(opt);
+  }
+  const current = state.draft.provider || state.currentSession?.provider || ns.defaultProvider || names[0];
+  sel.value = names.includes(current) ? current : names[0] ?? "";
+  $("#mp-model").value = state.draft.model || state.currentSession?.model || "";
+  pop.hidden = false;
+  await refreshModelPopover();
+}
+
+async function refreshModelPopover() {
+  const provider = $("#mp-provider").value;
+  const pc = ns.providers[provider] ?? {};
+  const hint = pc.default_model ?? ns.defaultModel;
+  $("#mp-model").placeholder = hint ? `default: ${hint}` : "model name";
+  $("#mp-models").innerHTML = "";
+  try {
+    const res = await rpc("models.list", { provider });
+    for (const m of res.models ?? []) {
+      const opt = document.createElement("option");
+      opt.value = m.id;
+      if (m.contextTokens) opt.label = `${m.id} (${Math.round(m.contextTokens / 1000)}k)`;
+      $("#mp-models").appendChild(opt);
+    }
+  } catch {
+    /* free-text stays available */
+  }
+}
+
+async function applyModelPopover() {
+  const provider = $("#mp-provider").value || ns.defaultProvider || "mock";
+  const model = $("#mp-model").value.trim();
+  const prevChip = $("#model-chip").textContent;
+  $("#model-pop").hidden = true;
+  state.draft.provider = provider;
+  state.draft.model = model;
+  if (!state.sessionId) {
+    renderModelChip();
+    toast(`next session will use ${provider}${model ? "/" + model : ""}`, "info");
+    return;
+  }
+  try {
+    const patch = { id: state.sessionId, provider };
+    if (model !== "") patch.model = model;
+    const updated = await rpc("session.update", patch);
+    state.currentSession = updated;
+    state.draft = { provider: "", model: "" };
+    const bits = [updated.provider];
+    if (updated.model) bits.push(updated.model);
+    if (updated.profile) bits.push(`profile: ${updated.profile}`);
+    $("#session-meta").textContent = bits.join(" · ");
+    renderModelChip();
+    refreshSessions();
+    toast(`model set to ${updated.provider}/${updated.model}`, "ok");
+  } catch (err) {
+    $("#model-chip").textContent = prevChip;
+    toast(`model change failed: ${err.message}`, "err");
+  }
+}
+
 async function createFromPanel() {
   const provider = $("#ns-provider").value || ns.defaultProvider || "mock";
   const model = $("#ns-model").value.trim();
@@ -923,9 +1226,13 @@ async function send() {
   if (text === "" || state.busy) return;
   let id = state.sessionId;
   if (!id) {
-    const s = await rpc("session.create", {});
+    const createParams = {};
+    if (state.draft.provider) createParams.provider = state.draft.provider;
+    if (state.draft.model) createParams.model = state.draft.model;
+    const s = await rpc("session.create", createParams);
     id = s.id;
     state.sessionId = id;
+    state.draft = { provider: "", model: "" };
     await refreshSessions();
   }
   setBusy(true);
@@ -933,7 +1240,24 @@ async function send() {
   input.value = "";
   autoSize(input);
   try {
-    await rpc("session.send", { id, text });
+    // a pending model-chip change is persisted first; on failure fall back to
+    // per-turn overrides passed straight into session.send
+    let overrides = null;
+    if (state.draft.provider) {
+      try {
+        const patch = { id, provider: state.draft.provider };
+        if (state.draft.model) patch.model = state.draft.model;
+        state.currentSession = await rpc("session.update", patch);
+        state.draft = { provider: "", model: "" };
+        refreshSessions();
+      } catch {
+        overrides = { ...state.draft };
+      }
+    }
+    const sparams = { id, text, plan: state.mode === "plan" };
+    if (overrides?.provider) sparams.provider = overrides.provider;
+    if (overrides?.model) sparams.model = overrides.model;
+    await rpc("session.send", sparams);
   } catch (err) {
     toast(`send failed: ${err.message}`, "err");
     setBusy(false);
@@ -950,6 +1274,7 @@ function autoSize(ta) {
 // ---------------------------------------------------------------------------
 function boot() {
   $("#new-session").addEventListener("click", () => void openNewSessionPanel());
+  $("#composer-new").addEventListener("click", () => void openNewSessionPanel());
   $("#ns-cancel").addEventListener("click", () => {
     $("#new-session-panel").hidden = true;
   });
@@ -958,6 +1283,47 @@ function boot() {
 
   $("#session-filter").addEventListener("input", applySessionFilter);
   ulSessionsClick();
+
+  // topbar: search + session menu
+  $("#search-toggle").addEventListener("click", () => toggleSearch());
+  $("#search-close").addEventListener("click", () => toggleSearch(false));
+  $("#transcript-search").addEventListener("input", applyTranscriptFilter);
+  $("#session-menu-btn").addEventListener("click", () => {
+    const opening = $("#session-menu-pop").hidden;
+    closeAllPops();
+    $("#session-menu-pop").hidden = !opening;
+  });
+  $("#session-menu-pop").addEventListener("click", (ev) => {
+    const btn = ev.target.closest("button[data-act]");
+    if (!btn) return;
+    $("#session-menu-pop").hidden = true;
+    if (btn.dataset.act === "rename") startRename();
+    else if (btn.dataset.act === "export") void exportMarkdown();
+    else if (btn.dataset.act === "delete") void deleteSession(state.sessionId);
+  });
+
+  // composer chips
+  $("#mode-chip").addEventListener("click", () => {
+    const opening = $("#mode-pop").hidden;
+    closeAllPops();
+    $("#mode-pop").hidden = !opening;
+  });
+  $("#mode-pop").addEventListener("click", (ev) => {
+    const btn = ev.target.closest("button[data-mode]");
+    if (!btn) return;
+    setMode(btn.dataset.mode);
+  });
+  $("#model-chip").addEventListener("click", () => void openModelPopover());
+  $("#mp-provider").addEventListener("change", () => void refreshModelPopover());
+  $("#mp-apply").addEventListener("click", () => void applyModelPopover());
+  $("#mp-cancel").addEventListener("click", () => {
+    $("#model-pop").hidden = true;
+  });
+
+  // close popovers on outside click
+  document.addEventListener("click", (ev) => {
+    if (!ev.target.closest(".menu-wrap")) closeAllPops();
+  });
 
   $("#composer").addEventListener("submit", (ev) => {
     ev.preventDefault();
@@ -987,7 +1353,17 @@ function boot() {
       $("#session-filter").focus();
       return;
     }
+    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "f") {
+      ev.preventDefault();
+      toggleSearch(true);
+      return;
+    }
     if (ev.key === "Escape") {
+      closeAllPops();
+      if (!$("#search-bar").hidden) {
+        toggleSearch(false);
+        return;
+      }
       if (!$("#new-session-panel").hidden) {
         $("#new-session-panel").hidden = true;
         return;
@@ -999,6 +1375,8 @@ function boot() {
     }
   });
 
+  setMode("build");
+  renderModelChip();
   void refreshSessions();
   void loadInbox();
   autoSize(input);

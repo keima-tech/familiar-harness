@@ -73,4 +73,4 @@ esac
 log ""
 "$INSTALL_BIN/familiar" --version 2>/dev/null || "$INSTALL_LIB/packages/cli/dist/familiar.js" --version || true
 log "familiar installed to $INSTALL_LIB"
-log "next: familiar chat   (TUI)   |   familiar serve   (Web UI on http://127.0.0.1:46210)"
+log "next: familiar   (TUI)   |   familiar serve   (Web UI on http://127.0.0.1:46210)   |   familiar update"

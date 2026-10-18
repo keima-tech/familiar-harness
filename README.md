@@ -61,6 +61,11 @@ npm run -w packages/desktop pack:linux   # deb + AppImage
 npm run -w packages/desktop pack:win     # NSIS (run on Windows)
 ```
 
+### Updating
+
+- **release installs** (via the one-liner): `familiar update` — checks the Forgejo releases, downloads the newest `familiar-*.tar.gz` and swaps it in place (`--check` for a dry run, `--forgejo`/`--repo` to override the registry). Requires Node's fetch to trust the endpoint's certificate; self-signed instances get an automatic unverified retry with a warning (`FAMILIAR_TLS_STRICT=1` to abort instead).
+- **from source**: `git pull && npm run build`.
+
 ### Uninstall
 
 **curl installer:**
@@ -85,8 +90,8 @@ npm unlink                     # removes the global `familiar` symlink
 ### Quick start
 
 ```bash
-# full-screen TUI (opencode-style)
-familiar chat
+# full-screen TUI (opencode-style) — same as `familiar chat`
+familiar
 
 # one-shot, headless
 familiar run -p "List the TODOs in this repo"
@@ -235,6 +240,11 @@ npm run -w packages/desktop pack:linux   # deb + AppImage
 npm run -w packages/desktop pack:win     # NSIS(Windows 上で実行)
 ```
 
+### アップデート
+
+- **リリース版(ワンライナーで導入)**: `familiar update` — Forgejo の最新 Release を確認し、`familiar-*.tar.gz` をダウンロードしてインストール先を入れ替えます(`--check` でドライラン、`--forgejo` / `--repo` で接続先変更)。自己署名証明書のインスタンスでは検証をスキップする再試行が行われます(警告表示。`FAMILIAR_TLS_STRICT=1` で中止)。
+- **ソースから**: `git pull && npm run build`。
+
 ### アンインストール
 
 **curl インストーラの場合:**
@@ -259,8 +269,8 @@ npm unlink                     # グローバルの `familiar` シンボリッ�
 ### クイックスタート
 
 ```bash
-# フルスクリーン TUI(opencode 風)
-familiar chat
+# フルスクリーン TUI(opencode 風)— `familiar chat` と同じ
+familiar
 
 # ワンショット実行(ヘッドレス)
 familiar run -p "このリポジトリの TODO を列挙して"

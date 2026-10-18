@@ -572,3 +572,23 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   `gpt-6.1-sol` に更新(DEFAULT_CONFIG・CONFIG_TEMPLATE・README・
   docs/spec/05-config.md)。例に「モデル名は流動的 — /models で要確認」
   の注記を追加。
+
+## v0.1.1 の実装メモ㉙(2026-10-19、familiar update・ベア familiar の周知)
+
+- **`familiar update`**: install.sh 由来のインストール(~/.local/lib/familiar/
+  packages/... レイアウトを realpath で判定)向けセルフアップデート。
+  Forgejo Release API で familiar-*.tar.gz を持つ最新リリースを semver 降順
+  (API の順序に依存しない)で解決 → バージョン比較(同値/旧は
+  up-to-date で終了)→ ダウンロード(tmp)→ tar 展開(同一 FS 上の
+  ステージング)→ ステージの完全性・package.json バージョン一致チェック →
+  rename スワップ(失敗時は旧ツリーへ復元)→ chmod 755(best-effort)。
+  `--check` でドライラン、`--forgejo` / `--repo` で接続先変更。
+  自己署名証明書(自前 Forgejo)では Node fetch が失敗するため、
+  CERT 系エラー時に限り検証スキップの https 再試行にフォールバック
+  (警告表示。NODE_EXTRA_CA_CERTS 推奨、FAMILIAR_TLS_STRICT=1 で無効化)。
+  モック Forgejo HTTP サーバで 0.1.0→0.1.1 の E2E 検証済み
+  (スワップ後 --version・残骸なし・--check up-to-date・serve 200)。
+- **ベア `familiar` = TUI** は既存実装(㉒)だが README のクイックスタートを
+  `familiar` 先頭に変更し、`familiar chat` は同等コマンドとして明記。
+  install.sh の完了メッセージも `familiar` 起点に。
+- README 両言語に「アップデート」節を追加。

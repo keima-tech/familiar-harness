@@ -15,6 +15,8 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
+import { execFile } from "node:child_process";
+import https from "node:https";
 import type { AgentEvent, ChatMessage, ModelInfo, SessionRecord } from "@familiar/protocol";
 import {
   CONFIG_TEMPLATE,
@@ -47,6 +49,8 @@ Usage:
              [--cwd DIR] [-y]
              # TTY opens the full-screen TUI; --line keeps the classic REPL
   familiar serve [--port N] [--bind ADDR] [--config PATH]
+  familiar update [--check] [--forgejo URL] [--repo SLUG]
+                        # self-update from release assets (install.sh installs)
   familiar token [--write] [--clear]   # M2 bearer token for familiar serve
   familiar sessions list | show <id> [--messages] | delete <id>
   familiar model list [provider]
@@ -90,6 +94,8 @@ const STRING_FLAGS = new Set([
   "--title",
   "--server",
   "--root",
+  "--forgejo",
+  "--repo",
   "-p",
   "--prompt",
   "--days",
@@ -105,6 +111,7 @@ const BOOL_FLAGS = new Set([
   "--messages",
   "--plan",
   "--local",
+  "--check",
   "--force",
   "--consolidate",
   "--dry-run",
@@ -1390,6 +1397,165 @@ async function cmdModel(flags: Record<string, string | boolean>, positionals: st
   process.stdout.write(dim(`\n(${res.models.length} models on ${res.provider})\n`));
 }
 
+/** Numeric semver triple compare: >0 when a is newer, <0 older, 0 equal. */
+function compareSemver(a: string, b: string): number {
+  const triple = (v: string): [number, number, number] => {
+    const [nums] = v.split("-");
+    const parts = (nums ?? "").split(".").map((n) => Number.parseInt(n, 10));
+    return [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0];
+  };
+  const [pa, pb] = [triple(a), triple(b)];
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) - (pb[i] ?? 0);
+  }
+  return 0;
+}
+
+interface UpdateRelease {
+  tag_name?: string;
+  assets?: Array<{ name?: string; browser_download_url?: string }>;
+}
+
+/**
+ * GET a URL as a buffer, tolerating self-signed CAs on the second try
+ * (self-hosted Forgejo instances). Prefer NODE_EXTRA_CA_CERTS for a trusted
+ * setup; FAMILIAR_TLS_STRICT=1 disables the fallback.
+ */
+async function httpGet(url: string): Promise<{ ok: boolean; status: number; buffer: Buffer }> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(120_000) });
+    return { ok: res.ok, status: res.status, buffer: Buffer.from(await res.arrayBuffer()) };
+  } catch (err) {
+    const code = String((err as { cause?: { code?: string } }).cause?.code ?? "");
+    if (!/CERT|SSL|TLS/i.test(code) || process.env.FAMILIAR_TLS_STRICT === "1") throw err;
+    process.stdout.write(
+      `warn: TLS verification failed (${code}) — retrying without verification; ` +
+        "set NODE_EXTRA_CA_CERTS to trust your CA, or FAMILIAR_TLS_STRICT=1 to abort\n",
+    );
+    return new Promise((resolve, reject) => {
+      const req = https.get(url, { rejectUnauthorized: false }, (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => chunks.push(c));
+        res.on("end", () =>
+          resolve({
+            ok: (res.statusCode ?? 500) < 400,
+            status: res.statusCode ?? 0,
+            buffer: Buffer.concat(chunks),
+          }),
+        );
+      });
+      req.on("error", reject);
+      req.setTimeout(300_000, () => req.destroy(new Error("timeout")));
+    });
+  }
+}
+
+/**
+ * `familiar update` — self-update for installs created by install.sh.
+ * Resolves the latest Forgejo release with a familiar-*.tar.gz asset, compares
+ * versions, then download → verify → swap the install directory (same
+ * filesystem, old tree restored if the swap fails midway).
+ * Source checkouts must update via `git pull && npm run build`.
+ */
+async function cmdUpdate(flags: Record<string, string | boolean>): Promise<void> {
+  const host = (flag(flags, "forgejo") as string) || process.env.FAMILIAR_FORGEJO || "https://example.invalid:3000";
+  const repo = (flag(flags, "repo") as string) || process.env.FAMILIAR_REPO || "owner/familiar-harness";
+  const checkOnly = flagBool(flags, "check");
+  const current = readVersion();
+
+  // Locate the install root this binary belongs to (~/.local/lib/familiar/…).
+  const self = fs.realpathSync(import.meta.url.replace(/^file:\/\//, "")).replace(/\\/g, "/");
+  const m = /(.*)\/packages\/cli\/dist\/familiar\.js$/.exec(self);
+  if (!m || !fs.existsSync(path.join(m[1] as string, "packages", "server", "public"))) {
+    fail(
+      "`familiar update` maintains installs created by install.sh. " +
+        "This looks like a source checkout — update with `git pull && npm run build`.",
+    );
+  }
+  const lib = m[1] as string;
+
+  const api = `${host}/api/v1/repos/${repo}/releases`;
+  process.stdout.write(`checking ${api} …\n`);
+  let releases: UpdateRelease[];
+  try {
+    const res = await httpGet(api);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    releases = JSON.parse(res.buffer.toString("utf8")) as UpdateRelease[];
+  } catch (err) {
+    fail(`cannot list releases at ${api}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  const withAsset = (releases ?? [])
+    .filter((r) => (r.assets ?? []).some((a) => /^familiar-.*\.tar\.gz$/.test(a.name ?? "")))
+    .sort((a, b) => compareSemver((b.tag_name ?? "").replace(/^v/, ""), (a.tag_name ?? "").replace(/^v/, "")))[0];
+  if (!withAsset?.tag_name) fail(`no release with a familiar-*.tar.gz asset at ${api}`);
+  const latest = (withAsset.tag_name as string).replace(/^v/, "");
+  const asset =
+    (withAsset.assets ?? []).find((a) => a.browser_download_url && a.name?.endsWith(`v${latest}.tar.gz`)) ??
+    (withAsset.assets ?? []).find((a) => /^familiar-.*\.tar\.gz$/.test(a.name ?? ""));
+  if (!asset?.browser_download_url) fail(`release v${latest} has no usable asset URL`);
+
+  if (compareSemver(latest, current) <= 0) {
+    process.stdout.write(`familiar ${current} — already up to date (latest release: v${latest})\n`);
+    return;
+  }
+  process.stdout.write(`update available: ${current} -> v${latest}\n`);
+  if (checkOnly) {
+    process.stdout.write("dry run — re-run without --check to install\n");
+    return;
+  }
+
+  // Stage on the SAME filesystem as `lib` (rename must not cross devices).
+  const stage = `${lib}.update-${process.pid}`;
+  const backup = `${lib}.bak-${process.pid}`;
+  const tgz = path.join(os.tmpdir(), `familiar-v${latest}.tar.gz`);
+  try {
+    process.stdout.write(`downloading ${asset.browser_download_url} …\n`);
+    const dl = await httpGet(asset.browser_download_url);
+    if (!dl.ok) throw new Error(`download failed (HTTP ${dl.status})`);
+    fs.writeFileSync(tgz, dl.buffer);
+
+    fs.rmSync(stage, { recursive: true, force: true });
+    fs.mkdirSync(stage, { recursive: true });
+    await new Promise<void>((resolve, reject) => {
+      execFile("tar", ["-xzf", tgz, "-C", stage], (err) => (err ? reject(err) : resolve()));
+    });
+    if (!fs.existsSync(path.join(stage, "packages", "cli", "dist", "familiar.js")) ||
+        !fs.existsSync(path.join(stage, "packages", "server", "public"))) {
+      throw new Error("extracted tree looks incomplete — refusing to swap");
+    }
+    const stagedVersion = JSON.parse(
+      fs.readFileSync(path.join(stage, "packages", "cli", "package.json"), "utf8"),
+    ).version as string;
+    if (stagedVersion !== latest) {
+      throw new Error(`staged version ${stagedVersion} does not match release v${latest}`);
+    }
+
+    process.stdout.write(`swapping ${lib} → v${latest} …\n`);
+    if (fs.existsSync(backup)) fs.rmSync(backup, { recursive: true, force: true });
+    fs.renameSync(lib, backup);
+    try {
+      fs.renameSync(stage, lib);
+    } catch (err) {
+      fs.renameSync(backup, lib); // restore
+      throw err;
+    }
+    // best effort — the tree is already swapped at this point
+    try {
+      fs.chmodSync(path.join(lib, "packages", "cli", "dist", "familiar.js"), 0o755);
+    } catch {
+      /* ignore */
+    }
+    fs.rmSync(backup, { recursive: true, force: true });
+    process.stdout.write(`updated: familiar ${current} -> ${latest}\n`);
+    process.stdout.write("restart any running `familiar serve` / desktop app to pick it up\n");
+  } catch (err) {
+    fail(`update failed (install unchanged): ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    fs.rmSync(tgz, { force: true });
+    if (fs.existsSync(stage)) fs.rmSync(stage, { recursive: true, force: true });
+  }
+}
+
 async function cmdInit(): Promise<void> {
   const cfgFile = familiarPaths.config();
   for (const dir of [familiarPaths.home(), familiarPaths.profiles(), familiarPaths.skills(), familiarPaths.memories(), familiarPaths.pendingMemory(), familiarPaths.pendingSkills()]) {
@@ -1861,6 +2027,9 @@ async function main(): Promise<void> {
         break;
       case "serve":
         await cmdServe(flags);
+        break;
+      case "update":
+        await cmdUpdate(flags);
         break;
       case "sessions":
         await cmdSessions(flags, rest);

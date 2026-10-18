@@ -129,7 +129,21 @@ export function startHttpTransport(
       if (asset) {
         const file = path.join(publicDir(), asset.file);
         if (fs.existsSync(file)) {
-          res.writeHead(200, { "Content-Type": asset.type });
+          // revalidate on every load: the UI ships as plain files, so a stale
+          // cache after an update would mix old CSS with new markup
+          const stat = fs.statSync(file);
+          const etag = `W/"${stat.size}-${Math.floor(stat.mtimeMs)}"`;
+          if (req.headers["if-none-match"] === etag) {
+            res.writeHead(304, { ETag: etag, "Cache-Control": "no-cache" });
+            res.end();
+            return;
+          }
+          res.writeHead(200, {
+            "Content-Type": asset.type,
+            "Cache-Control": "no-cache",
+            ETag: etag,
+            "Last-Modified": stat.mtime.toUTCString(),
+          });
           res.end(req.method === "HEAD" ? undefined : fs.readFileSync(file));
           return;
         }

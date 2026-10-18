@@ -472,3 +472,33 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   (`/rename `まで入れて待機)。実 PTY で パレット受理→入力→toast まで検証。
 - **ターミナルタイトル**: OSC 0 (`\x1b]0;familiar — <session title|~cwd>BEL`)
   を start 時と title/cwd 変更時に更新。
+
+## v1.1 の実装メモ㉕(2026-10-18、TUI 承認フロー・IME カーソル・usage/tok/s)
+
+- **TUI ネイティブ・ツール承認**: フルスクリーン TUI では
+  `CliApprovalAdapter`(readline)が alt-screen と同じ stdin を奪い合い、
+  最初のターンでツール承認が来ると描画が乱れ入力不能になる不具合を修正。
+  `TuiApprovalAdapter` を追加(`ui/approvals.ts`)し、cmdTui は TUI を
+  openRunTransport より先に構築して渡す(第 6 引数 `approval` で上書き、
+  既定は従来の readline アダプタ)。パネルのエディタ行に
+  `approve bash: <summary>? (y/N)` を表示(summary が既に
+  `<tool>:` で始まる場合は接頭辞を畳む)、ヒント行は `y approve / n deny`。
+  承認待ち中は y=承認 / n・Esc=拒否、他キーは無視し入力には混入しない。
+  実 PTY E2E(mock `@bash`)で 出現→n 拒否でターン完走→
+  再出現→y 承認でツール実行→後続会話 を検証。
+- **IME 変換窓の位置**: カーソル非表示(`?25l`)だと CJK IME の候補窓が
+  画面隅に寄るため、`?25l` を廃止。毎フレーム実カーソルをエディタの
+  キャレット位置(`row = h-bottomHeight + (slim?1:2)`, `col = bx+3+可視幅`)
+  に置き、`DECSCUSR 6`(固定バー)を start で要求、stop で `0 q` 復帰。
+  疑似ブロックカーソル(INV)は実カーソルと二重になるため撤去。
+- **usage 既定取得(openai_compatible)**: `stream_options.include_usage`
+  を既定で送る(`stream_options: false` で無効化、ollama は DEFAULT_CONFIG
+  で false のまま)。400/422 で `stream_options` が原因の拒否の場合は
+  1 回だけ外して再送し失敗させる。halogen 実機で turn.end に
+  usage が乗ることを確認(これが GUI の tok/s 非表示の原因)。
+- **GUI の tok/s 概算**: usage が取れない場合、ターン内ストリーム文字列から
+  `estimateTokens`(CJK≈1字/トークン、その他≈4字/トークン)で概算し
+  `↓≈N tok (≈M tok/s)` を表示。usage がある場合は従来どおり実測値。
+- **reasoning ブロックの閉鎖表示**: ストリーム終了後も
+  `◌ thinking…` のままだったのを、closeStreams で `done` を立て
+  `· thinking…` に切替(回転中/終了の区別が付く)。

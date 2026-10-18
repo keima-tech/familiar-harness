@@ -28,7 +28,7 @@ export interface ProviderConfig {
   default_model?: string;
   /** Static model list; when set, remote /models listing is skipped. */
   models?: string[];
-  /** Send `stream_options: { include_usage: true }` (needed by OpenAI, some compat providers reject it). */
+  /** Send `stream_options: { include_usage: true }` to get usage on the stream (tok/s in the GUI). Set `false` for servers that choke on it (auto-retried anyway). */
   stream_options?: boolean;
 }
 

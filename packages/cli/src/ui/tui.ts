@@ -260,7 +260,7 @@ function markRows(withHarness: boolean): string[] {
 type Block =
   | { kind: "user"; text: string; mode?: string }
   | { kind: "assistant"; src: string; lines: string[] | null; done: boolean; lastRender: number }
-  | { kind: "reasoning"; text: string }
+  | { kind: "reasoning"; text: string; done?: boolean }
   | { kind: "tool"; name: string; detail: string; status: "run" | "ok" | "err"; ms?: number; extra?: string[] }
   | { kind: "info"; text: string };
 
@@ -274,7 +274,9 @@ function blockLines(b: Block, width: number): string[] {
     case "assistant":
       return b.lines ?? [];
     case "reasoning": {
-      const out = [cc.gray("◌ thinking…")];
+      // ◌ = still streaming; · = closed (message/turn ended)
+      const mark = b.done ? cc.gray("·") : cc.gray("◌");
+      const out = [`${mark} ${cc.gray("thinking…")}`];
       for (const piece of b.text.split("\n")) {
         if (piece !== "") out.push(...wrapAnsi(cc.dim(piece), width));
       }
@@ -458,13 +460,37 @@ export class FullScreenTui {
   onSessionPick?: (id: string) => void | Promise<void>;
   /** caller hook: Esc pressed while streaming (≈ "stop the turn") */
   onAbortTurn?: () => void | Promise<void>;
+  /** pending tool approval (y/N prompt rendered into the prompt panel) */
+  private approvalReq: { tool: string; summary: string } | null = null;
+  private approvalResolve: ((ok: boolean) => void) | null = null;
+
+  /** Ask the user to approve a tool call (replaces the readline prompt the
+   * plain CLI uses, which would fight the full-screen TUI over stdin). */
+  requestApproval(req: { tool: string; summary: string }): Promise<boolean> {
+    if (this.approvalResolve !== null) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      this.approvalResolve = resolve;
+      this.approvalReq = { tool: req.tool, summary: req.summary };
+      this.frame();
+    });
+  }
+
+  private answerApproval(ok: boolean): void {
+    const resolve = this.approvalResolve;
+    this.approvalResolve = null;
+    this.approvalReq = null;
+    resolve?.(ok);
+    this.frame();
+  }
 
   // ---- lifecycle ---------------------------------------------------------
 
   start(): void {
     this.running = true;
     this.refreshSize();
-    process.stdout.write("\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1006h\x1b[?2004h\x1b[2J");
+    // ?25l is intentionally NOT used: a hidden cursor leaves CJK IME
+    // candidate windows anchored at the screen corner (unusable input).
+    process.stdout.write("\x1b[?1049h\x1b[?1000h\x1b[?1006h\x1b[?2004h\x1b[2J\x1b[6 q");
     this.applyTitle();
     this.frame();
   }
@@ -474,7 +500,7 @@ export class FullScreenTui {
     this.running = false;
     if (this.spinnerTimer) clearInterval(this.spinnerTimer);
     this.clearFrameTimer();
-    process.stdout.write("\x1b[?2004l\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[?1049l");
+    process.stdout.write("\x1b[?2004l\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[0 q\x1b[?1049l");
   }
 
   /** OSC 0 terminal title, updated alongside the session metadata. */
@@ -763,7 +789,11 @@ export class FullScreenTui {
       this.reRenderAssistant(this.assistantStream);
       this.assistantStream = null;
     }
-    this.reasoningStream = null;
+    if (this.reasoningStream) {
+      this.reasoningStream.done = true;
+      this.reasoningStream = null;
+      this.frameSoon();
+    }
   }
 
   get toolTotal(): number {
@@ -806,7 +836,21 @@ export class FullScreenTui {
       this.prevRows[i] = null;
     }
     this.prevRows.length = rows.length;
+    // keep the real terminal cursor at the editor caret cell — IME candidate
+    // windows and screen readers track it (hiding it breaks CJK input)
+    out += this.cursorPosition();
     process.stdout.write(out);
+  }
+
+  /** Cursor placement for the prompt panel caret (1-based row;col). */
+  private cursorPosition(): string {
+    const bl = this.bottomHeight();
+    const slim = this.height < 14;
+    const row = this.height - bl + (slim ? 1 : 2);
+    const { w: boxW, x } = this.boxLayout();
+    const available = Math.max(1, boxW - 5);
+    const vis = Math.min(available, visibleWidth(this.input));
+    return `\x1b[${row};${x + 3 + vis}H\x1b[?25h`;
   }
 
   // ---- scrolling ------------------------------------------------------------
@@ -914,11 +958,19 @@ export class FullScreenTui {
     return COLOR ? `${sgr(null, BG_BOX)}${" ".repeat(w)}` : " ".repeat(w);
   }
 
-  /** Editor row fragment: accent bar + placeholder or typed text. */
+  /** Editor row fragment: accent bar + approval question / placeholder / text. */
   private editorFragment(boxW: number): string {
     const bar = this.info.mode === "plan"
       ? `${sgr(N_PLAN, BG_BOX)}┃`
       : `${sgr(N_ACCENT, BG_BOX)}┃`;
+    if (this.approvalReq !== null) {
+      const r = this.approvalReq;
+      // summaries are already "tool: args" — avoid the double prefix
+      const label = r.summary.startsWith(`${r.tool}:`) ? r.summary : `${r.tool}: ${r.summary}`;
+      const q = `approve ${label}? (y/N)`;
+      const text = truncateWidth(q, Math.max(1, boxW - 5));
+      return `${bar}${RESET}  ${sgr(N_WHITE, BG_BOX)}${text}${RESET}`;
+    }
     const available = Math.max(1, boxW - 5); // bar + 2 lead + cursor + margin
     if (this.input === "") {
       const ph = `Ask anything… "${this.placeholder}"`;
@@ -926,8 +978,7 @@ export class FullScreenTui {
       return `${bar}${RESET}  ${sgr(N_GRAY, BG_BOX)}${text}${RESET}`;
     }
     const clipped = padLine(this.input, available);
-    const caret = COLOR ? `${INV} ${RESET}` : "_";
-    return `${bar}${RESET}  ${sgr(N_WHITE, BG_BOX)}${clipped}${RESET}${caret}`;
+    return `${bar}${RESET}  ${sgr(N_WHITE, BG_BOX)}${clipped}${RESET}${COLOR ? sgr(null, BG_BOX) : ""}`;
   }
 
   /** Metadata row fragment (agent · model provider · effort). */
@@ -976,11 +1027,13 @@ export class FullScreenTui {
       }
       left = cc.gray(display);
     }
-    const pairs: Array<[string, string]> = this.popupKind
-      ? [["enter", "select"], ["esc", "close"]]
-      : this.busy
-        ? [["esc", "stop"], ["ctrl+p", "commands"]]
-        : [["tab", "switch agent"], ["ctrl+p", "commands"]];
+    const pairs: Array<[string, string]> = this.approvalReq !== null
+      ? [["y", "approve"], ["n", "deny"]]
+      : this.popupKind
+        ? [["enter", "select"], ["esc", "close"]]
+        : this.busy
+          ? [["esc", "stop"], ["ctrl+p", "commands"]]
+          : [["tab", "switch agent"], ["ctrl+p", "commands"]];
     const render = ([key, label]: [string, string]): string =>
       this.popupKind ? ` ${label} ${cc.gray(key)} ` : ` ${key} ${cc.gray(label)} `;
     const hintStr = pairs.map(render).join(" ");
@@ -1353,6 +1406,15 @@ export class FullScreenTui {
   /** Handle a keypress; returns the submitted line, "quit" or null. */
   key(key: { name?: string; ctrl?: boolean; meta?: boolean; sequence?: string }): string | null {
     if (key.ctrl && key.name === "c") return "\x03";
+    // a pending approval swallows every key except y / n (= deny / esc-like)
+    if (this.approvalResolve !== null) {
+      const seq = (key.sequence ?? "").toLowerCase();
+      if (key.name === "y" || seq === "y") this.answerApproval(true);
+      else if (key.name === "n" || seq === "n" || key.name === "escape" || seq === "\x1b") {
+        this.answerApproval(false);
+      }
+      return null;
+    }
     if (key.ctrl && key.name === "l") {
       this.repaint();
       return null;

@@ -28,11 +28,12 @@ import {
   SqliteSessionStore,
   ensureDir,
   log,
+  type ApprovalAdapter,
 } from "@familiar/core";
 import { AgentServer, startHttpTransport } from "@familiar/server";
 import { createPrettyPrinter, createJsonPrinter, ansi, useColor } from "./ui/display.js";
 import { FullScreenTui, type TuiModelGroup } from "./ui/tui.js";
-import { CliApprovalAdapter } from "./ui/approvals.js";
+import { CliApprovalAdapter, TuiApprovalAdapter } from "./ui/approvals.js";
 import { RemoteFamiliarClient } from "./client/remote.js";
 import { cmdWorktree } from "./worktree.js";
 
@@ -237,6 +238,7 @@ async function openRunTransport(
   interactive: boolean,
   json: boolean,
   closeAfterDispatch: boolean,
+  approval?: ApprovalAdapter,
 ): Promise<{
   transport: FamiliarTransport;
   setJsonServerSink?: (sink: (ev: AgentEvent) => void) => void;
@@ -245,7 +247,7 @@ async function openRunTransport(
   if (flagBool(flags, "local")) {
     const server = new AgentServer({
       config: cfg,
-      approval: interactive ? new CliApprovalAdapter() : undefined,
+      approval: approval ?? (interactive ? new CliApprovalAdapter() : undefined),
     });
     return { transport: localTransport(server) };
   }
@@ -256,11 +258,11 @@ async function openRunTransport(
   const authToken = resolveClientToken(cfg);
   if (await RemoteFamiliarClient.probe(baseUrl, 700, authToken)) {
     let sink: ((ev: AgentEvent) => void) | undefined = serverEventPrettyPrinter();
-    const approval = interactive ? new CliApprovalAdapter() : undefined;
+    const approvalAd = approval ?? (interactive ? new CliApprovalAdapter() : undefined);
     const client = new RemoteFamiliarClient(
       baseUrl,
-      approval
-        ? (req) => approval.request({ tool: req.tool, summary: req.summary, detail: req.detail })
+      approvalAd
+        ? (req) => approvalAd.request({ tool: req.tool, summary: req.summary, detail: req.detail })
         : undefined,
       (ev) => sink?.(ev),
       authToken,
@@ -284,7 +286,7 @@ async function openRunTransport(
   }
   const server = new AgentServer({
     config: cfg,
-    approval: interactive ? new CliApprovalAdapter() : undefined,
+    approval: approval ?? (interactive ? new CliApprovalAdapter() : undefined),
   });
   return { transport: localTransport(server) };
 }
@@ -627,8 +629,19 @@ async function cmdChat(flags: Record<string, string | boolean>): Promise<void> {
 async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
   const cwd = resolveCwd(flags);
   const cfg = loadCliConfig(flags);
-  const { transport } = await openRunTransport(flags, cfg, true, false, false);
   const readlineMod = await import("node:readline");
+
+  // build the TUI first so tool approvals surface in the prompt panel
+  // (the readline prompt would fight the alt-screen over stdin)
+  const tui = new FullScreenTui();
+  const { transport } = await openRunTransport(
+    flags,
+    cfg,
+    true,
+    false,
+    false,
+    new TuiApprovalAdapter((req) => tui.requestApproval(req)),
+  );
 
   let session: SessionRecord | null = null;
   if (flag(flags, "session")) {
@@ -640,7 +653,6 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
     session = list.find((s) => s.cwd === cwd) ?? null;
   }
 
-  const tui = new FullScreenTui();
   const modeOf = (): "build" | "plan" => (flagBool(flags, "plan") ? "plan" : "build");
   /** Tab (with no popup open) toggles Build/Plan like opencode's agent switch. */
   tui.onModeToggle = (): void => {

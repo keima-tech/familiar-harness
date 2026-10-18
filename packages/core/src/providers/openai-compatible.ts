@@ -48,16 +48,28 @@ export class OpenAiCompatibleProvider implements Provider {
         function: { name: t.name, description: t.description, parameters: t.parameters },
       }));
     }
-    if (this.cfg.stream_options === true) {
-      body["stream_options"] = { include_usage: true };
-    }
+    // Request usage stats on the stream by default (tok/s in the GUI). Some
+    // older OpenAI-compatible servers reject the field — we retry without it.
+    const includeUsage = this.cfg.stream_options !== false;
+    if (includeUsage) body["stream_options"] = { include_usage: true };
 
-    const res = await fetch(`${this.baseUrl()}/chat/completions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders(this.secret) },
-      body: JSON.stringify(body),
-      signal: params.signal ?? AbortSignal.timeout(300_000),
-    });
+    const post = (payload: Record<string, unknown>): Promise<Response> =>
+      fetch(`${this.baseUrl()}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders(this.secret) },
+        body: JSON.stringify(payload),
+        signal: params.signal ?? AbortSignal.timeout(300_000),
+      });
+    let res = await post(body);
+    if (!res.ok && includeUsage && (res.status === 400 || res.status === 422)) {
+      const detail = await res.text().catch(() => "");
+      if (/stream_options/i.test(detail)) {
+        log.warn(`${this.id}: server rejected stream_options — retrying without usage stats`);
+        const retry = { ...body };
+        delete retry["stream_options"];
+        res = await post(retry);
+      }
+    }
     await assertOk(res, this.id);
     if (!res.body) throw new ProviderError("empty response body", 200, this.id);
 

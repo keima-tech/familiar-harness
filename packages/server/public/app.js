@@ -1395,6 +1395,17 @@ function fmtClock(ts) {
   return `${hh}:${mm}`;
 }
 
+/** Rough token estimate for streamed text (usage unavailable): CJK ≈ 1 token per char, other ≈ 4 chars/token. */
+function estimateTokens(text) {
+  let cjk = 0;
+  let other = 0;
+  for (const ch of text) {
+    if (/[\u0300-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff66-\uff9f]/.test(ch)) cjk++;
+    else other++;
+  }
+  return Math.round(cjk + other / 4);
+}
+
 /** Footer under an assistant bubble: copy button + meta bits (mode · model · time · tok/s). */
 function addMsgFooter(bubbleNode, raw, bits) {
   const msg = bubbleNode.closest(".msg");
@@ -1991,10 +2002,21 @@ function onEvent(sessionId, e) {
       }
       setBusy(false);
       const secs = parseFloat(state.lastElapsed ?? "") || 0;
-      const tps = secs > 0 && (u.completionTokens ?? 0) > 0
-        ? Math.round((u.completionTokens ?? 0) / secs) : 0;
-      const toks = u.promptTokens !== undefined
-        ? ` · ↑${u.promptTokens} ↓${u.completionTokens ?? 0} tok${tps ? ` (${tps} tok/s)` : ""}` : "";
+      const hasUsage = u.promptTokens !== undefined;
+      let completion = u.completionTokens ?? 0;
+      if (!hasUsage) {
+        // provider gave no usage (e.g. stream_options rejected): estimate from
+        // the streamed text so the speed readout still works
+        const all = state.turnBubbles.map((b) => b.text ?? "").join("");
+        completion = estimateTokens(all);
+      }
+      const tps = secs > 0 && completion > 0 ? Math.round(completion / secs) : 0;
+      const approx = hasUsage ? "" : "≈";
+      const toks = hasUsage
+        ? ` · ↑${u.promptTokens} ↓${u.completionTokens ?? 0} tok${tps ? ` (${tps} tok/s)` : ""}`
+        : completion > 0
+          ? ` · ↓${approx}${completion} tok${tps ? ` (${approx}${tps} tok/s)` : ""}`
+          : "";
       setTurnEndLabel(t("turn.done", `${state.lastElapsed ?? ""}${toks}`));
       // collapse thinking blocks, stop carets; footer on the last bubble
       for (const b of state.turnBubbles) {
@@ -2008,7 +2030,7 @@ function onEvent(sessionId, e) {
         const modelBits = [s?.provider, s?.model].filter(Boolean).join("/");
         if (modelBits) bits.push(modelBits);
         if (secs > 0) bits.push(`${secs.toFixed(1)}s`);
-        if (tps) bits.push(`${tps} tok/s`);
+        if (tps) bits.push(`${approx}${tps} tok/s`);
         bits.push(fmtClock(Date.now()));
         addMsgFooter(lastBubble.bubble, lastBubble.text, bits);
       }

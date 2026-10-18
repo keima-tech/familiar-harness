@@ -84,5 +84,38 @@ eq("null-safe", mdRender(null), "");
 // 15) inline code protects markdown chars inside
 eq("code protects", mdRender("`**x**`"), "<p><code>**x**</code></p>");
 
+// 16) GFM tables
+eq(
+  "table basic",
+  mdRender("| Date | Sky |\n| --- | --- |\n| 10/20 | rain |"),
+  '<table><thead><tr><th>Date</th><th>Sky</th></tr></thead><tbody><tr><td>10/20</td><td>rain</td></tr></tbody></table>',
+);
+eq(
+  "table alignment",
+  mdRender("| L | C | R |\n| :--- | :---: | ---: |\n| a | b | c |"),
+  '<table><thead><tr><th style="text-align:left">L</th><th style="text-align:center">C</th><th style="text-align:right">R</th></tr></thead><tbody><tr><td style="text-align:left">a</td><td style="text-align:center">b</td><td style="text-align:right">c</td></tr></tbody></table>',
+);
+eq(
+  "table without outer pipes",
+  mdRender("a | b\n--- | ---\n1 | 2"),
+  "<table><thead><tr><th>a</th><th>b</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table>",
+);
+eq(
+  "table keeps paragraphs around it",
+  mdRender("intro\n\n| a |\n| --- |\n| 1 |\n\nafter"),
+  "<p>intro</p><table><thead><tr><th>a</th></tr></thead><tbody><tr><td>1</td></tr></tbody></table><p>after</p>",
+);
+eq(
+  "table absent without separator",
+  mdRender("| a | b |\n| 1 | 2 |"),
+  "<p>| a | b |<br>| 1 | 2 |</p>",
+);
+eq(
+  "table cells escape html + inline md",
+  mdRender("| x |\n| --- |\n| **b** <i> |"),
+  '<table><thead><tr><th>x</th></tr></thead><tbody><tr><td><strong>b</strong> &lt;i&gt;</td></tr></tbody></table>',
+);
+eq("hr still works next to tables", mdRender("---"), "<hr>");
+
 console.log(`md-render: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

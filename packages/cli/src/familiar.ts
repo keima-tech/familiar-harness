@@ -38,6 +38,7 @@ import { cmdWorktree } from "./worktree.js";
 const USAGE = `familiar — OpenCode/Claude Code-style agent harness (CLI)
 
 Usage:
+  familiar                            # open the interactive chat (TUI) on a terminal
   familiar run [-p "prompt"] [--provider ID] [--model ID] [--session ID] [--new]
             [--cwd DIR] [--max-steps N] [-y] [--plan] [--json] [--title S]
   familiar chat [--session ID] [--provider ID] [--model ID] [--cwd DIR] [-y]
@@ -1141,6 +1142,14 @@ async function main(): Promise<void> {
   try {
     switch (command) {
       case "":
+        // bare `familiar` on a terminal opens the interactive chat (TUI);
+        // non-interactive callers (pipes, CI) keep getting the usage text.
+        if (process.stdin.isTTY === true && process.stdout.isTTY === true) {
+          await cmdChat(flags);
+          break;
+        }
+        process.stdout.write(USAGE);
+        break;
       case "help":
       case "--help":
       case "-h":

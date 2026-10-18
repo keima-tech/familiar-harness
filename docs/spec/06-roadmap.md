@@ -328,3 +328,16 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   `/model` はセッション作り直しではなく `session.update` で反映。
 - **入力の逐次化**: readline の line をキューイングし、turn 中のコマンドや
   再送が並走しないよう drain ループで直列処理(パイプ入力でも順序が保たれる)。
+## v1.1 の実装メモ⑲(2026-10-18 深夜、`familiar` で TUI・CJK 太字・Markdown 表)
+
+- **`familiar`(引数なし)で REPL を起動**: TTY なら cmdChat を直接開く(パイプ/CI は
+  従来どおり USAGE を表示)。USAGE の先頭にも明記。
+- **CJK の太字違和感を解消**: フォントスタックが Latin(Segoe UI)と CJK(游ゴシック
+  等)で別ファミリーになり、bold の太さが混在していた。**CJK 対応ファミリーを先頭**に
+  した単一スタックへ変更(`Hiragino Sans → Yu Gothic UI → Noto Sans CJK JP → …`)。
+  `strong/b` は `font-weight: 600` + `font-synthesis-weight: none`(疑似ボールド禁止)。
+  `setLang` は `<html lang>` も同期。
+- **GFM テーブル対応**: md レンダラに表(ヘッダ + 区切り行検出、`:--` アラインメント、
+  外側パイプ任意、セル内の HTML エスケープ/インライン md)を追加。CSS は罫線 +
+  ゼブラ + 横スクロール。mdtest を 36 アサーションに拡充。
+- 思考ヘッダの絵文字(💭)を `◌` に変更(環境によって豆腐になるため)。

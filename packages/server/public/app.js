@@ -557,6 +557,7 @@ function t(key, ...args) {
 /** Persist and apply the interface language. */
 function setLang(value) {
   lang = value === "en" ? "en" : "ja";
+  document.documentElement.lang = lang;
   try { localStorage.setItem("familiar.lang", lang); } catch { /* ignore */ }
   applyI18n();
 }
@@ -615,6 +616,30 @@ function mdInline(src) {
     `<a href="${url}" target="_blank" rel="noreferrer noopener">${txt}</a>`);
   t = t.replace(/\u0000(\d+)\u0000/g, (_m, i) => codeSpans[Number(i)] ?? "");
   return t;
+}
+
+/** Separator row of a GFM table: only dashes/colons/pipes, at least one pipe. */
+function isTableSeparator(line) {
+  if (!line.includes("|") || !line.includes("-")) return false;
+  return /^\s*\|?[\s:|-]*\|[\s:|-]*\|?\s*$/.test(line);
+}
+
+/** Split "| a | b |" into trimmed cells. */
+function splitTableRow(line) {
+  let t = line.trim();
+  if (t.startsWith("|")) t = t.slice(1);
+  if (t.endsWith("|")) t = t.slice(0, -1);
+  return t.split("|").map((c) => c.trim());
+}
+
+/** Alignment for a separator cell (:--- left, ---: right, :--: center). */
+function tableAlign(cell) {
+  const l = cell.startsWith(":");
+  const r = cell.endsWith(":");
+  if (l && r) return "center";
+  if (r) return "right";
+  if (l) return "left";
+  return "";
 }
 
 /** One fenced code block; long blocks render collapsed (expandable). */
@@ -686,6 +711,29 @@ function mdRender(src) {
       flushList();
       out.push("<hr>");
       i += 1;
+      continue;
+    }
+    // GFM table: | a | b |  followed by | --- | --- |
+    if (line.includes("|") && i + 1 < lines.length && isTableSeparator(lines[i + 1] ?? "")) {
+      flushPara();
+      flushList();
+      const head = splitTableRow(line);
+      const aligns = splitTableRow(lines[i + 1] ?? "").map(tableAlign);
+      i += 2;
+      const rows = [];
+      while (i < lines.length && (lines[i] ?? "").includes("|") && (lines[i] ?? "").trim() !== "") {
+        rows.push(splitTableRow(lines[i] ?? ""));
+        i += 1;
+      }
+      const cell = (tag, text, idx) => {
+        const a = aligns[idx] ? ` style="text-align:${aligns[idx]}"` : "";
+        return `<${tag}${a}>${mdInline(text)}</${tag}>`;
+      };
+      const thead = head.map((h, idx) => cell("th", h, idx)).join("");
+      const tbody = rows
+        .map((r) => `<tr>${r.map((c, idx) => cell("td", c, idx)).join("")}</tr>`)
+        .join("");
+      out.push(`<table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table>`);
       continue;
     }
     const quote = line.match(/^\s*>\s?(.*)$/);
@@ -1273,7 +1321,7 @@ function appendMessage(role, content, toolCalls, opts = {}) {
     if (opts.reasoning) {
       const det = document.createElement("details");
       det.className = "thinking";
-      det.innerHTML = `<summary>💭 ${esc(t("msg.thinking"))}</summary><pre class="th-text"></pre>`;
+      det.innerHTML = `<summary>◌ ${esc(t("msg.thinking"))}</summary><pre class="th-text"></pre>`;
       det.querySelector(".th-text").textContent = String(opts.reasoning);
       bubble.appendChild(det);
     }
@@ -1830,7 +1878,7 @@ function onEvent(sessionId, e) {
           const det = document.createElement("details");
           det.className = "thinking";
           det.open = true;
-          det.innerHTML = `<summary>💭 ${esc(t("msg.thinking"))}</summary><pre class="th-text"></pre>`;
+          det.innerHTML = `<summary>◌ ${esc(t("msg.thinking"))}</summary><pre class="th-text"></pre>`;
           live.bubble.insertBefore(det, live.contentEl);
           live.reasoningEl = det.querySelector(".th-text");
           live.thinkingEl = det;

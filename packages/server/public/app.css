@@ -59,7 +59,11 @@ body {
   padding: 12px 14px;
 }
 .logo { font-weight: 600; letter-spacing: 0.3px; }
-#new-session { padding: 3px 9px; border-radius: 6px; font-size: 13px; }
+#new-session {
+  padding: 3px 9px; border-radius: 6px; font-size: 13px;
+  background: transparent; border: none; color: var(--dim); font-weight: 400;
+}
+#new-session:hover { color: var(--text); background: var(--hover); }
 .search-row { padding: 0 10px 8px; }
 .search-row input {
   width: 100%; background: transparent; color: var(--text);
@@ -660,13 +664,13 @@ details.thinking .th-text {
 }
 #input::placeholder { color: #5b5b64; }
 .composer-foot { display: flex; align-items: center; gap: 8px; }
-.composer-foot > button#composer-new,
+.composer-foot button#composer-new,
 .composer-foot > button#retry {
   background: transparent; border: none; color: var(--dim);
   border-radius: 999px; width: 28px; height: 28px; line-height: 1;
   font-size: 14px; padding: 0; cursor: pointer; font-weight: 400;
 }
-.composer-foot > button#composer-new:hover,
+.composer-foot button#composer-new:hover,
 .composer-foot > button#retry:hover { color: var(--text); background: var(--hover); }
 .composer-foot > button#retry { font-size: 16px; color: var(--dim); }
 #mode-chip, #model-chip {

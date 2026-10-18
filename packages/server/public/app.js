@@ -2739,11 +2739,9 @@ async function renderProvidersSection(content) {
     const pc = ns.providers[name] ?? {};
     const wrap = document.createElement("div");
     wrap.className = `provcard${providerOpen === name ? " open" : ""}`;
-    const authLabel = providerAuthLabel(pc);
     wrap.innerHTML = `
       <button class="provhead" type="button">
         <span class="pname">${esc(name)}${name === ns.defaultProvider ? `<small class="pdefault">${esc(t("prov.default"))}</small>` : ""}</span>
-        <span class="pinfo">${esc(pc.kind ?? "?")}${pc.default_model ? ` · ${esc(pc.default_model)}` : ""}${authLabel ? ` · ${esc(authLabel)}` : ""}</span>
       </button>
       <div class="provbody" hidden></div>`;
     wrap.querySelector(".provhead").addEventListener("click", () => {

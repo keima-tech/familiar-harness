@@ -203,6 +203,11 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
       base_url: "https://openrouter.ai/api/v1",
       auth: { env: "OPENROUTER_API_KEY" },
     },
+    nvidia: {
+      kind: "openai_compatible",
+      base_url: "https://integrate.api.nvidia.com/v1",
+      auth: { env: "NVIDIA_API_KEY" },
+    },
     ollama: {
       kind: "openai_compatible",
       base_url: "http://127.0.0.1:11434/v1",
@@ -566,6 +571,9 @@ providers:
   openrouter:
     kind: openai_compatible
     base_url: https://openrouter.ai/api/v1
+  nvidia:
+    kind: openai_compatible
+    base_url: https://integrate.api.nvidia.com/v1
     auth: { env: OPENROUTER_API_KEY }
   ollama:
     kind: openai_compatible

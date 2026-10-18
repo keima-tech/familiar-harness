@@ -448,3 +448,27 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
 - **line REPL も `/models`**: 引数あり直接設定・引数なし一覧表示。
   `/help` 文言も追随。TUI の info は `(送信なし)` 開始でスプラッシュ面を
   空に保ち、重要な通知は toast(下線行 2.6 秒)へ集約。
+## v1.1 の実装メモ㉔(2026-10-18、TUI 第二弾:セッション切替・中断・ペースト)
+
+- **/sessions セッションピッカー**: TUI で `/sessions`(引数なし)を
+  モデルピッカー同型のダイアログに。行は `┃ ● <title  id8>
+  <model provider> … <reltime>`。● は現在セッション(setSessionInfo の
+  新フィールド sessionId で判定)。入力中の文字で id/title/provider/model/
+  cwd の部分一致フィルタ^H(^H=空クエリで開く)。選択は `onSessionPick` →
+  `session.get` で履歴込み取替え + toast。line REPL は従来の list 表示を維持。
+- **esc で turn 中断**: ストリーミング中に Esc を押すと
+  `onAbortTurn` → `session.abort`(㉒)。フッタヒントは busy 時
+  `esc stop / ctrl+p commands` に切替。`turn.aborted` イベントは
+  トランスクリプトに `■ stopped` ブロック+`stopped` toast。
+- **bracketed paste(2004)**: start で `\x1b[?2004h`、stop で `\x1b[?2004l`。
+  onData は `ESC[200~…ESC[201~` を状態機械で抽出(マーカーがチャンク境界
+  で分断されても復元)。ペースト本文はキーストローク復号を通さずエディタへ
+  単一行化(\n・\t→空白、8000 字上限)して挿入。
+- **ダイアログの空クエリ開始**: モデル/セッション両ピッカーは
+  open 時に editor をクリア(直前のテキストがフィルタとして残らない)。
+- **ポップアップ外クリック**: SGR クリック行が popupRowAt に存在しない場合
+  (トランスクリプト・フッタ等)opencode 同様ダイアログを閉じる。
+- **/rename <title>**: `session.update {title}`。パレットは needsArg 補完
+  (`/rename `まで入れて待機)。実 PTY で パレット受理→入力→toast まで検証。
+- **ターミナルタイトル**: OSC 0 (`\x1b]0;familiar — <session title|~cwd>BEL`)
+  を start 時と title/cwd 変更時に更新。

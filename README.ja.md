@@ -28,7 +28,7 @@ curl -fsSL https://example.invalid:3000/owner/familiar-harness/raw/branch/main/i
 
 - `~/.local/lib/familiar` へ展開し、`~/.local/bin/familiar` にシンボリックリンクを作成(`FAMILIAR_INSTALL_DIR` / `FAMILIAR_BIN_DIR` で変更可)。
 - 接続先 Forgejo は `FAMILIAR_FORGEJO`(既定 `https://example.invalid:3000`)・リポジトリは `FAMILIAR_REPO`(既定 `owner/familiar-harness`)で変更できます。
-- バージョン指定:`curl ... | sh -s -- 1.1.0` のように引数で渡します。
+- バージョン指定:`curl ... | sh -s -- 0.1.0` のように引数で渡します。
 
 **ソースから(全プラットフォーム):**
 

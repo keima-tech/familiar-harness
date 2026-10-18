@@ -28,7 +28,7 @@ curl -fsSL https://example.invalid:3000/owner/familiar-harness/raw/branch/main/i
 
 - Installs to `~/.local/lib/familiar` and symlinks `~/.local/bin/familiar` (both overridable via `FAMILIAR_INSTALL_DIR` / `FAMILIAR_BIN_DIR`).
 - The installer reads the Forgejo instance from `FAMILIAR_FORGEJO` (default `https://example.invalid:3000`) and repo from `FAMILIAR_REPO` (default `owner/familiar-harness`).
-- A specific version: pass it as the first argument (`install.sh 1.1.0` when piping, e.g. `curl ... | sh -s -- 1.1.0`).
+- A specific version: pass it as the first argument (`install.sh 0.1.0` when piping, e.g. `curl ... | sh -s -- 0.1.0`).
 
 **From source (any platform):**
 

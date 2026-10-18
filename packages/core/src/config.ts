@@ -177,7 +177,7 @@ export interface ResolvedConfig {
 
 export const DEFAULT_CONFIG: ResolvedConfig = {
   homeDir: familiarPaths.home(),
-  default_provider: "mock",
+  default_provider: "openai",
   providers: {
     openai: {
       kind: "openai_compatible",
@@ -214,7 +214,8 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
       auth: { env: "none" },
       stream_options: false,
     },
-    mock: { kind: "mock" },
+    // NOTE: the "mock" provider kind still exists for tests/smoke, but it is
+    // no longer built in by default — add `mock: { kind: "mock" }` explicitly.
   },
   fallback: [],
   auxiliary: {},
@@ -326,6 +327,21 @@ export function resolveAuthSecret(auth: ProviderAuth | undefined): string | unde
     const value = process.env[auth.env];
     return value === undefined || value === "" ? undefined : value;
   }
+  return undefined;
+}
+
+export type ReasoningEffort = "low" | "medium" | "high";
+
+/**
+ * Validate a reasoning-effort value coming from the CLI/GUI/session-store.
+ * Accepts "low" | "medium" | "high"; "", "default", "off" and null clear it.
+ * Anything else is undefined (provider default) — never throws.
+ */
+export function normalizeEffort(raw: string | null | undefined): ReasoningEffort | undefined {
+  if (raw === null || raw === undefined) return undefined;
+  const v = String(raw).trim().toLowerCase();
+  if (v === "" || v === "default" || v === "off" || v === "none") return undefined;
+  if (v === "low" || v === "medium" || v === "high") return v;
   return undefined;
 }
 
@@ -574,13 +590,11 @@ providers:
   nvidia:
     kind: openai_compatible
     base_url: https://integrate.api.nvidia.com/v1
-    auth: { env: OPENROUTER_API_KEY }
+    auth: { env: NVIDIA_API_KEY }
   ollama:
     kind: openai_compatible
     base_url: http://127.0.0.1:11434/v1
     auth: none
-  mock:
-    kind: mock
 
 # Rendered as "provider" or "provider/model"; tried in order when the primary
 # provider fails BEFORE streaming starts.

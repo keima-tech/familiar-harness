@@ -39,6 +39,13 @@ export class AnthropicProvider implements Provider {
     };
     if (system) body["system"] = system;
     if (params.temperature !== undefined) body["temperature"] = params.temperature;
+    // effort → extended thinking budget (budget_tokens must be < max_tokens)
+    if (params.effort) {
+      const budgets = { low: 4096, medium: 10240, high: 16384 } as const;
+      const budget = budgets[params.effort];
+      body["thinking"] = { type: "enabled", budget_tokens: budget };
+      body["max_tokens"] = Math.max(body["max_tokens"] as number, budget + 2048);
+    }
     if (params.tools && params.tools.length > 0) {
       body["tools"] = params.tools.map((t) => ({
         name: t.name,

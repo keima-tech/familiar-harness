@@ -374,3 +374,43 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   サイドバー「＋」もゴースト化。
 - 新規組み込みプロバイダ **nvidia**(OpenAI互換、
   https://integrate.api.nvidia.com/v1、認証は環境変数 NVIDIA_API_KEY)。
+
+## v1.1 の実装メモ㉒(2026-10-18、TUI 操作性・GUI 中断/添付/エフォート・プロバイダ設定)
+
+- **TUI 起動バナー**: ブロック文字で "FAMILIAR / HARNESS" を太字シアンで
+  描画する `showBanner()`(依存ゼロの自前 5 段フォント)を transcript 先頭に
+  追加。サブタイトルに `/ コマンド · Tab → build/plan` のヒントを併記。
+- **スラッシュコマンド候補 + Tab 補完**: エディタ先頭トークンに前方一致する
+  `TUI_COMMANDS` カタログをフロート表示(ビューポート下段にオーバーレイ・行差分
+  はそのまま)。`↑/↓` で選択移動(wrap)、`Tab`/`↵` で受理。引数が要るコマンド
+  (`/session` `/model` `/effort` `/cwd` `/export`)は `name ` を入れて待機、
+  不要コマンド(`/help` `/clear` 等)はそのまま実行。
+- **Tab で Build/Plan 切替**: 候補ポップが閉じているときの Tab は
+  `onModeToggle` コールバックがモードを反転し、ステータスバーと info に通知。
+- **マウスクリック選択**: SGR 1006 の押下イベント(`<0;c;rM`)を解析して
+  `tui.click(row, col)` へ。候補行のクリック=選択(引数コマンドは補完、
+  即実行系はそのまま実行)。
+- **GUI 中断ボタン**: `session.abort` RPC を新設(AgentServer が実行中 turn を
+  AbortController で管理)。ループは provider API 呼び出しを abort し
+  `turn.aborted` イベント(protocol 新型)を出して正常応答
+  `{ aborted: true }` を返す(turn.error は出ない)。`#send` が実行中
+  「■ 停止」に変化(タイトル/CSS `.stop`)。
+- **GUI ドラッグ&ドロップ添付**: composer への drop で `attachFiles()` が
+  `@path ` を挿入(最大 8 件)。Electron 38 では `webUtils.getPathForFile` を
+  preload 経由で使用(File.path は廃止済み)。ページ遷移防止のため
+  document 級の dragover/drop を preventDefault。
+- **推論エフォート**: `SessionRecord.effort`(low|medium|high|null)を追加
+  (sessions テーブルは実行時 ALTER TABLE マイグレーション)。
+  openai_compatible → `reasoning_effort`、anthropic → `thinking.budget_tokens`
+  (4096/10240/16384 + max_tokens 余盛)に写像。session.create/update/send で
+  受け、CLI は `--effort` と `/effort`、GUI は `#effort-chip`(既定/low/medium/
+  high ポップオーバー)。
+- **mock プロバイダを既定から除去**: `DEFAULT_CONFIG.providers` と
+  テンプレートから `mock` を削除(既定は openai)。`kind: "mock"` 自体は
+  smoke テストのため維持。GUI の認証済み判定から mock 特例を除去。
+- **GUI プロバイダ設定の再構成**: 「接続済みプロバイダー」(認証解決済み or
+  キー不要)を折りたたみカードで列挙し、「接続候補」は内蔵カタログ
+  (OpenAI / Anthropic / Gemini / NVIDIA / OpenRouter / Ollama 未接続分)+
+  キー未解決のカスタム設定を `＋ 接続` ボタン(フォームを事前入力で開く)
+  で提示。カード行にブランド色ドットを追加。
+

@@ -37,12 +37,13 @@ POST /rpc
 | `ping` | — | `"pong"` |
 | `config.get` | — | サニタイズ済み設定(シークレットは `"***"` 表示) |
 | `models.list` | `{ provider?: string }` | `ModelInfo[]` |
-| `session.create` | `{ title?, provider?, model?, profile?, cwd? }` | `SessionRecord` |
+| `session.create` | `{ title?, provider?, model?, profile?, effort?, cwd? }` | `SessionRecord` |
 | `session.list` | — | `SessionRecord[]`(updated_at 降順) |
 | `session.get` | `{ id }` | `{ session, messages }` |
+| `session.update` | `{ id, title?, provider?, model?, profile?, effort?, cwd? }` | `SessionRecord` |
 | `session.delete` | `{ id }` | `{ deleted: true }` |
-| `session.send` | `{ id, text, provider?, model?, maxSteps?, yolo?, plan? }` | `{ turnId, steps, toolCalls, usage }`(イベントは WS / onEvent で流れる) |
-| `session.abort`(M2) | `{ id }` | — |
+| `session.send` | `{ id, text, provider?, model?, effort?, maxSteps?, yolo?, plan? }` | `{ turnId, steps, toolCalls, usage }`(イベントは WS / onEvent で流れる) |
+| `session.abort` | `{ id }` | `{ aborting: boolean }` — 実行中 turn を中断(API 呼び出しを abort。実行中ツールはそのステップ完了後に停止) |
 | `permission.respond`(M2) | `{ requestId, approved }` | `{ resolved: true }` — serve モードの動的承認 |
 | `memory.list`(M3) | `{}` | `{ memories: MemoryEntry[], pendingCount }` |
 | `memory.pending`(M3) | `{}` | `{ items: PendingItem[] }` |
@@ -67,7 +68,7 @@ POST /rpc
 | `config.get` に含まれるサニタイズ項目は 05 を参照 | | |
 
 `ModelInfo = { id: string; provider: string; contextTokens?: number }`
-`SessionRecord = { id, title, provider, model, profile?, cwd, createdAt, updatedAt }`
+`SessionRecord = { id, title, provider, model, profile?, effort? (low|medium|high|null), cwd, createdAt, updatedAt }`
 
 ## 4. AgentEvent 型
 
@@ -84,6 +85,7 @@ type AgentEvent =
   | { type: "tool.result";   toolCallId: string; name: string;
                              content: string; isError: boolean; durationMs: number }
   | { type: "turn.end";      turnId: string; usage?: Usage }
+  | { type: "turn.aborted";  turnId: string }                       // ユーザー中断(session.abort)。turn.error と同時に出ない
   | { type: "turn.error";    turnId: string; error: string; recoverable: boolean }
   | { type: "compaction";    dropped: number; kept: number; summarized?: boolean }
   // M2: dynamic approval (serve mode)
@@ -103,6 +105,8 @@ ToolCall = { id: string; name: string; arguments: string /* JSON text */ };
 - `tool.call` はループ内で新しく観測されたツール呼び出し完成時点(`tool_use` 確定時)。
 - `turn.error` は provider 通信エラー等の復帰不能エラー。turn は異常終了し、メッセージは
   保存済みの状態までコミットされる。
+- `turn.aborted` は `session.abort` による正常中断(provider の API 呼び出しを abort)。
+  `session.send` 自体は `{ turnId: "", aborted: true }` で正常応答し、`turn.error` は出ない。
 
 ## 5. 承認の流れ(serve モード / M2)
 

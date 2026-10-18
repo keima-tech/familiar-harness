@@ -66,6 +66,8 @@ export interface SessionRecord {
   provider: string;
   model: string;
   profile?: string;
+  /** reasoning effort for models that support it: "low" | "medium" | "high"; null = provider default */
+  effort?: string | null;
   cwd: string;
   createdAt: number;
   updatedAt: number;

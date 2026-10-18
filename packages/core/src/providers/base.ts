@@ -1,11 +1,5 @@
-import type {
-  ChatMessage,
-  JsonSchemaObject,
-  ModelInfo,
-  ToolCall,
-  ToolSchema,
-  Usage,
-} from "@familiar/protocol";
+import type { ChatMessage, JsonSchemaObject, ModelInfo, ToolCall, ToolSchema, Usage } from "@familiar/protocol";
+import type { ReasoningEffort } from "../config.js";
 
 // ---------------------------------------------------------------------------
 // Provider stream chunk model (normalized across providers)
@@ -26,6 +20,8 @@ export interface ChatParams {
   system?: string;
   temperature?: number;
   maxTokens?: number;
+  /** reasoning effort for models that support it (session/turn level) */
+  effort?: ReasoningEffort;
   signal?: AbortSignal;
 }
 

@@ -8,7 +8,7 @@
 ```yaml
 version: 1
 
-default_provider: openai      # ollama / anthropic / openrouter / mock / ...
+default_provider: openai      # ollama / anthropic / openrouter ...
 default_model: "gpt-5.2"      # provider 別の未指定時に使用(e.g. ollama: qwen2.5-coder:3b)
 
 providers:
@@ -38,8 +38,18 @@ providers:
     kind: openai_compatible
     base_url: https://integrate.api.nvidia.com/v1
     auth: { env: NVIDIA_API_KEY }
-  mock:
-    kind: mock
+  # NOTE: kind: mock は mock プロバイダ実装(smoke テスト用)として残るが、
+  # 既定の組み込みプロバイダ一覧には含まれない。使うなら以下を明示:
+  # mock:
+  #   kind: mock
+
+# 推論エフォート(v1.1):
+#   config.yaml のキーではなくセッション層の値。session.create / session.update の
+#   `effort` (low | medium | high / null=プロバイダ既定) を設定し、turn 単位では
+#   session.send の effort で上書きできる。
+#   写像: openai_compatible → body.reasoning_effort / anthropic → thinking.budget_tokens。
+#   CLI: familiar run --effort low|medium|high / chat TUI: /effort low|medium|high|off
+#   GUI: composer の「既定 ▾」チップ(chip.effort)。
 
 # M2: fallback 連鎖(主プロバイダがストリーム開始前に失敗したら順に試す)
 fallback:

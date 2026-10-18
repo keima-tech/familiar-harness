@@ -11,6 +11,7 @@ import type { AgentEvent } from "@familiar/protocol";
 
 const RESET = "\x1b[0m";
 const BOLD = "\x1b[1m";
+const INV = "\x1b[7m";
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
 
 // ---------------------------------------------------------------------------
@@ -115,7 +116,8 @@ type Block =
   | { kind: "assistant"; src: string; lines: string[] | null; done: boolean; lastRender: number }
   | { kind: "reasoning"; text: string }
   | { kind: "tool"; name: string; detail: string; status: "run" | "ok" | "err"; ms?: number; extra?: string[] }
-  | { kind: "info"; text: string };
+  | { kind: "info"; text: string }
+  | { kind: "banner"; lines: string[] };
 
 const cc = {
   dim: (s: string) => (useColor() ? ansi.dim(s) : s),
@@ -123,7 +125,62 @@ const cc = {
   green: (s: string) => (useColor() ? ansi.green(s) : s),
   cyan: (s: string) => (useColor() ? ansi.cyan(s) : s),
   bold: (s: string) => (useColor() ? `${BOLD}${s}${RESET}` : s),
+  inv: (s: string) => (useColor() ? `${INV}${s}${RESET}` : s),
 };
+
+// ---------------------------------------------------------------------------
+// slash-command catalog (shared by the line REPL /help and the TUI menu)
+// ---------------------------------------------------------------------------
+
+export interface TuiCommand {
+  name: string;
+  desc: string;
+  /** command takes an argument: completion ends in "name " instead of running */
+  needsArg?: boolean;
+}
+
+export const TUI_COMMANDS: TuiCommand[] = [
+  { name: "/help", desc: "show the command list" },
+  { name: "/new", desc: "new session with the configured defaults" },
+  { name: "/sessions", desc: "list recent sessions" },
+  { name: "/session", desc: "switch to a session (id)", needsArg: true },
+  { name: "/model", desc: "show or set provider/model", needsArg: true },
+  { name: "/effort", desc: "reasoning effort low|medium|high|off", needsArg: true },
+  { name: "/cwd", desc: "change the working folder", needsArg: true },
+  { name: "/plan", desc: "toggle plan mode" },
+  { name: "/todo", desc: "show the session task list" },
+  { name: "/retry", desc: "resend the previous message" },
+  { name: "/export", desc: "dump the transcript as markdown", needsArg: true },
+  { name: "/clear", desc: "clear the transcript" },
+  { name: "/exit", desc: "quit (also /quit, /q)" },
+];
+
+// ---------------------------------------------------------------------------
+// startup banner (block-letter "FAMILIAR HARNESS" logo, dependency free)
+// ---------------------------------------------------------------------------
+
+const GLYPHS: Record<string, string[]> = {
+  O: [" ███ ", "█   █", "█   █", "█   █", " ███ "],
+  R: ["████ ", "█   █", "████ ", "█  █ ", "█   █"],
+  B: ["████ ", "█   █", "████ ", "█   █", "████ "],
+  I: ["█████", "  █  ", "  █  ", "  █  ", "█████"],
+  T: ["█████", "  █  ", "  █  ", "  █  ", "  █  "],
+  H: ["█   █", "█   █", "█████", "█   █", "█   █"],
+  A: [" ███ ", "█   █", "█████", "█   █", "█   █"],
+  E: ["█████", "█    ", "████ ", "█    ", "█████"],
+  N: ["█   █", "██  █", "█ █ █", "█  ██", "█   █"],
+  S: [" ████", "█    ", " ███ ", "    █", "████ "],
+  " ": ["     ", "     ", "     ", "     ", "     "],
+};
+
+function logoBlock(word: string): string[] {
+  const letters = [...word.toUpperCase()].map((ch) => GLYPHS[ch] ?? GLYPHS[" "]!);
+  const rows: string[] = ["", "", "", "", ""];
+  for (let r = 0; r < 5; r++) {
+    rows[r] = letters.map((g) => g[r]).join(" ").replace(/ +$/, "").replace(/ +(█)/g, " $1");
+  }
+  return rows;
+}
 
 function blockLines(b: Block, width: number): string[] {
   switch (b.kind) {
@@ -158,6 +215,8 @@ function blockLines(b: Block, width: number): string[] {
       return b.text === ""
         ? []
         : b.text.split("\n").flatMap((piece) => (piece === "" ? [""] : wrapAnsi(cc.dim(piece), width)));
+    case "banner":
+      return b.lines;
   }
 }
 
@@ -200,6 +259,13 @@ export class FullScreenTui {
   private toolCount = 0;
   private assistantStream: Block & { kind: "assistant" } | null = null;
   private reasoningStream: Block & { kind: "reasoning" } | null = null;
+  // slash-command suggestion popup
+  private menu: TuiCommand[] | null = null;
+  private menuSel = 0;
+  /** 0-based screen row → absolute menu index (for mouse clicks) */
+  private menuRowAt: number[] = [];
+  /** caller hook: Tab pressed with no popup open (= toggling build/plan) */
+  onModeToggle?: () => void;
 
   // ---- lifecycle ---------------------------------------------------------
 
@@ -207,6 +273,10 @@ export class FullScreenTui {
     this.running = true;
     this.refreshSize();
     process.stdout.write("\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1006h\x1b[2J");
+    // show the startup banner first (top of the flow); output then anchors
+    // as usual — End or any new submit jumps back to the tail
+    const max = Math.max(0, this.flow().length - (this.height - 4));
+    if (max > 0) this.scrollOffset = max;
     this.frame();
   }
 
@@ -241,6 +311,22 @@ export class FullScreenTui {
   }
 
   // ---- content feeding -----------------------------------------------------
+
+  /** OpenCode-style startup banner: block-letter "FAMILIAR HARNESS" + hint. */
+  showBanner(version = ""): void {
+    const logoRows = [...logoBlock("Familiar"), ...logoBlock("Harness")].map((r) =>
+      useColor() ? `${BOLD}${"\x1b[36m"}${r}${RESET}` : r,
+    );
+    const rows: string[] = [...logoRows];
+    rows.push("");
+    rows.push(
+      `  ${cc.bold("◍ Familiar Harness")}${version ? cc.dim(` ${version}`) : ""} — ` +
+        cc.dim("/ for commands · Tab toggles build/plan · ↑/↓ scroll"),
+    );
+    this.blocks.unshift({ kind: "banner", lines: rows });
+    this.flowCache = null;
+    this.frameSoon();
+  }
 
   setUserLine(text: string): void {
     this.blocks.push({ kind: "user", text });
@@ -282,6 +368,8 @@ export class FullScreenTui {
 
   clearInput(): void {
     this.input = "";
+    this.menu = null;
+    this.menuSel = 0;
     this.frame();
   }
 
@@ -576,7 +664,80 @@ export class FullScreenTui {
       rows.push(`╰${leftRendered}${mid}${right === "" ? "" : cc.dim(right)}╯`);
     }
 
+    this.composeMenuOverlay(rows);
     return rows.map((r) => padLine(r, w));
+  }
+
+  /** Overlay the slash-command popup on the bottom transcript rows. */
+  private composeMenuOverlay(rows: string[]): void {
+    if (!this.menu || this.menu.length === 0) {
+      this.menuRowAt = [];
+      return;
+    }
+    const menu = this.menu;
+    const maxItems = Math.max(1, Math.min(menu.length, this.height - 5));
+    const from = Math.max(0, Math.min(this.menuSel - (maxItems - 1), menu.length - maxItems));
+    const w = this.width;
+    const nameW = Math.min(12, Math.max(...menu.map((c) => c.name.length)));
+    this.menuRowAt = [];
+    for (let i = 0; i < maxItems; i++) {
+      const c = menu[from + i];
+      if (!c) break;
+      const absolute = from + i;
+      const selected = absolute === this.menuSel;
+      const body = ` ${selected ? "❯" : " "} ${c.name.padEnd(nameW, " ")}${c.desc ? `  ${c.desc}` : ""}`;
+      const line = selected ? cc.inv(padLine(body, Math.max(0, w - 4))) : cc.dim(body);
+      const rowIndex = this.height - 3 - maxItems + i;
+      rows[rowIndex] = `│${padLine(` ${line}`, Math.max(0, w - 2))}│`;
+      this.menuRowAt[rowIndex] = absolute;
+    }
+  }
+
+  /** Re-filter the suggestion popup from the current editor text. */
+  private refreshMenu(): void {
+    const v = this.input;
+    if (v.startsWith("/") && !v.includes(" ")) {
+      const q = v.toLowerCase();
+      const items = TUI_COMMANDS.filter((c) => c.name.startsWith(q));
+      this.menu = items.length > 0 ? items : null;
+      if (this.menu && this.menuSel >= this.menu.length) this.menuSel = 0;
+      if (!this.menu) this.menuSel = 0;
+    } else {
+      this.menu = null;
+    }
+  }
+
+  /** Accept suggestion #i: fill the editor (arg commands) or return the line. */
+  private acceptMenu(i: number): string | null {
+    const c = this.menu?.[i];
+    if (!c) return null;
+    this.menu = null;
+    this.menuSel = 0;
+    if (c.needsArg) {
+      // completion only: keep the editor in "waiting for argument" state
+      this.input = `${c.name} `;
+    } else {
+      // submitted directly — same contract as a plain Enter (editor is cleared)
+      this.input = "";
+    }
+    this.frame();
+    return c.needsArg ? null : c.name;
+  }
+
+  private moveMenu(delta: number): void {
+    const len = this.menu?.length ?? 0;
+    if (len === 0) return;
+    this.menuSel = (this.menuSel + delta + len) % len;
+    this.frame();
+  }
+
+  /** Mouse click (SGR): select the popup row on the given 1-based screen row. */
+  click(row: number, _col: number): string | null {
+    if (!this.menu) return null;
+    const absolute = this.menuRowAt[row - 1];
+    if (absolute === undefined) return null;
+    this.menuSel = absolute;
+    return this.acceptMenu(absolute);
   }
 
   // ---- editor / keys ---------------------------------------------------------
@@ -590,12 +751,18 @@ export class FullScreenTui {
     }
     if (key.ctrl && key.name === "u") {
       this.input = "";
+      this.menu = null;
       this.frame();
       return null;
     }
     switch (key.name) {
       case "return":
       case "enter": {
+        // popup open: Enter accepts the highlighted suggestion (arg-less
+        // commands run right away; arg commands wait for their text)
+        if (this.menu && this.menu.length > 0) {
+          return this.acceptMenu(Math.min(this.menuSel, this.menu.length - 1));
+        }
         const line = this.input;
         this.input = "";
         return line;
@@ -603,14 +770,31 @@ export class FullScreenTui {
       case "backspace":
         if (this.input.length > 0) {
           this.input = [...this.input].slice(0, -1).join("");
+          this.refreshMenu();
           this.frame();
         }
         return null;
       case "up":
+        if (this.menu) {
+          this.moveMenu(-1);
+          return null;
+        }
         this.scroll(-1);
         return null;
       case "down":
+        if (this.menu) {
+          this.moveMenu(1);
+          return null;
+        }
         this.scroll(1);
+        return null;
+      case "tab":
+        if (this.menu && this.menu.length > 0) {
+          this.acceptMenu(Math.min(this.menuSel, this.menu.length - 1));
+          return null;
+        }
+        // no popup → toggle Build/Plan (caller owns the mode state)
+        this.onModeToggle?.();
         return null;
       case "pageup":
         this.scroll(-(this.height - 6));
@@ -639,6 +823,7 @@ export class FullScreenTui {
         this.scrollEnd();
       }
       this.input += key.sequence;
+      this.refreshMenu();
       this.frame();
     }
     return null;

@@ -21,6 +21,7 @@ import {
   configFilePath,
   writeProviderToDisk,
   describeAuthSource,
+  normalizeEffort,
   familiarPaths,
   sanitizeConfigForApi,
   ProviderRegistry,
@@ -163,6 +164,8 @@ export class AgentServer {
   private curatorScheduler?: CuratorScheduler;
   /** M4: ms timestamp of the last turn activity (idle feed for the curator) */
   private lastTurnAt = Date.now();
+  /** runs per session while a turn is streamed (session.abort kills it) */
+  private readonly activeTurns = new Map<string, AbortController>();
   /** M5: MCP dynamic tools */
   readonly mcp?: McpHub;
   private mcpDiscover?: Promise<void>;
@@ -342,6 +345,8 @@ export class AgentServer {
         return this.updateSession(params);
       case "session.send":
         return this.send(params, ctx);
+      case "session.abort":
+        return this.abortTurn(params);
       case "permission.respond": {
         const requestId = str(params, "requestId");
         if (!requestId) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "requestId is required");
@@ -598,11 +603,17 @@ export class AgentServer {
       );
     }
     const cwd = path.resolve(str(params, "cwd") ?? process.cwd());
+    const effortParam = str(params, "effort") ?? "";
+    const effort = normalizeEffort(effortParam);
+    if (effortParam !== "" && !effort) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, `effort must be low | medium | high`);
+    }
     const created = this.store.createSession({
       title: str(params, "title") ?? "",
       provider,
       model,
       profile: str(params, "profile"),
+      effort,
       cwd,
     });
     // M5: session_start lifecycle hook (awaited; hooks can never throw).
@@ -631,6 +642,7 @@ export class AgentServer {
       model?: string;
       profile?: string | null;
       cwd?: string;
+      effort?: string | null;
     } = {};
     if (params["title"] !== undefined) {
       patch.title = str(params, "title") ?? "";
@@ -678,6 +690,15 @@ export class AgentServer {
         patch.profile = profile;
       }
     }
+    if (params["effort"] !== undefined) {
+      const raw = params["effort"];
+      const effortValue = raw === null ? "" : str(params, "effort") ?? "";
+      const norm = normalizeEffort(effortValue);
+      if (effortValue !== "" && !norm) {
+        throw new RpcError(RPC_ERROR_INVALID_PARAMS, `effort must be low | medium | high`);
+      }
+      patch.effort = norm ?? "";
+    }
     const updated = this.store.updateSession(id, patch);
     if (!updated) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "session not found");
     return updated;
@@ -686,7 +707,7 @@ export class AgentServer {
   private async send(
     params: Record<string, unknown>,
     ctx: RpcContext,
-  ): Promise<{ turnId: string; steps: number; toolCalls: number; usage: Usage }> {
+  ): Promise<{ turnId: string; steps: number; toolCalls: number; usage: Usage; aborted?: boolean }> {
     // M5: make dynamic MCP tools visible before the first tool advertisement.
     await this.mcpReady();
     const sessionId = str(params, "id");
@@ -697,6 +718,11 @@ export class AgentServer {
     const session = this.requireSession(sessionId);
     const events = (event: unknown): void => ctx.onEvent?.(sessionId, event);
     const msgCountBefore = this.store.getMessages(sessionId).length;
+    if (this.activeTurns.has(sessionId)) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, "a turn is already running for this session (stop it first)");
+    }
+    const controller = new AbortController();
+    this.activeTurns.set(sessionId, controller);
     try {
       const res = await this.runner.runTurn({
         sessionId,
@@ -704,23 +730,41 @@ export class AgentServer {
         provider: str(params, "provider"),
         model: str(params, "model"),
         profile: str(params, "profile") ?? undefined,
+        effort: str(params, "effort"),
         yolo: params["yolo"] === true,
         plan: params["plan"] === true,
         maxSteps: num(params, "maxSteps"),
+        signal: controller.signal,
         onEvent: events,
       });
       // M3: background self-review of this turn (stage-only; never blocks long)
-      if (!this.disableReview) {
+      if (!this.disableReview && !controller.signal.aborted) {
         await this.reviewTurn({ sessionId, session, msgCountBefore, ctx });
       }
       // M4: idle feed for the curator scheduler
       this.lastTurnAt = Date.now();
       return res;
     } catch (err) {
+      if (controller.signal.aborted) {
+        log.debug(`turn aborted by user: session ${sessionId}`);
+        return { turnId: "", steps: 0, toolCalls: 0, usage: {}, aborted: true };
+      }
       // Include the failure in the response as well (events already carried it).
       log.error(`turn failed: ${err instanceof Error ? err.message : String(err)}`);
       throw err;
+    } finally {
+      this.activeTurns.delete(sessionId);
     }
+  }
+
+  /** Kill the running turn of a session (GUI stop button / CLI). */
+  private abortTurn(params: Record<string, unknown>): { aborting: boolean } {
+    const sessionId = str(params, "id");
+    if (!sessionId) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "session id is required");
+    const controller = this.activeTurns.get(sessionId);
+    if (!controller) return { aborting: false };
+    controller.abort();
+    return { aborting: true };
   }
 
   /** Spec 04 §3: extract lessons from the just-finished turn and STAGE them. */

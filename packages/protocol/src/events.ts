@@ -25,6 +25,8 @@ export type AgentEvent =
     }
   | { type: "turn.end"; turnId: string; usage?: Usage }
   | { type: "turn.error"; turnId: string; error: string; recoverable: boolean }
+  /** the turn was cancelled (user abort) — normal shutdown, not an error */
+  | { type: "turn.aborted"; turnId: string }
   | { type: "compaction"; dropped: number; kept: number; /** M4: true when an aux model wrote the summary note (false / absent = drop guard) */ summarized?: boolean }
   /** M2 dynamic approval (serve mode): broadcast, wait for permission.respond */
   | { type: "permission.request"; requestId: string; tool: string; summary: string; detail?: string }
@@ -37,4 +39,4 @@ export type AgentEvent =
   | { type: "cron.run"; name: string; status: "ok" | "error"; durationMs: number };
 
 export const isTerminalEvent = (e: AgentEvent): boolean =>
-  e.type === "turn.end" || e.type === "turn.error";
+  e.type === "turn.end" || e.type === "turn.error" || e.type === "turn.aborted";

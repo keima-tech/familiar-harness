@@ -40,6 +40,8 @@ export class OpenAiCompatibleProvider implements Provider {
     };
     if (params.temperature !== undefined) body["temperature"] = params.temperature;
     if (params.maxTokens !== undefined) body["max_tokens"] = params.maxTokens;
+    // reasoning effort (OpenAI standard field; OpenRouter/nvidia/OpenAI o-series)
+    if (params.effort) body["reasoning_effort"] = params.effort;
     if (params.tools && params.tools.length > 0) {
       body["tools"] = params.tools.map((t) => ({
         type: "function",

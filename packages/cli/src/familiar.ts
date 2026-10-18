@@ -40,9 +40,10 @@ const USAGE = `familiar — OpenCode/Claude Code-style agent harness (CLI)
 
 Usage:
   familiar                            # open the interactive chat (TUI) on a terminal
-  familiar run [-p "prompt"] [--provider ID] [--model ID] [--session ID] [--new]
-            [--cwd DIR] [--max-steps N] [-y] [--plan] [--json] [--title S]
-  familiar chat [--session ID] [--provider ID] [--model ID] [--cwd DIR] [-y]
+  familiar run [-p "prompt"] [--provider ID] [--model ID] [--effort low|medium|high]
+            [--session ID] [--cwd DIR] [--max-steps N] [-y] [--plan] [--json] [--title S]
+  familiar chat [--session ID] [--provider ID] [--model ID] [--effort low|medium|high]
+             [--cwd DIR] [-y]
              # TTY opens the full-screen TUI; --line keeps the classic REPL
   familiar serve [--port N] [--bind ADDR] [--config PATH]
   familiar token [--write] [--clear]   # M2 bearer token for familiar serve
@@ -77,6 +78,7 @@ Options:
 const STRING_FLAGS = new Set([
   "--provider",
   "--model",
+  "--effort",
   "--config",
   "--cwd",
   "--session",
@@ -109,6 +111,7 @@ const BOOL_FLAGS = new Set([
   "--clear",
   "--version",
   "-V",
+  "--line",
 ]);
 
 export interface ParsedArgs {
@@ -334,13 +337,14 @@ async function cmdRun(flags: Record<string, string | boolean>, positionals: stri
   }
 
   try {
-    const res = (await transport.dispatch(
+      const res = (await transport.dispatch(
       "session.send",
       {
         id: sessionId,
         text,
         provider: providerId(flags),
         model: modelId(flags),
+        effort: flag(flags, "effort"),
         maxSteps: toNumber(flag(flags, "max-steps")),
         yolo: flagBool(flags, "yolo"),
         plan: flagBool(flags, "plan"),
@@ -464,6 +468,7 @@ async function cmdChat(flags: Record<string, string | boolean>): Promise<void> {
         text,
         yolo: flagBool(flags, "yolo"),
         plan: flagBool(flags, "plan"),
+        effort: flag(flags, "effort"),
       },
       { onEvent: (ev) => printer(ev) },
     );
@@ -484,6 +489,7 @@ async function cmdChat(flags: Record<string, string | boolean>): Promise<void> {
               "  /sessions           list recent sessions\n" +
               "  /session <id>       switch to a session\n" +
               "  /model [p/m]        show or set provider/model for this session\n" +
+              "  /effort [l|m|h|off] reasoning effort (low/medium/high)\n" +
               "  /cwd <path>         change the session working folder\n" +
               "  /todo               show the session task list\n" +
               "  /plan [off]         toggle plan mode\n" +
@@ -567,6 +573,23 @@ async function cmdChat(flags: Record<string, string | boolean>): Promise<void> {
         if (value === "off") delete flags["plan"];
         else flags["plan"] = true;
         process.stdout.write(dim(`(mode: ${modeLabel()})\n`));
+      } else if (line.startsWith("/effort")) {
+        const value = line.slice("/effort".length).trim().toLowerCase();
+        if (value === "" || value === "default" || value === "off") {
+          delete flags["effort"];
+          if (session) {
+            await transport.dispatch("session.update", { id: session.id, effort: "" });
+          }
+          process.stdout.write(dim(`(effort: provider default)\n`));
+        } else if (value === "low" || value === "medium" || value === "high") {
+          flags["effort"] = value;
+          if (session) {
+            await transport.dispatch("session.update", { id: session.id, effort: value });
+          }
+          process.stdout.write(dim(`(effort: ${value})\n`));
+        } else {
+          process.stderr.write(red("usage: /effort low|medium|high|off\n"));
+        }
       } else if (line.startsWith("/model")) {
         const value = line.slice("/model".length).trim();
         if (!session && !value) {
@@ -619,6 +642,13 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
 
   const tui = new FullScreenTui();
   const modeOf = (): "build" | "plan" => (flagBool(flags, "plan") ? "plan" : "build");
+  /** Tab (with no suggestion popup open) toggles Build/Plan. */
+  tui.onModeToggle = (): void => {
+    if (flagBool(flags, "plan")) delete flags["plan"];
+    else flags["plan"] = true;
+    tui.setSessionInfo({ mode: modeOf() });
+    tui.setInfo(`mode: ${modeOf()} (Tab toggles build/plan)`);
+  };
   const sessionBits = (s: SessionRecord): void => {
     tui.setSessionInfo({
       title: s.title || s.id.slice(0, 8),
@@ -642,8 +672,9 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
       : `${providerId(flags) ?? cfg.default_provider}/${modelId(flags) ?? "-"}`,
   });
   tui.setInfo(
-    `◌ Familiar Harness v${readVersion()} — type /help for commands, ↑/↓ scroll, Ctrl+C quit`,
+    `◍ Familiar Harness v${readVersion()} — / for commands (↑/↓ + Tab) · Tab → build/plan · ↑/↓ scroll · Ctrl+C quit`,
   );
+  tui.showBanner(`v${readVersion()}`);
 
   tui.start();
 
@@ -692,7 +723,13 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
     const s = await ensureSession();
     await transport.dispatch(
       "session.send",
-      { id: s.id, text, yolo: flagBool(flags, "yolo"), plan: flagBool(flags, "plan") },
+      {
+        id: s.id,
+        text,
+        yolo: flagBool(flags, "yolo"),
+        plan: flagBool(flags, "plan"),
+        effort: flag(flags, "effort"),
+      },
       { onEvent: (ev) => tui.printer(ev) },
     );
     lastUser = text;
@@ -708,11 +745,12 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
     if (line === "/help") {
       tui.setInfo(
         [
-          "commands:",
+          "commands:  (type / for a popup menu — ↑/↓ select, Tab complete, ↵ run)",
           "  /new            new session with the configured defaults",
           "  /sessions       list recent sessions",
           "  /session <id>   switch to a session",
           "  /model [p/m]    show or set provider/model for this session",
+          "  /effort l|m|h|off  reasoning effort (low/medium/high)",
           "  /cwd <path>     change the session working folder",
           "  /todo           show the session task list",
           "  /plan [off]     toggle plan mode",
@@ -720,7 +758,7 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
           "  /export <file>  dump the transcript as markdown",
           "  /clear          clear the transcript",
           "  /exit           quit",
-          "(any other text is sent to the agent)",
+          "(Tab toggles build/plan when the popup is closed; any other text is sent)",
         ].join("\n"),
       );
       return;
@@ -822,6 +860,27 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
       tui.setSessionInfo({ mode: modeOf() });
       return;
     }
+    if (line.startsWith("/effort")) {
+      const value = line.slice("/effort".length).trim().toLowerCase();
+      if (value === "" || value === "default" || value === "off") {
+        delete flags["effort"];
+        if (session) {
+          await transport.dispatch("session.update", { id: session.id, effort: "" });
+        }
+        tui.setInfo("effort: provider default");
+        return;
+      }
+      if (value === "low" || value === "medium" || value === "high") {
+        flags["effort"] = value;
+        if (session) {
+          await transport.dispatch("session.update", { id: session.id, effort: value });
+        }
+        tui.setInfo(`effort: ${value}`);
+        return;
+      }
+      die("usage: /effort low|medium|high|off");
+      return;
+    }
     if (line.startsWith("/model")) {
       const value = line.slice("/model".length).trim();
       if (value === "reset") {
@@ -904,14 +963,23 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
     for (let i = 0; i < data.length; ) {
       if (data[i] === "\x1b" && i + 1 < data.length) {
         const rest = data.slice(i);
-        const seq = /^(\x1b\[<\d+;\d+;\d+[Mm])/.exec(rest);
+        const seq = /^(\x1b\[<(\d+);(\d+);(\d+)([Mm]))/.exec(rest);
         if (seq && seq[1]) {
-          tui.wheel(seq[1]);
+          const btn = Number(seq[2]);
+          const col = Number(seq[3]);
+          const row = Number(seq[4]);
+          const isRelease = seq[5] === "m";
+          if (btn >= 64) {
+            tui.wheel(seq[1]); // 64/65 = wheel up/down (SGR 1006)
+          } else if (!isRelease && btn <= 2) {
+            const line = tui.click(row, col - 1);
+            if (line) submit(line);
+          }
           i += seq[1].length;
           continue;
         }
         const isMouseLike = /^\x1b\[[<\d;]/.exec(rest);
-        const named = /^(\x1b(?:\[([A-DH])|(\d(?:~)?)|O([A-D])))/.exec(rest);
+        const named = /^(\x1b(?:\[([A-DHZ])|(\d(?:~)?)|O([A-D])))/.exec(rest);
         if (named && named[0]) {
           const code = named[2] ?? named[4];
           const tilde = named[3];
@@ -920,11 +988,15 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
           else if (code === "B") name = "down";
           else if (code === "H") name = "home";
           else if (code === "F") name = "end";
+          else if (code === "Z") name = "tab"; // Shift-Tab ≙ Tab
           else if (tilde === "1") name = "home";
           else if (tilde === "4") name = "end";
           else if (tilde === "5") name = "pageup";
           else if (tilde === "6") name = "pagedown";
-          if (name) tui.key({ name });
+          if (name) {
+            const r = tui.key({ name });
+            if (r !== null) submit(r);
+          }
           i += named[0].length;
           continue;
         }
@@ -964,6 +1036,12 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
       if (code === 13 || code === 10) {
         const line = tui.key({ name: "return" });
         if (line !== null) submit(line);
+        i += consumed;
+        continue;
+      }
+      if (code === 9) {
+        const r = tui.key({ name: "tab" }); // accept suggestion / toggle mode
+        if (r !== null) submit(r);
         i += consumed;
         continue;
       }

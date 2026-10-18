@@ -99,6 +99,7 @@ const STR = {
     "msg.thinking": "思考",
     "send.enter": "送信 (Enter)",
     "send.ctrlEnter": "送信 (Ctrl+Enter)",
+    "send.stop": "停止 (Enter)",
     "composer.phEnter": "何でも聞いてください (Enter で送信 / Shift+Enter で改行)",
     "composer.phCtrl": "何でも聞いてください (Ctrl+Enter で送信 / Enter で改行)",
     "drawer.inbox": "承認インボックス",
@@ -130,6 +131,22 @@ const STR = {
     "toast.createFailed": "セッション作成に失敗しました: {0}",
     "toast.sendFailed": "送信に失敗しました: {0}",
     "toast.attached": "添付しました: {0}",
+    "toast.dropAttach": "ドロップで添付しました: {0}",
+    "toast.attachFailed": "添付ファイルのパスを取得できませんでした: {0}",
+    "toast.stopRequested": "停止を要求しました…",
+    "toast.effortSet": "エフォート: {0}",
+    "toast.effortNext": "エフォート: {0} (次のセッションから適用)",
+    "chip.effort": "推論エフォート",
+    "effort.default": "既定",
+    "effort.defaultDesc": "エフォートなし (プロバイダ既定)",
+    "effort.lowDesc": "low",
+    "effort.mediumDesc": "medium",
+    "effort.highDesc": "high",
+    "prov.connected": "接続済みプロバイダー",
+    "prov.noneConnected": "接続済みのプロバイダーはありません",
+    "prov.candidates": "接続候補",
+    "prov.connect": "＋ 接続",
+    "prov.mock": "mock (テスト用)",
     "toast.shellHint": "「!」で始めるとシェルコマンドの実行をエージェントに依頼します",
     "toast.notifDenied": "通知の許可が得られませんでした",
     "toast.theme": "テーマ: {0}",
@@ -139,6 +156,7 @@ const STR = {
     "toast.providerSaved": "プロバイダー設定を保存しました: {0}",
     "turn.done": "✓ 完了 ({0})",
     "turn.thinking": "考えています…",
+    "turn.stopped": "⏹ 停止しました",
     "taskDone": "タスクが完了しました",
     "auth.required": "トークン認証が必要です",
     "auth.hint": "このサーバーはBearerトークンを要求しています。 familiar token --write で発行し、URL に ?token=... を付けて開き直してください。",
@@ -257,7 +275,6 @@ const STR = {
     "prov.probing": "取得中…",
     "prov.probeEmpty": "モデルが見つかりませんでした",
     "prov.probeOk": "{0} 件のモデル",
-    "prov.probeMock": "mock はモデル一覧の取得が不要です",
     "ns.modelDefault": "プロバイダーの既定",
     "cwd.title": "作業フォルダーを変更",
     "cwd.browse": "📁 参照…",
@@ -337,6 +354,7 @@ const STR = {
     "msg.thinking": "Thinking",
     "send.enter": "send (Enter)",
     "send.ctrlEnter": "send (Ctrl+Enter)",
+    "send.stop": "stop (Enter)",
     "composer.phEnter": "Ask anything… (Enter to send / Shift+Enter for a new line)",
     "composer.phCtrl": "Ask anything… (Ctrl+Enter to send / Enter for a new line)",
     "drawer.inbox": "approval inbox",
@@ -368,6 +386,22 @@ const STR = {
     "toast.createFailed": "session.create failed: {0}",
     "toast.sendFailed": "send failed: {0}",
     "toast.attached": "attached: {0}",
+    "toast.dropAttach": "attached via drop: {0}",
+    "toast.attachFailed": "could not resolve a file path: {0}",
+    "toast.stopRequested": "stop requested…",
+    "toast.effortSet": "effort: {0}",
+    "toast.effortNext": "effort: {0} (applies from the next session)",
+    "chip.effort": "reasoning effort",
+    "effort.default": "default",
+    "effort.defaultDesc": "no effort (provider default)",
+    "effort.lowDesc": "low",
+    "effort.mediumDesc": "medium",
+    "effort.highDesc": "high",
+    "prov.connected": "Connected providers",
+    "prov.noneConnected": "no connected providers yet",
+    "prov.candidates": "Candidates",
+    "prov.connect": "＋ connect",
+    "prov.mock": "mock (tests only)",
     "toast.shellHint": "start with \"!\" to ask the agent to run a shell command",
     "toast.notifDenied": "notification permission denied",
     "toast.theme": "theme: {0}",
@@ -377,6 +411,7 @@ const STR = {
     "toast.providerSaved": "provider settings saved: {0}",
     "turn.done": "✓ done ({0})",
     "turn.thinking": "thinking…",
+    "turn.stopped": "⏹ stopped",
     "taskDone": "Task completed",
     "auth.required": "Token authentication required",
     "auth.hint": "This server requires a bearer token. Generate one with `familiar token --write` and reopen the URL with ?token=...",
@@ -495,7 +530,6 @@ const STR = {
     "prov.probing": "fetching…",
     "prov.probeEmpty": "no models found",
     "prov.probeOk": "{0} model(s)",
-    "prov.probeMock": "mock needs no model probe",
     "ns.modelDefault": "provider default",
     "cwd.title": "Change working folder",
     "cwd.browse": "📁 Browse…",
@@ -580,11 +614,12 @@ function applyI18n() {
   }
   // dynamic labels
   applyComposerPlaceholder();
-  $("#send").title = prefs.sendWithEnter ? t("send.enter") : t("send.ctrlEnter");
+  refreshSendButton();
   $("#session-title").textContent = state.currentSession
     ? state.currentSession.title
     : t("top.noSession");
   $("#mode-chip").textContent = `${t(state.mode === "plan" ? "mode.plan" : "mode.build")} ▾`;
+  renderEffortChip();
   if (state.modelChipDefault) {
     $("#model-chip").textContent = `${t("chip.modelLabel")} ▾`;
   }
@@ -835,8 +870,8 @@ const state = {
   /** live assistant bubbles of the running turn (thinking collapse + footer). */
   turnBubbles: [],
   mode: "build", // "build" | "plan" — passed per send (plan => read-only tools)
-  /** pending provider/model change before the next turn (applied + persisted). */
-  draft: { provider: "", model: "" },
+  /** pending provider/model/effort change before the next turn (applied + persisted). */
+  draft: { provider: "", model: "", effort: "" },
   /** tokens seen this browsing session, per session id (turn.end events). */
   usageBySession: {},
   /** last turn's prompt tokens per session ≈ current context size. */
@@ -857,6 +892,18 @@ const ns = {
   defaultModel: null,
   loaded: false,
 };
+
+/** Built-in provider catalog for the settings screen (connected vs. candidates).
+ * The GUI never lists a key-less placeholder as connected — a provider moves to
+ * the "Connected" section once its key resolves (or it needs no key). */
+const KNOWN_PROVIDERS = [
+  { id: "openai", label: "OpenAI", kind: "openai_compatible", base_url: "https://api.openai.com/v1", color: "#10a37f", env: "OPENAI_API_KEY" },
+  { id: "anthropic", label: "Anthropic", kind: "anthropic", base_url: "https://api.anthropic.com/v1", color: "#d97757", env: "ANTHROPIC_API_KEY" },
+  { id: "google", label: "Google Gemini", kind: "openai_compatible", base_url: "https://generativelanguage.googleapis.com/v1beta/openai", color: "#4285f4", env: "GEMINI_API_KEY" },
+  { id: "nvidia", label: "NVIDIA", kind: "openai_compatible", base_url: "https://integrate.api.nvidia.com/v1", color: "#76b900", env: "NVIDIA_API_KEY" },
+  { id: "openrouter", label: "OpenRouter", kind: "openai_compatible", base_url: "https://openrouter.ai/api/v1", color: "#8083f2", env: "OPENROUTER_API_KEY" },
+  { id: "ollama", label: "Ollama", kind: "openai_compatible", base_url: "http://127.0.0.1:11434/v1", color: "#e5e5e5", env: null },
+];
 
 // ---------------------------------------------------------------------------
 // appearance: 10 themes × (dark|light) palettes + light/dark/system mode
@@ -1122,6 +1169,7 @@ async function openSession(id) {
   $("#session-meta").textContent = bits.join(" · ");
   renderSessionCwd(s);
   renderModelChip();
+  renderEffortChip();
   void refreshTodo();
   updateContextGauge();
   closeAllPops();
@@ -1546,7 +1594,7 @@ function runFirstCommand() {
 }
 
 function closeAllPops() {
-  for (const id of ["session-menu-pop", "mode-pop", "model-pop", "plus-pop", "cmd-pop"]) {
+  for (const id of ["session-menu-pop", "mode-pop", "model-pop", "plus-pop", "effort-pop", "cmd-pop"]) {
     $(`#${id}`).hidden = true;
   }
 }
@@ -1780,11 +1828,32 @@ function liveBubble(sessionId) {
   return entry;
 }
 
+/** Send button doubles as the stop button: ↑ idle / ■ while a turn runs. */
+function refreshSendButton() {
+  const send = $("#send");
+  const busy = state.busy === true;
+  send.classList.toggle("stop", busy);
+  send.textContent = busy ? "■" : (send.dataset.iconIdle ?? "↑");
+  send.title = busy ? t("send.stop") : (prefs.sendWithEnter ? t("send.enter") : t("send.ctrlEnter"));
+}
+
+/** Abort the running turn of the current session. */
+async function stopTurn() {
+  if (!state.busy || !state.sessionId) return;
+  try {
+    toast(t("toast.stopRequested"), "info");
+    await rpc("session.abort", { id: state.sessionId });
+  } catch (err) {
+    toast(t("toast.sendFailed", err.message), "err");
+  }
+}
+
 function setBusy(busy) {
   state.busy = busy;
-  $("#send").disabled = busy;
+  $("#send").disabled = false; // the send button doubles as the stop button
   $("#input").disabled = busy;
   $("#turn-spinner").hidden = !busy;
+  refreshSendButton();
   if (busy) {
     state.turnStartedAt = Date.now();
     if (state.turnTimer) clearInterval(state.turnTimer);
@@ -1957,6 +2026,14 @@ function onEvent(sessionId, e) {
       for (const b of state.turnBubbles) if (b.caret) b.caret.remove();
       state.turnBubbles = [];
       appendMessage("assistant", `⚠ ${e.error}`, null);
+      break;
+    case "turn.aborted":
+      setBusy(false);
+      for (const b of state.turnBubbles) if (b.caret) b.caret.remove();
+      state.turnBubbles = [];
+      setTurnEndLabel(t("turn.stopped"));
+      void refreshTodo();
+      refreshSessions();
       break;
     case "improvement.staged":
       loadInbox();
@@ -2227,7 +2304,7 @@ function savePrefs(patch) {
   localStorage.setItem("familiar.prefs", JSON.stringify(prefs));
   applyUiPrefs();
   applyComposerPlaceholder();
-  $("#send").title = prefs.sendWithEnter ? t("send.enter") : t("send.ctrlEnter");
+  refreshSendButton();
 }
 
 function applyUiPrefs() {
@@ -2557,9 +2634,10 @@ function providerAuthLabel(pc) {
  */
 function isProviderUsable(pc) {
   const src = pc?.auth?.source ?? "none";
-  // "none" (or legacy "env:none") = key-less endpoint like Ollama; mock always ok.
+  // "none" (or legacy "env:none") = key-less endpoint like Ollama;
+  // anything with a resolved key (inline/file/env) is connected too.
   return (
-    pc?.kind === "mock" || src === "none" || src === "env:none" || pc?.auth?.resolved === true
+    src === "none" || src === "env:none" || pc?.auth?.resolved === true
   );
 }
 
@@ -2575,13 +2653,16 @@ function providerForm(name, pc, isNew) {
   const form = document.createElement("div");
   form.className = "pform";
   const auth = pc?.auth ?? {};
+  // "mock" remains a test-only kind: expose it in the kind <select> only when
+  // the entry already uses it (custom/local configs)
+  const mockOption = `<option value="mock">${esc(t("prov.mock"))}</option>`;
   form.innerHTML = `
     ${isNew ? `<div class="field-row"><label>${esc(t("prov.name"))}</label><input class="pf-name" type="text" spellcheck="false" placeholder="${esc(t("prov.namePh"))}" /></div>` : ""}
     <div class="field-row"><label>${esc(t("prov.kind"))}</label>
       <select class="pf-kind">
         <option value="openai_compatible">openai_compatible</option>
         <option value="anthropic">anthropic</option>
-        <option value="mock">mock</option>
+        ${pc?.kind === "mock" ? mockOption : ""}
       </select></div>
     <div class="field-row"><label>${esc(t("prov.endpoint"))}</label><input class="pf-url" type="text" spellcheck="false" placeholder="${esc(t("prov.endpointPh"))}" /></div>
     <div class="field-row"><label>${esc(t("prov.apiKey"))}</label><input class="pf-key" type="password" autocomplete="new-password" placeholder="${auth.resolved ? esc(t("prov.keySet")) : esc(t("prov.keyUnset"))}" /></div>
@@ -2616,17 +2697,7 @@ function providerForm(name, pc, isNew) {
   };
 
   let probeTimer = null;
-  const syncMockState = () => {
-    const isMock = kindSel.value === "mock";
-    probeBtn.disabled = isMock;
-    if (isMock) {
-      probeStatus.textContent = t("prov.probeMock");
-      modelsBox.innerHTML = "";
-    }
-  };
-  syncMockState();
   async function probeModels() {
-    if (kindSel.value === "mock") return;
     const url = urlInput.value.trim();
     if (!/^https?:\/\//i.test(url)) {
       modelsBox.innerHTML = "";
@@ -2670,7 +2741,6 @@ function providerForm(name, pc, isNew) {
   }
   probeBtn.addEventListener("click", probeModels);
   kindSel.addEventListener("change", () => {
-    syncMockState();
     clearTimeout(probeTimer);
     probeTimer = setTimeout(() => void probeModels(), 200);
   });
@@ -2729,32 +2799,89 @@ function providerForm(name, pc, isNew) {
   return form;
 }
 
+/** Provider settings: "Connected" providers as collapsible cards, then the
+ * built-in catalog + unconfigured entries as "Candidates", each with a
+ * ＋接続 button that opens the form prefilled. */
 async function renderProvidersSection(content) {
-  const c = card(t("set.providers"), t("set.providersDesc"));
-  content.appendChild(c);
   if (!(await ensureNsConfig())) return;
   const names = Object.keys(ns.providers).sort((a, b) =>
     a === ns.defaultProvider ? -1 : b === ns.defaultProvider ? 1 : a.localeCompare(b));
+  const connected = [];
+  const candidates = [];
   for (const name of names) {
+    (isProviderUsable(ns.providers[name]) ? connected : candidates).push(name);
+  }
+
+  // ---- section 1: connected ----
+  const connHead = document.createElement("div");
+  connHead.className = "provsec";
+  connHead.innerHTML = `<b>${esc(t("prov.connected"))}</b><span>${connected.length}</span>`;
+  content.appendChild(connHead);
+  if (connected.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "proempty dim";
+    empty.textContent = t("prov.noneConnected");
+    content.appendChild(empty);
+  }
+  for (const name of connected) {
     const pc = ns.providers[name] ?? {};
-    const wrap = document.createElement("div");
-    wrap.className = `provcard${providerOpen === name ? " open" : ""}`;
-    wrap.innerHTML = `
-      <button class="provhead" type="button">
-        <span class="pname">${esc(name)}${name === ns.defaultProvider ? `<small class="pdefault">${esc(t("prov.default"))}</small>` : ""}</span>
-      </button>
-      <div class="provbody" hidden></div>`;
-    wrap.querySelector(".provhead").addEventListener("click", () => {
-      providerOpen = providerOpen === name ? "" : name;
+    content.appendChild(providerCard(name, pc));
+  }
+
+  // ---- section 2: candidates ----
+  const candHead = document.createElement("div");
+  candHead.className = "provsec";
+  candHead.innerHTML = `<b>${esc(t("prov.candidates"))}</b><span>${candidates.length}</span>`;
+  content.appendChild(candHead);
+  const candRows = new Map(); // openKey → form prefill
+  // (a) configured providers whose key does not resolve yet
+  for (const name of candidates) {
+    const pc = ns.providers[name] ?? {};
+    candRows.set(name, pc);
+  }
+  // (b) built-in catalog entries that are not connected
+  for (const k of KNOWN_PROVIDERS) {
+    if (connected.includes(k.id)) continue;
+    if (candRows.has(k.id)) continue; // configured but unresolvable — keep its values
+    candRows.set(k.id, { kind: k.kind, base_url: k.base_url, known: k });
+  }
+  const ordered = [...candRows.keys()].sort((a, b) => {
+    const ka = KNOWN_PROVIDERS.findIndex((k) => k.id === a);
+    const kb = KNOWN_PROVIDERS.findIndex((k) => k.id === b);
+    if (ka !== -1 && kb !== -1) return ka - kb;
+    if (ka !== -1) return -1;
+    if (kb !== -1) return 1;
+    return a.localeCompare(b);
+  });
+  for (const name of ordered) {
+    const isKnown = KNOWN_PROVIDERS.some((k) => k.id === name);
+    const row = document.createElement("div");
+    row.className = "provrow";
+    const pc = candRows.get(name) ?? {};
+    const k = pc.known ?? KNOWN_PROVIDERS.find((x) => x.id === name);
+    const color = k?.color ?? "#8a8a94";
+    const label = k?.label ?? name;
+    const hint = pc.base_url ?? k?.base_url ?? "";
+    const envRef = k?.env ? ` · ${k.env}` : "";
+    row.innerHTML =
+      `<span class="pdot" style="background:${esc(color)}"></span>` +
+      `<span class="pr-name">${esc(label)}<small class="pr-hint">${esc(hint ? hint + envRef : envRef.slice(3))}</small></span>` +
+      `<button type="button" class="pconn">${esc(t("prov.connect"))}</button>`;
+    row.querySelector(".pconn").addEventListener("click", () => {
+      providerOpen = name;
       renderSettingsSection("providers");
     });
     if (providerOpen === name) {
-      const body = wrap.querySelector(".provbody");
-      body.hidden = false;
-      body.appendChild(providerForm(name, pc, false));
+      row.classList.add("open");
+      const body = document.createElement("div");
+      body.className = "provbody";
+      body.appendChild(providerForm(name, pc, true));
+      row.appendChild(body);
     }
-    content.appendChild(wrap);
+    content.appendChild(row);
   }
+
+  // ---- custom provider (free form) ----
   if (providerOpen === "__new__") {
     const wrap = document.createElement("div");
     wrap.className = "provcard open";
@@ -2772,6 +2899,28 @@ async function renderProvidersSection(content) {
     });
     content.appendChild(add);
   }
+}
+
+/** A collapsible card row for a connected provider (name + default badge). */
+function providerCard(name, pc) {
+  const wrap = document.createElement("div");
+  wrap.className = `provcard${providerOpen === name ? " open" : ""}`;
+  wrap.innerHTML = `
+    <button class="provhead" type="button">
+      <span class="pdot" style="background:${esc(KNOWN_PROVIDERS.find((k) => k.id === name)?.color ?? "#8a8a94")}"></span>
+      <span class="pname">${esc(name)}${name === ns.defaultProvider ? `<small class="pdefault">${esc(t("prov.default"))}</small>` : ""}</span>
+    </button>
+    <div class="provbody" hidden></div>`;
+  wrap.querySelector(".provhead").addEventListener("click", () => {
+    providerOpen = providerOpen === name ? "" : name;
+    renderSettingsSection("providers");
+  });
+  if (providerOpen === name) {
+    const body = wrap.querySelector(".provbody");
+    body.hidden = false;
+    body.appendChild(providerForm(name, pc, false));
+  }
+  return wrap;
 }
 
 async function renderExtensionsSection(content) {
@@ -2983,6 +3132,43 @@ function setMode(mode) {
   $("#mode-pop").hidden = true;
 }
 
+/** Reasoning effort chip: default ⇔ low ⇔ medium ⇔ high (per session). */
+function effortLabel(v) {
+  return v ? String(v) : t("effort.default");
+}
+
+function activeEffort() {
+  return state.draft.effort || (state.currentSession?.effort ?? "");
+}
+
+function renderEffortChip() {
+  $("#effort-chip").textContent = `${effortLabel(activeEffort())} ▾`;
+}
+
+async function setEffort(v) {
+  $("#effort-pop").hidden = true;
+  const valid = v === "" || v === "low" || v === "medium" || v === "high";
+  if (!valid) return;
+  if (state.sessionId) {
+    try {
+      const updated = await rpc("session.update", { id: state.sessionId, effort: v });
+      state.currentSession = updated;
+      state.draft.effort = "";
+      renderEffortChip();
+      refreshSessions();
+      toast(t("toast.effortSet", effortLabel(updated.effort ?? "")), "ok");
+      return;
+    } catch (err) {
+      toast(t("toast.modelFailed", err.message), "err");
+      return;
+    }
+  }
+  // no session yet: stashed into the draft, applied at first send
+  state.draft.effort = v;
+  renderEffortChip();
+  toast(t("toast.effortNext", effortLabel(v)), "info");
+}
+
 function renderModelChip() {
   const s = state.currentSession;
   const provider = state.draft.provider || s?.provider || ns.defaultProvider;
@@ -3094,7 +3280,7 @@ async function applyModelChoice(provider, model) {
     if (model !== "") patch.model = model;
     const updated = await rpc("session.update", patch);
     state.currentSession = updated;
-    state.draft = { provider: "", model: "" };
+    state.draft = { provider: "", model: "", effort: state.draft.effort };
     const bits = [updated.provider];
     if (updated.model) bits.push(updated.model);
     if (updated.profile) bits.push(`profile: ${updated.profile}`);
@@ -3125,6 +3311,15 @@ async function newSession() {
 // ---------------------------------------------------------------------------
 // composer
 // ---------------------------------------------------------------------------
+/** Abort the running turn when busy; otherwise send the composer text. */
+function composerAction() {
+  if (state.busy) {
+    void stopTurn();
+    return;
+  }
+  void send();
+}
+
 async function send() {
   const input = $("#input");
   const text = input.value.trim();
@@ -3134,10 +3329,11 @@ async function send() {
     const createParams = {};
     if (state.draft.provider) createParams.provider = state.draft.provider;
     if (state.draft.model) createParams.model = state.draft.model;
+    if (state.draft.effort) createParams.effort = state.draft.effort;
     const s = await rpc("session.create", createParams);
     id = s.id;
     state.sessionId = id;
-    state.draft = { provider: "", model: "" };
+    state.draft = { provider: "", model: "", effort: "" };
     await refreshSessions();
   }
   setBusy(true);
@@ -3153,7 +3349,7 @@ async function send() {
         const patch = { id, provider: state.draft.provider };
         if (state.draft.model) patch.model = state.draft.model;
         state.currentSession = await rpc("session.update", patch);
-        state.draft = { provider: "", model: "" };
+        state.draft = { provider: "", model: "", effort: state.draft.effort };
         refreshSessions();
       } catch {
         overrides = { ...state.draft };
@@ -3163,6 +3359,7 @@ async function send() {
     const sparams = { id, text, plan: state.mode === "plan" };
     if (overrides?.provider) sparams.provider = overrides.provider;
     if (overrides?.model) sparams.model = overrides.model;
+    if (state.draft.effort) sparams.effort = state.draft.effort;
     await rpc("session.send", sparams);
   } catch (err) {
     toast(t("toast.sendFailed", err.message), "err");
@@ -3182,6 +3379,35 @@ function insertIntoComposer(text) {
   const start = ta.selectionStart ?? ta.value.length;
   ta.setRangeText(text, start, ta.selectionEnd ?? start, "end");
   autoSize(ta);
+}
+
+/** Resolve an absolute path for a dropped/attached file (Electron ships
+ * webUtils.getPathForFile; the browser fallback only has the file name). */
+function resolveFilePath(f) {
+  try {
+    const viaBridge = window.familiarDesktop?.filePathFor?.(f);
+    if (typeof viaBridge === "string" && viaBridge !== "" ) return viaBridge;
+  } catch {
+    /* bridge not available (plain browser) */
+  }
+  return f.path || f.name;
+}
+
+/** Insert @path tokens for attachments (picker + drag & drop). */
+async function attachFiles(fileList) {
+  const files = [...fileList].slice(0, 8);
+  if (files.length === 0) return;
+  const refs = [];
+  for (const f of files) {
+    const ref = resolveFilePath(f);
+    if (!ref) {
+      toast(t("toast.attachFailed", f.name), "err");
+      continue;
+    }
+    insertIntoComposer(`@${ref} `);
+    refs.push(ref);
+  }
+  if (refs.length > 0) toast(t("toast.dropAttach", refs.join(" ")), "ok");
 }
 
 /** Hermes-style /retry: re-send the last user message. */
@@ -3259,9 +3485,31 @@ function boot() {
     const f = $("#file-attach").files?.[0];
     $("#file-attach").value = "";
     if (!f) return;
-    const ref = f.path || f.name; // Electron exposes the full path
-    insertIntoComposer(`@${ref} `);
-    toast(t("toast.attached", ref), "ok");
+    void attachFiles([f]);
+  });
+
+  // ---- drag & drop attachments into the composer --------------------------
+  // Dropping must never navigate the page away, even outside the composer.
+  for (const evt of ["dragover", "drop"]) {
+    document.addEventListener(evt, (ev) => ev.preventDefault());
+  }
+  const composerEl = $("#composer");
+  composerEl.addEventListener("dragover", (ev) => {
+    if (ev.dataTransfer?.types?.includes("Files")) {
+      ev.preventDefault();
+      composerEl.classList.add("dragover");
+    }
+  });
+  composerEl.addEventListener("dragleave", (ev) => {
+    if (!composerEl.contains(ev.relatedTarget)) composerEl.classList.remove("dragover");
+  });
+  composerEl.addEventListener("drop", (ev) => {
+    composerEl.classList.remove("dragover");
+    const files = [...(ev.dataTransfer?.files ?? [])];
+    if (files.length > 0) {
+      ev.preventDefault();
+      void attachFiles(files);
+    }
   });
 
   $("#session-filter").addEventListener("input", applySessionFilter);
@@ -3305,6 +3553,16 @@ function boot() {
     if (!btn) return;
     setMode(btn.dataset.mode);
   });
+  $("#effort-chip").addEventListener("click", () => {
+    const opening = $("#effort-pop").hidden;
+    closeAllPops();
+    $("#effort-pop").hidden = !opening;
+  });
+  $("#effort-pop").addEventListener("click", (ev) => {
+    const btn = ev.target.closest("button[data-effort]");
+    if (!btn) return;
+    void setEffort(btn.dataset.effort ?? "");
+  });
   $("#model-chip").addEventListener("click", () => void openModelPopover());
   $("#mp-settings").addEventListener("click", () => openSettingsModal("providers"));
 
@@ -3320,7 +3578,7 @@ function boot() {
 
   $("#composer").addEventListener("submit", (ev) => {
     ev.preventDefault();
-    void send();
+    composerAction();
   });
   const input = $("#input");
   input.addEventListener("keydown", (ev) => {
@@ -3347,7 +3605,7 @@ function boot() {
       : ev.key === "Enter" && (ev.ctrlKey || ev.metaKey);
     if (wantsSend) {
       ev.preventDefault();
-      void send();
+      composerAction();
     }
   });
   input.addEventListener("input", () => {
@@ -3416,6 +3674,7 @@ function boot() {
 
   setMode("build");
   renderModelChip();
+  renderEffortChip();
   updateContextGauge();
   void refreshSessions();
   void loadInbox();

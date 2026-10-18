@@ -17,6 +17,7 @@ export interface SessionStore {
     provider: string;
     model: string;
     profile?: string;
+    effort?: string;
     cwd: string;
   }): SessionRecord;
   getSession(id: string): SessionRecord | null;
@@ -25,7 +26,7 @@ export interface SessionStore {
   getMessages(sessionId: string): ChatMessage[];
   /** Set/update the title (used for first user message). */
   renameSession(id: string, title: string): void;
-  /** Patch session options (title / provider / model / profile / cwd). Returns the updated record. */
+  /** Patch session options (title / provider / model / profile / cwd / effort). Returns the updated record. */
   updateSession(
     id: string,
     patch: {
@@ -36,6 +37,8 @@ export interface SessionStore {
       profile?: string | null;
       /** absolute path of the working directory */
       cwd?: string;
+      /** reasoning effort: "low" | "medium" | "high"; "" / null clears */
+      effort?: string | null;
     },
   ): SessionRecord | null;
   deleteSession(id: string): boolean;
@@ -49,6 +52,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   provider TEXT NOT NULL,
   model TEXT NOT NULL,
   profile TEXT,
+  effort TEXT NOT NULL DEFAULT '',
   cwd TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
@@ -78,6 +82,7 @@ interface SessionRow {
   cwd: string;
   created_at: number;
   updated_at: number;
+  effort: string | null;
 }
 
 export class SqliteSessionStore implements SessionStore {
@@ -87,6 +92,11 @@ export class SqliteSessionStore implements SessionStore {
     ensureDir(path.dirname(file));
     this.db = new DatabaseSync(file);
     this.db.exec(SCHEMA);
+    // migration: pre-v1.1 databases lack the effort column
+    const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[];
+    if (!cols.some((c) => c.name === "effort")) {
+      this.db.exec(`ALTER TABLE sessions ADD COLUMN effort TEXT NOT NULL DEFAULT ''`);
+    }
   }
 
   createSession(opts: {
@@ -94,14 +104,15 @@ export class SqliteSessionStore implements SessionStore {
     provider: string;
     model: string;
     profile?: string;
+    effort?: string;
     cwd: string;
   }): SessionRecord {
     const id = crypto.randomUUID();
     const now = Date.now();
     this.db
       .prepare(
-        `INSERT INTO sessions (id, title, provider, model, profile, cwd, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO sessions (id, title, provider, model, profile, effort, cwd, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -109,6 +120,7 @@ export class SqliteSessionStore implements SessionStore {
         opts.provider,
         opts.model,
         opts.profile ?? null,
+        opts.effort ?? "",
         opts.cwd,
         now,
         now,
@@ -119,6 +131,7 @@ export class SqliteSessionStore implements SessionStore {
       provider: opts.provider,
       model: opts.model,
       profile: opts.profile,
+      ...(opts.effort ? { effort: opts.effort } : {}),
       cwd: opts.cwd,
       createdAt: now,
       updatedAt: now,
@@ -151,6 +164,8 @@ export class SqliteSessionStore implements SessionStore {
       model?: string;
       profile?: string | null;
       cwd?: string;
+      /** "low" | "medium" | "high"; "" / null clears */
+      effort?: string | null;
     },
   ): SessionRecord | null {
     const sets: string[] = [];
@@ -174,6 +189,10 @@ export class SqliteSessionStore implements SessionStore {
     if (patch.cwd !== undefined) {
       sets.push("cwd = ?");
       values.push(patch.cwd);
+    }
+    if (patch.effort !== undefined) {
+      sets.push("effort = ?");
+      values.push(patch.effort ?? "");
     }
     if (sets.length === 0) return this.getSession(id);
     sets.push("updated_at = ?");
@@ -255,6 +274,7 @@ function toRecord(row: SessionRow): SessionRecord {
     provider: row.provider,
     model: row.model,
     profile: row.profile ?? undefined,
+    effort: row.effort ? row.effort : null,
     cwd: row.cwd,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

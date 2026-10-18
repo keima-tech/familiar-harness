@@ -6,6 +6,7 @@ import type {
   Usage,
 } from "@familiar/protocol";
 import type { ResolvedConfig } from "../config.js";
+import { normalizeEffort } from "../config.js";
 import { log } from "../logger.js";
 import type { SessionStore } from "../session/store.js";
 import type { SessionRecord } from "@familiar/protocol";
@@ -31,6 +32,8 @@ export interface RunTurnOptions {
   provider?: string;
   model?: string;
   profile?: string;
+  /** per-turn reasoning effort override (falls back to session.effort) */
+  effort?: string;
   yolo?: boolean;
   maxSteps?: number;
   /** M2: plan mode — read-only toolset only */
@@ -38,6 +41,7 @@ export interface RunTurnOptions {
   /** M2: injected prompt sections (todo state, memory later) */
   extraSystem?: string[];
   onEvent: (event: AgentEvent) => void;
+  /** cancel the turn (provider streams abort; tools finish their step) */
   signal?: AbortSignal;
 }
 
@@ -113,6 +117,7 @@ export class AgentRunner {
     const providerId = opts.provider ?? session.provider;
     const model = opts.model ?? session.model;
     const profile = opts.profile ?? session.profile;
+    const effort = normalizeEffort(opts.effort ?? (session as { effort?: string | null }).effort);
     const maxSteps = opts.maxSteps ?? 25;
     const yolo = opts.yolo ?? false;
 
@@ -203,6 +208,7 @@ export class AgentRunner {
               parameters: t.parameters,
             })),
             signal: opts.signal,
+            effort,
           },
           (chunk) => {
             if (chunk.type === "text") {
@@ -350,6 +356,11 @@ export class AgentRunner {
       });
       return { turnId, steps, toolCalls: toolCallsTotal, usage: finalUsage };
     } catch (err) {
+      // User abort: not an error — announce and stop (provider fetch raised).
+      if (opts.signal?.aborted) {
+        opts.onEvent({ type: "turn.aborted", turnId });
+        throw err;
+      }
       const recoverable = err instanceof ProviderError && err.status !== undefined && err.status >= 500;
       const message = err instanceof Error ? err.message : String(err);
       if (err instanceof Error && err.name === "TimeoutError") {

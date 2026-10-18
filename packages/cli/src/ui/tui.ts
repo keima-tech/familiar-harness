@@ -1,9 +1,19 @@
 /**
- * Full-screen TUI (OpenCode-style): alternating screen buffer with an outer
- * rounded border (title embedded in the top border, status in the bottom),
- * scrollable transcript viewport, single-line editor and spinner. No
- * dependencies — raw ANSI only. Frames are line-diffed: only changed rows
- * are rewritten.
+ * Full-screen TUI (OpenCode-style). Raw ANSI only — no dependencies.
+ *
+ * Layout (no outer frame, matching opencode):
+ *   - startup: centered two-tone block-letter wordmark ("familiar" dim gray,
+ *     "harness" bright) above the prompt panel; keyboard hints right-aligned
+ *     on the bottom row.
+ *   - prompt panel: raised background, left accent bar (┃), placeholder row,
+ *     metadata row (agent · model provider · effort) and a thin underline row.
+ *   - once messages exist the transcript fills the upper area and the panel
+ *     pins to the bottom; the wordmark disappears (like opencode's session view).
+ *   - slash-command suggestions (typed "/" or ctrl+p) and the /models picker
+ *     render as centered raised panels above the prompt box
+ *     (↑/↓ + Enter + click + Esc, like opencode dialogs).
+ *
+ * Frames are line-diffed: only changed rows are rewritten.
  */
 import { ansi, useColor, ThinkingFilter, renderDiff, toolCallDetail } from "./display.js";
 import { TermMarkdown } from "./markdown.js";
@@ -15,7 +25,7 @@ const INV = "\x1b[7m";
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
 
 // ---------------------------------------------------------------------------
-// ANSI-safe measurement / wrapping / padding
+// ANSI-safe measurement / wrapping / clipping
 // ---------------------------------------------------------------------------
 
 function charWidth(cp: number): number {
@@ -37,6 +47,22 @@ export function visibleWidth(s: string): number {
   let w = 0;
   for (const ch of s.replace(ANSI_RE, "")) w += charWidth(ch.codePointAt(0) ?? 0);
   return w;
+}
+
+/** Byte offset keeping the rightmost `width` display columns of a plain string. */
+function chatKeepTail(s: string, width: number): number {
+  const chars = [...s];
+  let w = 0;
+  let start = chars.length;
+  while (start > 0) {
+    const cp = chars[start - 1]!.codePointAt(0) ?? 0;
+    const cw = charWidth(cp);
+    if (w + cw > width) break;
+    w += cw;
+    start -= 1;
+  }
+  const head = chars.slice(0, start).join("");
+  return head.length;
 }
 
 /** Truncate by display width (keeping ANSI) and right-pad to `width`. */
@@ -65,6 +91,32 @@ function padLine(s: string, width: number): string {
     w += 1;
   }
   return out;
+}
+
+/** Right-truncate by display width, keeping ANSI, ellipsis when clipped. */
+function truncateWidth(s: string, width: number): string {
+  if (width <= 0) return "";
+  let out = "";
+  let w = 0;
+  let i = 0;
+  while (i < s.length) {
+    if (s[i] === "\x1b") {
+      const m = /^\x1b\[[0-9;]*m/.exec(s.slice(i));
+      if (m) {
+        out += m[0];
+        i += m[0].length;
+        continue;
+      }
+    }
+    const cp = s.codePointAt(i)!;
+    const ch = String.fromCodePoint(cp);
+    const cw = charWidth(cp);
+    if (w + cw > width - 1) return `${out}…`;
+    out += ch;
+    w += cw;
+    i += ch.length;
+  }
+  return out.length === s.length ? s : out;
 }
 
 /** Word-preferred wrap that falls back to hard breaks (CJK friendly). */
@@ -108,25 +160,141 @@ export function wrapAnsi(s: string, width: number): string[] {
 }
 
 // ---------------------------------------------------------------------------
+// palette
+// ---------------------------------------------------------------------------
+
+const COLOR = useColor();
+
+// 256-color numbers used on painted (raised) rows.
+// bright ANSI colors map to xterm codes 8-15; bg 233 ≈ #121212 (opencode
+// background.raised #141414), bg 234 = one step lighter for the active row.
+const N_ACCENT = 12; // Build agent / active bar
+const N_PLAN = 13; // Plan agent
+const N_WARN = 11; // effort / warnings
+const N_GRAY = 8; // border / muted / hints
+const N_WHITE = 15; // strong text (model name)
+const BG_BOX = 233; // prompt panel background
+const BG_ACTIVE = 234; // selected popup row background
+
+/** SGR that resets style then applies optional 256 fg + 256 bg. */
+function sgr(fg: number | null, bg: number | null = BG_BOX): string {
+  if (!COLOR) return "";
+  const parts = ["0"];
+  if (fg !== null) parts.push(`38;5;${fg}`);
+  if (bg !== null) parts.push(`48;5;${bg}`);
+  return `\x1b[${parts.join(";")}m`;
+}
+
+const cc = {
+  dim: (s: string) => (COLOR ? ansi.dim(s) : s),
+  gray: (s: string) => (COLOR ? `\x1b[90m${s}${RESET}` : s),
+  red: (s: string) => (COLOR ? ansi.red(s) : s),
+  green: (s: string) => (COLOR ? ansi.green(s) : s),
+  cyan: (s: string) => (COLOR ? ansi.cyan(s) : s),
+  accent: (s: string) => (COLOR ? `\x1b[94m${s}${RESET}` : s),
+  planCol: (s: string) => (COLOR ? `\x1b[95m${s}${RESET}` : s),
+  bold: (s: string) => (COLOR ? `${BOLD}${s}${RESET}` : s),
+  inv: (s: string) => (COLOR ? `${INV}${s}${RESET}` : s),
+};
+
+// ---------------------------------------------------------------------------
+// wordmark — opencode-style lowercase block letters
+// ---------------------------------------------------------------------------
+
+// Glyph semantics (opencode logo font): each letter is 4 columns; "_" is a
+// hollow counter (a shadowed-background space), "^" a filled top (▀ painted
+// over the hollow bg), "~" a shadowed top line. Row 0 carries ascender marks.
+// Letters cover "familiar harness": o r b i t h a e s (+n for future words).
+const WM_GLYPHS: Record<string, string[]> = {
+  o: ["    ", "█▀▀█", "█__█", "▀▀▀▀"],
+  r: ["    ", "█▀▀▄", "█▀__", "▀▀▀▀"],
+  b: ["▄   ", "█▀▀█", "█__█", "▀▀▀▀"],
+  i: [" ▄  ", " █  ", " █  ", " ▀  "],
+  t: [" ▄  ", "▀▀▀▀", " █  ", " ▀  "],
+  h: ["▄   ", "█▀▀▄", "█__█", "▀~~▀"],
+  a: ["    ", "▄▀▀█", "█__█", "▀~~▀"],
+  e: ["    ", "█▀▀█", "█^^^", "▀▀▀▀"],
+  s: ["    ", "▄▀▀▀", "▀▀▄_", "▄▄▄▀"],
+  n: ["    ", "█▀▀█", "█__█", "▀~~▀"],
+};
+
+const BLANK_GLYPH = ["    ", "    ", "    ", "    "] as const;
+
+/** One glyph row of one word half. */
+function markHalf(word: string, row: number, rightHalf: boolean): string {
+  const line = [...word].map((ch) => (WM_GLYPHS[ch] ?? BLANK_GLYPH)[row]).join(" ");
+  if (!COLOR) return line.replace(/[_^~]/g, " ").replace(/ +$/, "");
+  // left half: dim gray glyphs with #333 shadow · right half: default fg
+  const shadow = rightHalf ? "\x1b[38;5;238m" : "\x1b[38;5;235m";
+  const hollow = rightHalf ? "\x1b[48;5;238m" : "\x1b[48;5;235m";
+  const fg = rightHalf ? "" : "\x1b[90m";
+  let out = "";
+  for (const char of [...line]) {
+    if (char === "_") out += `${hollow} ${RESET}`;
+    else if (char === "^") out += `${fg}${hollow}▀${RESET}`;
+    else if (char === "~") out += `${shadow}▀${RESET}`;
+    else if (char === " ") out += " ";
+    else out += `${fg}${char}${RESET}`;
+  }
+  return out;
+}
+
+/** Two-tone wordmark rows (opencode exit-splash style). */
+function markRows(withHarness: boolean): string[] {
+  const rows: string[] = [];
+  for (let row = 0; row < 4; row++) {
+    let line = markHalf("familiar", row, false);
+    if (withHarness) {
+      const right = markHalf("harness", row, true);
+      if (right !== "") line += ` ${right}`;
+    }
+    rows.push(line.replace(/ +$/, ""));
+  }
+  return rows;
+}
+
+// ---------------------------------------------------------------------------
 // transcript blocks
 // ---------------------------------------------------------------------------
 
 type Block =
-  | { kind: "user"; text: string }
+  | { kind: "user"; text: string; mode?: string }
   | { kind: "assistant"; src: string; lines: string[] | null; done: boolean; lastRender: number }
   | { kind: "reasoning"; text: string }
   | { kind: "tool"; name: string; detail: string; status: "run" | "ok" | "err"; ms?: number; extra?: string[] }
-  | { kind: "info"; text: string }
-  | { kind: "banner"; lines: string[] };
+  | { kind: "info"; text: string };
 
-const cc = {
-  dim: (s: string) => (useColor() ? ansi.dim(s) : s),
-  red: (s: string) => (useColor() ? ansi.red(s) : s),
-  green: (s: string) => (useColor() ? ansi.green(s) : s),
-  cyan: (s: string) => (useColor() ? ansi.cyan(s) : s),
-  bold: (s: string) => (useColor() ? `${BOLD}${s}${RESET}` : s),
-  inv: (s: string) => (useColor() ? `${INV}${s}${RESET}` : s),
-};
+function blockLines(b: Block, width: number): string[] {
+  switch (b.kind) {
+    case "user": {
+      // opencode-style bordered user message: agent-colored ┃ on every row
+      const bar = b.mode === "plan" ? cc.planCol("┃") : cc.accent("┃");
+      return wrapAnsi(b.text, Math.max(8, width - 3)).map((l) => `${bar} ${l}`);
+    }
+    case "assistant":
+      return b.lines ?? [];
+    case "reasoning": {
+      const out = [cc.gray("◌ thinking…")];
+      for (const piece of b.text.split("\n")) {
+        if (piece !== "") out.push(...wrapAnsi(cc.dim(piece), width));
+      }
+      return out;
+    }
+    case "tool": {
+      const mark = b.status === "run" ? cc.gray("●") : b.status === "ok" ? cc.green("✓") : cc.red("✗");
+      let head = `${mark} ${cc.cyan(b.name)}`;
+      if (b.detail) head += ` ${cc.gray(`· ${b.detail}`)}`;
+      if (b.status === "ok" && b.ms !== undefined) head += `  ${cc.gray(`${b.ms}ms`)}`;
+      const lines = [...wrapAnsi(head, width)];
+      for (const l of b.extra ?? []) lines.push(...wrapAnsi(l, width));
+      return lines;
+    }
+    case "info":
+      return b.text === ""
+        ? []
+        : b.text.split("\n").flatMap((piece) => (piece === "" ? [""] : wrapAnsi(cc.gray(piece), width)));
+  }
+}
 
 // ---------------------------------------------------------------------------
 // slash-command catalog (shared by the line REPL /help and the TUI menu)
@@ -144,7 +312,7 @@ export const TUI_COMMANDS: TuiCommand[] = [
   { name: "/new", desc: "new session with the configured defaults" },
   { name: "/sessions", desc: "list recent sessions" },
   { name: "/session", desc: "switch to a session (id)", needsArg: true },
-  { name: "/model", desc: "show or set provider/model", needsArg: true },
+  { name: "/models", desc: "pick provider/model from a list" },
   { name: "/effort", desc: "reasoning effort low|medium|high|off", needsArg: true },
   { name: "/cwd", desc: "change the working folder", needsArg: true },
   { name: "/plan", desc: "toggle plan mode" },
@@ -155,88 +323,82 @@ export const TUI_COMMANDS: TuiCommand[] = [
   { name: "/exit", desc: "quit (also /quit, /q)" },
 ];
 
-// ---------------------------------------------------------------------------
-// startup banner (block-letter "FAMILIAR HARNESS" logo, dependency free)
-// ---------------------------------------------------------------------------
-
-const GLYPHS: Record<string, string[]> = {
-  O: [" ███ ", "█   █", "█   █", "█   █", " ███ "],
-  R: ["████ ", "█   █", "████ ", "█  █ ", "█   █"],
-  B: ["████ ", "█   █", "████ ", "█   █", "████ "],
-  I: ["█████", "  █  ", "  █  ", "  █  ", "█████"],
-  T: ["█████", "  █  ", "  █  ", "  █  ", "  █  "],
-  H: ["█   █", "█   █", "█████", "█   █", "█   █"],
-  A: [" ███ ", "█   █", "█████", "█   █", "█   █"],
-  E: ["█████", "█    ", "████ ", "█    ", "█████"],
-  N: ["█   █", "██  █", "█ █ █", "█  ██", "█   █"],
-  S: [" ████", "█    ", " ███ ", "    █", "████ "],
-  " ": ["     ", "     ", "     ", "     ", "     "],
-};
-
-function logoBlock(word: string): string[] {
-  const letters = [...word.toUpperCase()].map((ch) => GLYPHS[ch] ?? GLYPHS[" "]!);
-  const rows: string[] = ["", "", "", "", ""];
-  for (let r = 0; r < 5; r++) {
-    rows[r] = letters.map((g) => g[r]).join(" ").replace(/ +$/, "").replace(/ +(█)/g, " $1");
-  }
-  return rows;
+// model catalog fed by the caller (config provider names + models.list RPC)
+export interface TuiModelEntry {
+  provider: string;
+  id: string;
+  contextTokens?: number;
 }
 
-function blockLines(b: Block, width: number): string[] {
-  switch (b.kind) {
-    case "user":
-      return wrapAnsi(`${cc.cyan("❯")} ${b.text}`, width);
-    case "assistant": {
-      if (b.lines === null) {
-        const md = new TermMarkdown();
-        const out = md.push(b.src) + md.flush();
-        b.lines = out === "" ? [""] : out.replace(/\n+$/, "").split("\n");
-        b.lastRender = Date.now();
-      }
-      return b.lines;
-    }
-    case "reasoning": {
-      const out = [cc.dim("◌ thinking…")];
-      for (const piece of b.text.split("\n")) {
-        if (piece !== "") out.push(...wrapAnsi(cc.dim(piece), width));
-      }
-      return out;
-    }
-    case "tool": {
-      const mark = b.status === "run" ? cc.dim("●") : b.status === "ok" ? cc.green("✓") : cc.red("✗");
-      let head = `${mark} ${cc.cyan(b.name)}`;
-      if (b.detail) head += ` ${cc.dim(`· ${b.detail}`)}`;
-      if (b.status === "ok" && b.ms !== undefined) head += `  ${cc.dim(`${b.ms}ms`)}`;
-      const lines = [...wrapAnsi(head, width)];
-      for (const l of b.extra ?? []) lines.push(...wrapAnsi(l, width));
-      return lines;
-    }
-    case "info":
-      return b.text === ""
-        ? []
-        : b.text.split("\n").flatMap((piece) => (piece === "" ? [""] : wrapAnsi(cc.dim(piece), width)));
-    case "banner":
-      return b.lines;
-  }
+export interface TuiModelGroup {
+  provider: string;
+  models: TuiModelEntry[];
+  error?: string;
 }
 
-// ---------------------------------------------------------------------------
-// screen manager
-// ---------------------------------------------------------------------------
-
-export interface TuiInfo {
-  app: string;
-  title: string;
-  model: string;
-  mode: "build" | "plan" | string;
-  cwd: string;
-}
+/** One flat popup row. */
+type PopupRow =
+  | { kind: "header"; text: string }
+  | { kind: "cmd"; cmd: TuiCommand }
+  | { kind: "model"; entry: TuiModelEntry };
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+const PLACEHOLDERS = ["Fix a TODO in the codebase", "What is the tech stack of this project?", "Fix broken tests"];
+
 const NAV_KEYS = new Set([
   "up", "down", "left", "right", "pageup", "pagedown", "home", "end",
   "escape", "delete", "tab",
 ]);
+
+export interface TuiInfo {
+  app: string;
+  title: string;
+  provider: string;
+  model: string;
+  mode: "build" | "plan" | string;
+  effort?: string;
+  cwd: string;
+}
+
+// prompt metadata row (inside the raised panel), width-budgeted like
+// opencode's promptMetadataLayout: first candidate that fits, else truncate.
+function metadataRow(info: TuiInfo, width: number): string {
+  type Piece = { text: string; fg: number | null; bold?: boolean };
+  const agentLabel = info.mode === "plan" ? "Plan" : "Build";
+  const agentFg = info.mode === "plan" ? N_PLAN : N_ACCENT;
+  const head: Piece[] = [
+    { text: agentLabel, fg: agentFg },
+    { text: "·", fg: N_GRAY },
+    { text: info.model === "" ? "-" : info.model, fg: N_WHITE },
+  ];
+  const provider = info.provider && info.provider !== "" ? [{ text: info.provider, fg: N_GRAY }] : [];
+  const effort = info.effort && info.effort !== "" ? [{ text: info.effort, fg: N_WARN, bold: true }] : [];
+  // candidates: full → drop provider (all fragments are ASCII)
+  const candidates: Piece[][] = [
+    [...head, ...provider, ...effort],
+    [...head, ...effort],
+  ];
+  const plainW = (list: Piece[]) => list.map((p) => p.text).join(" ").length;
+  let chosen = candidates[1]!;
+  for (const cand of candidates) {
+    if (plainW(cand) <= width) {
+      chosen = cand;
+      break;
+    }
+  }
+  if (plainW(chosen) > width) {
+    // last resort: truncate the model id
+    const fixed = plainW(chosen) - chosen[2]!.text.length;
+    chosen[2]!.text = truncateWidth(chosen[2]!.text, Math.max(3, width - fixed - 1));
+  }
+  let out = "";
+  for (const p of chosen) {
+    out += `${sgr(p.fg, BG_BOX)}${p.bold ? `${BOLD}${p.text}` : p.text}${RESET}`;
+    out += COLOR ? `${sgr(null, BG_BOX)} ` : " ";
+  }
+  return out;
+}
 
 export class FullScreenTui {
   private blocks: Block[] = [];
@@ -250,7 +412,10 @@ export class FullScreenTui {
   private busy = false;
   private startedAt = 0;
   private usage = { prompt: 0, completion: 0 };
-  private info: TuiInfo = { app: "Familiar Harness", title: "", model: "", mode: "build", cwd: "" };
+  private info: TuiInfo = {
+    app: "Familiar Harness", title: "", provider: "", model: "", mode: "build", cwd: "",
+  };
+  private placeholder: string = PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)]!;
   private running = false;
   private spinnerTimer: ReturnType<typeof setInterval> | null = null;
   private spinnerFrame = 0;
@@ -259,13 +424,20 @@ export class FullScreenTui {
   private toolCount = 0;
   private assistantStream: Block & { kind: "assistant" } | null = null;
   private reasoningStream: Block & { kind: "reasoning" } | null = null;
-  // slash-command suggestion popup
-  private menu: TuiCommand[] | null = null;
-  private menuSel = 0;
-  /** 0-based screen row → absolute menu index (for mouse clicks) */
-  private menuRowAt: number[] = [];
+  // popups: slash-command suggestions ("commands") or the model picker ("models")
+  private popupKind: "commands" | "models" | null = null;
+  private cmdItems: TuiCommand[] = [];
+  private modelGroups: TuiModelGroup[] = [];
+  private popupSel = 0;
+  /** 0-based screen row → absolute popup row index (for mouse clicks) */
+  private popupRowAt: number[] = [];
+  /** transient notice rendered above the prompt panel until the timer expires */
+  private toastMsg = "";
+  private toastTimer: ReturnType<typeof setTimeout> | null = null;
   /** caller hook: Tab pressed with no popup open (= toggling build/plan) */
   onModeToggle?: () => void;
+  /** caller hook: a model is picked in the /models popup */
+  onModelPick?: (provider: string, model: string) => void | Promise<void>;
 
   // ---- lifecycle ---------------------------------------------------------
 
@@ -273,10 +445,6 @@ export class FullScreenTui {
     this.running = true;
     this.refreshSize();
     process.stdout.write("\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1006h\x1b[2J");
-    // show the startup banner first (top of the flow); output then anchors
-    // as usual — End or any new submit jumps back to the tail
-    const max = Math.max(0, this.flow().length - (this.height - 4));
-    if (max > 0) this.scrollOffset = max;
     this.frame();
   }
 
@@ -312,24 +480,8 @@ export class FullScreenTui {
 
   // ---- content feeding -----------------------------------------------------
 
-  /** OpenCode-style startup banner: block-letter "FAMILIAR HARNESS" + hint. */
-  showBanner(version = ""): void {
-    const logoRows = [...logoBlock("Familiar"), ...logoBlock("Harness")].map((r) =>
-      useColor() ? `${BOLD}${"\x1b[36m"}${r}${RESET}` : r,
-    );
-    const rows: string[] = [...logoRows];
-    rows.push("");
-    rows.push(
-      `  ${cc.bold("◍ Familiar Harness")}${version ? cc.dim(` ${version}`) : ""} — ` +
-        cc.dim("/ for commands · Tab toggles build/plan · ↑/↓ scroll"),
-    );
-    this.blocks.unshift({ kind: "banner", lines: rows });
-    this.flowCache = null;
-    this.frameSoon();
-  }
-
-  setUserLine(text: string): void {
-    this.blocks.push({ kind: "user", text });
+  setUserLine(text: string, mode?: string): void {
+    this.blocks.push({ kind: "user", text, mode });
     this.frameSoon();
   }
 
@@ -339,9 +491,24 @@ export class FullScreenTui {
     this.frameSoon();
   }
 
-  noSessionNote(): void {
-    this.blocks.push({ kind: "info", text: "(no session yet — the first message creates one)" });
-    this.frameSoon();
+  /** Transient notice above the prompt panel (auto-hides). */
+  toast(text: string, ms = 2600): void {
+    this.toastMsg = text;
+    if (this.toastTimer) clearTimeout(this.toastTimer);
+    this.toastTimer = setTimeout(() => {
+      this.toastMsg = "";
+      this.toastTimer = null;
+      this.frame();
+    }, ms);
+    this.frame();
+  }
+
+  clearToast(): void {
+    this.toastMsg = "";
+    if (this.toastTimer) {
+      clearTimeout(this.toastTimer);
+      this.toastTimer = null;
+    }
   }
 
   setSessionInfo(info: Partial<TuiInfo>): void {
@@ -368,8 +535,7 @@ export class FullScreenTui {
 
   clearInput(): void {
     this.input = "";
-    this.menu = null;
-    this.menuSel = 0;
+    this.closePopup();
     this.frame();
   }
 
@@ -379,7 +545,7 @@ export class FullScreenTui {
     this.frame();
   }
 
-  /** Persisted history ("lfamiliar chat --session") loaded before start(). */
+  /** Persisted history ("familiar chat --session") loaded before start(). */
   loadHistory(messages: ReadonlyArray<{ role: string; content?: string; name?: string; meta?: unknown }>): void {
     for (const m of messages) {
       const meta = (m.meta ?? {}) as { ephemeral?: boolean };
@@ -399,6 +565,42 @@ export class FullScreenTui {
       }
     }
     this.flowCache = null;
+  }
+
+  // ---- model catalog (fed progressively from familiar.ts) -----------------------
+
+  /** Land the selection on the current model (or the first entry). */
+  private landSelection(): void {
+    const flat = this.popupFlat() ?? [];
+    let firstEntry = -1;
+    let current = -1;
+    for (let i = 0; i < flat.length; i++) {
+      const r = flat[i];
+      if (!r || r.kind !== "model") continue;
+      if (firstEntry === -1) firstEntry = i;
+      if (current === -1 && this.isCurrent(r.entry)) current = i;
+    }
+    this.popupSel = current !== -1 ? current : firstEntry !== -1 ? firstEntry : 0;
+  }
+
+  /** Groups arrive with models referencing their own provider; normalize so
+   * every entry carries the group's provider id (models.list may omit it). */
+  setModelGroups(groups: readonly TuiModelGroup[]): void {
+    this.modelGroups = groups.map((g) => ({
+      provider: g.provider,
+      error: g.error,
+      models: g.models.map((m) => ({
+        provider: g.provider,
+        id: m.id,
+        ...(m.contextTokens !== undefined ? { contextTokens: m.contextTokens } : {}),
+      })),
+    }));
+    if (this.popupKind === "models") {
+      const flat = this.popupFlat() ?? [];
+      const onHeader = flat[this.popupSel]?.kind === "header";
+      if (onHeader || this.popupSel >= flat.length) this.landSelection();
+      this.frame();
+    }
   }
 
   // ---- AgentEvent printer -------------------------------------------------
@@ -498,8 +700,7 @@ export class FullScreenTui {
     if (b.lines !== null && Date.now() - b.lastRender < (b.done ? 900 : 150)) return;
     const md = new TermMarkdown();
     const out = md.push(b.src) + md.flush();
-    const rendered = out === "" ? [""] : out.replace(/\n+$/, "").split("\n");
-    b.lines = rendered;
+    b.lines = out === "" ? [""] : out.replace(/\n+$/, "").split("\n");
     b.lastRender = Date.now();
   }
 
@@ -535,11 +736,32 @@ export class FullScreenTui {
     }, 50);
   }
 
+  /** Render one frame: recompose and rewrite only the changed rows. */
+  frame(): void {
+    if (!this.running) return;
+    this.refreshSize();
+    this.flowCache = null; // blocks may have changed — rebuild the transcript
+    const rows = this.compose();
+    let out = "";
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i] ?? "";
+      if (this.prevRows[i] === row) continue;
+      out += `\x1b[${i + 1};1H\x1b[2K${row}`;
+      this.prevRows[i] = row;
+    }
+    for (let i = rows.length; i < this.prevRows.length; i++) {
+      out += `\x1b[${i + 1};1H\x1b[2K`;
+      this.prevRows[i] = null;
+    }
+    this.prevRows.length = rows.length;
+    process.stdout.write(out);
+  }
+
   // ---- scrolling ------------------------------------------------------------
 
   private flow(): string[] {
     if (this.flowCache) return this.flowCache;
-    const inner = Math.max(10, this.width - 4);
+    const inner = Math.max(10, this.width - 5);
     for (const b of this.blocks) {
       if (b.kind === "assistant") this.reRenderAssistant(b);
     }
@@ -568,7 +790,7 @@ export class FullScreenTui {
   }
 
   private clampScroll(): void {
-    const view = Math.max(1, this.height - 4);
+    const view = Math.max(1, this.height - this.bottomHeight());
     const max = Math.max(0, this.flow().length - view);
     if (this.scrollOffset > max) this.scrollOffset = max;
   }
@@ -581,168 +803,429 @@ export class FullScreenTui {
 
   /** To the very top. */
   scrollTop(): void {
-    const view = Math.max(1, this.height - 4);
-    void view;
+    const view = Math.max(1, this.height - this.bottomHeight());
     const max = Math.max(0, this.flow().length - view);
     this.scrollOffset = max;
     this.frame();
   }
 
-  // ---- painting ------------------------------------------------------------
+  // ---- bottom area metrics ------------------------------------------------
 
-  frame(): void {
-    if (!this.running) return;
-    this.refreshSize();
-    this.flowCache = null; // blocks changed (or cache semantics) — rebuild
-    const rows = this.compose();
-    let out = "";
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i] ?? "";
-      if (this.prevRows[i] === row) continue;
-      out += `\x1b[${i + 1};1H\x1b[2K${row}`;
-      this.prevRows[i] = row;
-    }
-    for (let i = rows.length; i < this.prevRows.length; i++) {
-      out += `\x1b[${i + 1};1H\x1b[2K`;
-      this.prevRows[i] = null;
-    }
-    this.prevRows.length = rows.length;
-    process.stdout.write(out);
+  /** Rows below the transcript: [pad] editor meta [underline] hints. */
+  private bottomHeight(): number {
+    return this.height < 14 ? 3 : 5;
   }
+
+  /** Prompt panel width + left origin (opencode: maxWidth 75, centered). */
+  private boxLayout(): { w: number; x: number } {
+    const boxW = Math.max(24, Math.min(75, this.width - 4));
+    return { w: boxW, x: Math.floor((this.width - boxW) / 2) };
+  }
+
+  // ---- painting helpers ------------------------------------------------------
+
+  /**
+   * One painted panel row: pre-painted fragments (their visible widths must
+   * fit `width`), then padding inside the raised background to the row end.
+   */
+  private panelRow(segs: string[], width: number, bg: number | null = BG_BOX): string {
+    let body = "";
+    let vis = 0;
+    for (const s of segs) {
+      const v = visibleWidth(s);
+      if (vis + v > width) break;
+      body += s;
+      vis += v;
+    }
+    const pad = Math.max(0, width - vis);
+    let row = "";
+    if (COLOR && bg !== null) row += sgr(null, bg);
+    row += body;
+    if (COLOR && bg !== null) {
+      if (pad > 0) row += sgr(null, bg) + " ".repeat(pad);
+      row += RESET;
+    } else {
+      row += " ".repeat(pad);
+    }
+    return row;
+  }
+
+  /** Paint one popup/panel fragment with optional 256 fg (bg-confirmed). */
+  private frag(fg: number | null, text: string, bold = false, bg: number | null = BG_BOX): string {
+    if (!COLOR) return bold ? `${BOLD}${text}${RESET}` : text;
+    return `${sgr(fg, bg)}${bold ? `${BOLD}${text}` : text}${RESET}`;
+  }
+
+  /** Background-painted gap (keeps the panel unbroken between fragments). */
+  private gap(w: number): string {
+    if (w <= 0) return "";
+    return COLOR ? `${sgr(null, BG_BOX)}${" ".repeat(w)}` : " ".repeat(w);
+  }
+
+  /** Editor row fragment: accent bar + placeholder or typed text. */
+  private editorFragment(boxW: number): string {
+    const bar = this.info.mode === "plan"
+      ? `${sgr(N_PLAN, BG_BOX)}┃`
+      : `${sgr(N_ACCENT, BG_BOX)}┃`;
+    const available = Math.max(1, boxW - 5); // bar + 2 lead + cursor + margin
+    if (this.input === "") {
+      const ph = `Ask anything… "${this.placeholder}"`;
+      const text = truncateWidth(ph, available);
+      return `${bar}${RESET}  ${sgr(N_GRAY, BG_BOX)}${text}${RESET}`;
+    }
+    const clipped = padLine(this.input, available);
+    const caret = COLOR ? `${INV} ${RESET}` : "_";
+    return `${bar}${RESET}  ${sgr(N_WHITE, BG_BOX)}${clipped}${RESET}${caret}`;
+  }
+
+  /** Metadata row fragment (agent · model provider · effort). */
+  private metaFragment(boxW: number): string {
+    return metadataRow(this.info, Math.max(8, boxW - 4));
+  }
+
+  // ---- bottom fixed area ------------------------------------------------------
+
+  /** The rows below the transcript area (opencode prompt + footer). */
+  private composeBottom(): string[] {
+    const { w: boxW, x: bx } = this.boxLayout();
+    const slim = this.height < 14;
+    const out: string[] = [];
+    if (!slim) out.push(" ".repeat(bx) + this.panelRow([], boxW));
+    out.push(" ".repeat(bx) + this.panelRow([this.editorFragment(boxW)], boxW));
+    out.push(" ".repeat(bx) + this.panelRow([this.metaFragment(boxW)], boxW));
+    if (!slim) {
+      if (this.toastMsg !== "") {
+        out.push(" ".repeat(bx) + this.panelRow([this.frag(N_GRAY, truncateWidth(this.toastMsg, boxW))], boxW));
+      } else {
+        out.push(" ".repeat(bx) + cc.gray("╹"));
+      }
+    }
+    out.push(this.composeHints());
+    return out;
+  }
+
+  /** Last row: left cwd/status, right keyboard hints (opencode footer row). */
+  private composeHints(): string {
+    const w = this.width;
+    let left = "";
+    if (this.toastMsg !== "" && this.height < 14) {
+      left = cc.gray(truncateWidth(this.toastMsg, Math.max(4, Math.floor(w / 3))));
+    } else if (this.busy) {
+      const g = SPINNER_FRAMES[this.spinnerFrame % SPINNER_FRAMES.length] ?? "⠋";
+      left = cc.dim(`${g} ${((Date.now() - this.startedAt) / 1000).toFixed(1)}s`);
+    } else if (this.info.cwd !== "") {
+      // opencode footer: shorten $HOME to ~ and keep the tail when long
+      let display = this.info.cwd;
+      const home = process.env.HOME ?? "";
+      if (home && display.startsWith(home)) display = `~${display.slice(home.length)}`;
+      const maxW = Math.max(8, Math.floor(w / 3));
+      if (visibleWidth(display) > maxW) {
+        display = `…${display.slice(chatKeepTail(display, maxW - 1))}`;
+      }
+      left = cc.gray(display);
+    }
+    const pairs: Array<[string, string]> = this.popupKind
+      ? [["enter", "select"], ["esc", "close"]]
+      : [["tab", "switch agent"], ["ctrl+p", "commands"]];
+    const render = ([key, label]: [string, string]): string =>
+      this.popupKind ? ` ${label} ${cc.gray(key)} ` : ` ${key} ${cc.gray(label)} `;
+    const hintStr = pairs.map(render).join(" ");
+    const lw = visibleWidth(left);
+    const rw = visibleWidth(hintStr);
+    if (lw + rw > w - 2) {
+      // narrow terminal: hints win
+      return padLine(hintStr, w);
+    }
+    const mid = " ".repeat(Math.max(1, w - lw - rw));
+    return padLine(left + mid + hintStr, w);
+  }
+
+  // ---- wordmark ------------------------------------------------------------
+
+  /** Splash wordmark rows + width (null when the screen is too small). */
+  private wordmark(): { rows: string[]; width: number; left: number } | null {
+    const w = this.width;
+    if (w < 28) return null;
+    const rows = markRows(w >= 61);
+    let total = 0;
+    for (const r of rows) total = Math.max(total, visibleWidth(r));
+    return { rows, width: total, left: Math.max(0, Math.floor((w - total) / 2)) };
+  }
+
+  // ---- compose ------------------------------------------------------------
 
   private compose(): string[] {
     const w = this.width;
-    const rows: string[] = [];
-    const dimRun = (n: number): string => cc.dim("─".repeat(n));
+    const h = this.height;
+    const rows: string[] = new Array(h).fill("");
+    const hasTranscript = this.blocks.length > 0;
 
-    // top border: title left, model right
-    {
-      const L = ` ◍ ${this.info.app}${this.info.title ? ` · ${this.info.title}` : ""} `;
-      const R = this.info.model === "" ? "" : ` ${this.info.model} `;
-      const mid = dimRun(Math.max(0, w - visibleWidth(L) - visibleWidth(R) - 2));
-      rows.push(`╭${cc.dim(L)}${mid}${R === "" ? "" : cc.dim(R)}╮`);
-    }
+    const bottom = this.composeBottom();
+    const bottomH = bottom.length;
+    const topH = Math.max(0, h - bottomH);
 
-    // transcript viewport
-    const view = Math.max(1, this.height - 4);
-    this.clampScroll();
-    const flow = this.flow();
-    const start = Math.max(0, flow.length - view - this.scrollOffset);
-    const window = flow.slice(start, start + view);
-    for (let i = 0; i < view; i++) {
-      let line = window[i] ?? "";
-      if (i === 0 && start > 0) line = line === "" ? cc.dim("▲") : `${cc.dim("▲")} ${line}`;
-      rows.push(`│${padLine(` ${line}`, Math.max(0, w - 2))}│`);
-    }
-
-    // input separator + editor row
-    rows.push(`├${dimRun(w - 2)}┤`);
-    {
-      const prompt = ` ${cc.cyan("❯")} `;
-      const editor = prompt + this.input;
-      const caret = useColor() ? "\x1b[7m \x1b[0m" : "_";
-      rows.push(`│${padLine(editor + caret, Math.max(0, w - 2))}│`);
-    }
-
-    // bottom border: mode · model left, activity/tokens + cwd right
-    {
-      const left = ` ${this.info.mode === "plan" ? "plan" : "build"} · ${this.info.model} `;
-      const leftRendered =
-        this.info.mode === "plan"
-          ? ` ${cc.bold(cc.cyan("plan"))} · ${this.info.model} `
-          : cc.dim(left);
-      const bits: string[] = [];
-      if (this.busy) {
-        const g = SPINNER_FRAMES[this.spinnerFrame % SPINNER_FRAMES.length] ?? "⠋";
-        bits.push(`${g} ${((Date.now() - this.startedAt) / 1000).toFixed(1)}s`);
+    if (hasTranscript) {
+      // transcript fills the area above the prompt panel
+      this.clampScroll();
+      const flow = this.flow();
+      const start = Math.max(0, flow.length - topH - this.scrollOffset);
+      const window = flow.slice(start, start + topH);
+      for (let i = 0; i < topH; i++) {
+        let line = window[i] ?? "";
+        if (i === 0 && start > 0) line = line === "" ? cc.dim("▲") : `${cc.dim("▲")} ${line}`;
+        rows[i] = padLine(`  ${line}`, w);
       }
-      if (this.usage.prompt || this.usage.completion) bits.push(`↑${this.usage.prompt} ↓${this.usage.completion} tok`);
-      const cwdBase = this.info.cwd.split("/").filter(Boolean).pop() ?? "";
-      if (cwdBase) bits.push(cwdBase);
-      const right = bits.length > 0 ? ` ${bits.join(" · ")} ` : "";
-      const mid = dimRun(Math.max(0, w - visibleWidth(left) - visibleWidth(right) - 2));
-      rows.push(`╰${leftRendered}${mid}${right === "" ? "" : cc.dim(right)}╯`);
+    } else {
+      // startup splash: wordmark block pinned slightly above center
+      // (opencode hides the logo on short terminals, h < 12)
+      const mark = this.height >= 12 ? this.wordmark() : null;
+      if (mark) {
+        const blank = Math.max(0, topH - mark.rows.length - 1);
+        let y = Math.floor(blank * 0.4);
+        for (const m of mark.rows) {
+          rows[y] = padLine(" ".repeat(mark.left) + m, w);
+          y += 1;
+        }
+      }
     }
 
-    this.composeMenuOverlay(rows);
-    return rows.map((r) => padLine(r, w));
+    for (let i = 0; i < bottomH; i++) rows[topH + i] = bottom[i] ?? padLine("", w);
+
+    this.composePopupOverlay(rows, topH);
+    for (let i = 0; i < rows.length; i++) {
+      if (rows[i] === undefined || rows[i] === null) rows[i] = padLine("", w);
+    }
+    return rows as string[];
   }
 
-  /** Overlay the slash-command popup on the bottom transcript rows. */
-  private composeMenuOverlay(rows: string[]): void {
-    if (!this.menu || this.menu.length === 0) {
-      this.menuRowAt = [];
-      return;
+  // ---- popups -------------------------------------------------------------
+
+  /** Flat filtered popup rows for the active kind (null when closed). */
+  private popupFlat(): PopupRow[] | null {
+    if (this.popupKind === "commands") {
+      return this.cmdItems.map((c): PopupRow => ({ kind: "cmd", cmd: c }));
     }
-    const menu = this.menu;
-    const maxItems = Math.max(1, Math.min(menu.length, this.height - 5));
-    const from = Math.max(0, Math.min(this.menuSel - (maxItems - 1), menu.length - maxItems));
-    const w = this.width;
-    const nameW = Math.min(12, Math.max(...menu.map((c) => c.name.length)));
-    this.menuRowAt = [];
-    for (let i = 0; i < maxItems; i++) {
-      const c = menu[from + i];
-      if (!c) break;
-      const absolute = from + i;
-      const selected = absolute === this.menuSel;
-      const body = ` ${selected ? "❯" : " "} ${c.name.padEnd(nameW, " ")}${c.desc ? `  ${c.desc}` : ""}`;
-      const line = selected ? cc.inv(padLine(body, Math.max(0, w - 4))) : cc.dim(body);
-      const rowIndex = this.height - 3 - maxItems + i;
-      rows[rowIndex] = `│${padLine(` ${line}`, Math.max(0, w - 2))}│`;
-      this.menuRowAt[rowIndex] = absolute;
+    if (this.popupKind !== "models") return null;
+    const q = this.input.trim().toLowerCase();
+    const rows: PopupRow[] = [];
+    if (this.modelGroups.length === 0) {
+      rows.push({ kind: "header", text: "loading providers…" });
+      return rows;
     }
+    for (const g of this.modelGroups) {
+      const matches = (id: string): boolean =>
+        q === "" || `${g.provider}/${id}`.toLowerCase().includes(q) || id.toLowerCase().includes(q);
+      const entries = g.models.filter((m) => matches(m.id));
+      if (entries.length === 0 && q !== "" && g.models.length > 0) continue;
+      rows.push({ kind: "header", text: g.error ? `${g.provider} · unavailable` : g.provider });
+      for (const m of entries) {
+        rows.push({ kind: "model", entry: m });
+      }
+      if (entries.length === 0 && g.error) rows.push({ kind: "header", text: `→ ${truncateWidth(g.error, 46)}` });
+    }
+    if (rows.length === 0) rows.push({ kind: "header", text: "no matching models" });
+    return rows;
   }
 
-  /** Re-filter the suggestion popup from the current editor text. */
-  private refreshMenu(): void {
-    const v = this.input;
+  /** ● marker for the session's current model. */
+  private isCurrent(e: TuiModelEntry): boolean {
+    if (this.info.provider !== "" && e.provider !== this.info.provider) return false;
+    return this.info.model === "" || e.id === this.info.model;
+  }
+
+  /** Open the /models picker (caller feeds groups via setModelGroups). */
+  openModelsPopup(): void {
+    this.popupKind = "models";
+    this.landSelection();
+    this.frame();
+  }
+
+  /** Open the command palette (ctrl+p) or the slash-driven suggestion list. */
+  openCommandPopup(): void {
+    this.popupKind = "commands";
+    this.popupSel = 0;
+    this.refreshCmdItems(this.input);
+    this.frame();
+  }
+
+  private closePopup(): void {
+    if (this.popupKind === "models") this.input = "";
+    this.popupKind = null;
+    this.cmdItems = [];
+    this.popupSel = 0;
+  }
+
+  /** Re-filter the command popup list from the current editor text. */
+  private refreshCmdItems(v: string): void {
+    const q = v.toLowerCase();
     if (v.startsWith("/") && !v.includes(" ")) {
-      const q = v.toLowerCase();
-      const items = TUI_COMMANDS.filter((c) => c.name.startsWith(q));
-      this.menu = items.length > 0 ? items : null;
-      if (this.menu && this.menuSel >= this.menu.length) this.menuSel = 0;
-      if (!this.menu) this.menuSel = 0;
+      this.cmdItems = TUI_COMMANDS.filter((c) => c.name.startsWith(q));
     } else {
-      this.menu = null;
+      this.cmdItems = q === ""
+        ? [...TUI_COMMANDS]
+        : TUI_COMMANDS.filter(
+            (c) => c.name.toLowerCase().includes(q) || c.desc.toLowerCase().includes(q),
+          );
     }
+    if (this.cmdItems.length === 0) this.closePopup();
+    if (this.popupSel >= this.cmdItems.length) this.popupSel = 0;
   }
 
-  /** Accept suggestion #i: fill the editor (arg commands) or return the line. */
-  private acceptMenu(i: number): string | null {
-    const c = this.menu?.[i];
-    if (!c) return null;
-    this.menu = null;
-    this.menuSel = 0;
-    if (c.needsArg) {
-      // completion only: keep the editor in "waiting for argument" state
-      this.input = `${c.name} `;
-    } else {
-      // submitted directly — same contract as a plain Enter (editor is cleared)
+  moveMenu(delta: number): void {
+    const rows = this.popupFlat();
+    if (!rows || rows.length === 0) return;
+    let sel = this.popupSel;
+    for (let step = 0; step < rows.length; step++) {
+      sel = sel + delta;
+      if (sel < 0) sel = rows.length - 1;
+      if (sel >= rows.length) sel = 0;
+      const r = rows[sel];
+      if (r && r.kind !== "header") break;
+    }
+    this.popupSel = sel;
+    this.frame();
+  }
+
+  /** Accept the highlighted popup row (Enter / Tab / click). */
+  private acceptPopup(i: number): string | null {
+    const rows = this.popupFlat();
+    const len = rows?.length ?? 0;
+    const r = len === 0 ? undefined : (rows ?? [])[Math.max(0, Math.min(i, len - 1))];
+    if (!r || r.kind === "header") {
+      // land on the nearest selectable row (headers are not selectable)
+      const idx = r ? i : 0;
+      for (let d = 1; d < len; d++) {
+        const fwd = (idx + d) % len;
+        if (rows![fwd] && rows![fwd]!.kind !== "header") return this.acceptPopup(fwd);
+      }
+      for (let d = 1; d < len; d++) {
+        const back = ((idx - d) % len + len) % len;
+        if (rows![back] && rows![back]!.kind !== "header") return this.acceptPopup(back);
+      }
+      return null;
+    }
+    if (r.kind === "cmd") {
+      const c = r.cmd;
+      this.closePopup();
       this.input = "";
+      if (c.needsArg) {
+        // completion only: keep waiting for the argument
+        this.input = `${c.name} `;
+        this.frame();
+        return null;
+      }
+      this.frame();
+      return c.name;
     }
+    // model picked — same contract as /model <provider/model>
+    const e = r.entry;
+    this.closePopup();
     this.frame();
-    return c.needsArg ? null : c.name;
+    void this.onModelPick?.(e.provider, e.id);
+    return null;
   }
 
-  private moveMenu(delta: number): void {
-    const len = this.menu?.length ?? 0;
-    if (len === 0) return;
-    this.menuSel = (this.menuSel + delta + len) % len;
-    this.frame();
+  /** Render the popup as a centered raised panel above the prompt box. */
+  private composePopupOverlay(rows: string[], topH: number): void {
+    this.popupRowAt = [];
+    if (!this.popupKind) return;
+    const flat = this.popupFlat();
+    if (!flat || flat.length === 0) return;
+    const w = this.width;
+    const { x: px } = this.boxLayout();
+    const pw = this.boxLayout().w;
+    const avail = topH; // rows above the prompt panel
+    if (avail < 3) return; // no room even for the panel skeleton
+    const headerH = avail >= 5 ? 1 : 0; // title row when there is room
+    const hintH = 1;
+    const listH = Math.max(1, Math.min(flat.length, avail - headerH - hintH));
+    const panelH = headerH + listH + hintH;
+    const startY = topH - panelH;
+    const from = Math.max(0, Math.min(this.popupSel - (listH - 1), flat.length - listH));
+    const B = sgr(null, BG_BOX);
+
+    // title row
+    let y = startY;
+    if (headerH > 0) {
+      const titleText = this.popupKind === "models" ? "Select model" : "Select a command";
+      const title = this.frag(N_WHITE, titleText, true);
+      const esc = this.gap(1) + this.frag(N_GRAY, "esc");
+      const used = visibleWidth(title) + visibleWidth(esc) + 2;
+      const midGap = Math.max(1, pw - used - 1);
+      rows[y] = " ".repeat(px) + this.panelRow([this.gap(2), title, this.gap(midGap), esc, this.gap(1)], pw);
+      y += 1;
+    }
+
+    // list rows
+    for (let i = 0; i < listH; i++) {
+      const abs = from + i;
+      const r = flat[abs];
+      const selected = abs === this.popupSel;
+      const bg = selected ? BG_ACTIVE : BG_BOX;
+      if (!r) continue;
+      let segs: string[];
+      if (r.kind === "header") {
+        segs = [
+          this.gap(2),
+          this.frag(N_GRAY, truncateWidth(r.text, pw - 5), false, bg),
+        ];
+      } else if (r.kind === "model") {
+        const e = r.entry;
+        const ctx = e.contextTokens ? fmtCtx(e.contextTokens) : "";
+        segs = [
+          selected ? this.frag(N_ACCENT, "┃", false, bg) : this.gap(1),
+          this.isCurrent(e) ? this.frag(N_ACCENT, "●", false, bg) : this.gap(1),
+          this.gap(1),
+          this.frag(null, truncateWidth(e.id, Math.max(3, pw - 12)), false, bg),
+          ...(ctx ? [this.gap(2), this.frag(N_GRAY, ctx, false, bg)] : []),
+        ];
+      } else {
+        const c = r.cmd;
+        const bar = selected ? this.frag(N_ACCENT, "┃", false, bg) : this.gap(1);
+        const desc = c.desc
+          ? this.frag(N_GRAY, truncateWidth(c.desc, Math.max(0, pw - c.name.length - 9)), false, bg)
+          : "";
+        segs = [bar, this.gap(1), this.frag(null, c.name, false, bg), this.gap(2) + desc];
+      }
+      rows[y] = " ".repeat(px) + this.panelRow(segs, pw, bg);
+      if (r.kind !== "header") this.popupRowAt[y] = abs;
+      y += 1;
+    }
+
+    // footer hint row: left "close esc" · right "select enter"
+    const leftSegs = [this.gap(2), this.frag(null, "close"), this.gap(1), this.frag(N_GRAY, "esc")];
+    const rightSegs = [this.frag(null, "select"), this.gap(1), this.frag(N_GRAY, "enter"), this.gap(1)];
+    const leftW = visibleWidth(leftSegs.join(""));
+    const rightW = visibleWidth(rightSegs.join(""));
+    const midGap = Math.max(1, pw - leftW - rightW);
+    rows[y] = " ".repeat(px) + this.panelRow([...leftSegs, this.gap(midGap), ...rightSegs], pw);
   }
 
-  /** Mouse click (SGR): select the popup row on the given 1-based screen row. */
+  // ---- mouse --------------------------------------------------------------
+
+  /** Mouse click (SGR): select/accept the popup row on the given row. */
   click(row: number, _col: number): string | null {
-    if (!this.menu) return null;
-    const absolute = this.menuRowAt[row - 1];
-    if (absolute === undefined) return null;
-    this.menuSel = absolute;
-    return this.acceptMenu(absolute);
+    const abs = this.popupRowAt[row - 1];
+    if (abs === undefined) return null;
+    this.popupSel = abs;
+    return this.acceptPopup(abs);
+  }
+
+  /** Mouse wheel (SGR 1006): "<64 b ; c ; r M" up / "<65 … M" down. */
+  wheel(sequence: string): boolean {
+    const m = /^\x1b\[<(64|65);\d+;\d+M$/.exec(sequence);
+    if (!m) return false;
+    if (this.popupKind) {
+      this.moveMenu(m[1] === "64" ? -1 : 1);
+      return true;
+    }
+    this.scroll((m[1] === "64" ? -1 : 1) * 3);
+    return true;
   }
 
   // ---- editor / keys ---------------------------------------------------------
 
-  /** Handle a keypress; returns the submitted line, "quit" control or null. */
+  /** Handle a keypress; returns the submitted line, "quit" or null. */
   key(key: { name?: string; ctrl?: boolean; meta?: boolean; sequence?: string }): string | null {
     if (key.ctrl && key.name === "c") return "\x03";
     if (key.ctrl && key.name === "l") {
@@ -750,18 +1233,22 @@ export class FullScreenTui {
       return null;
     }
     if (key.ctrl && key.name === "u") {
-      this.input = "";
-      this.menu = null;
-      this.frame();
+      this.clearInput();
+      return null;
+    }
+    if (key.ctrl && key.name === "p") {
+      this.openCommandPopup();
       return null;
     }
     switch (key.name) {
+      case "escape":
+        this.closePopup();
+        this.frame();
+        return null;
       case "return":
       case "enter": {
-        // popup open: Enter accepts the highlighted suggestion (arg-less
-        // commands run right away; arg commands wait for their text)
-        if (this.menu && this.menu.length > 0) {
-          return this.acceptMenu(Math.min(this.menuSel, this.menu.length - 1));
+        if (this.popupKind) {
+          return this.acceptPopup(this.popupSel);
         }
         const line = this.input;
         this.input = "";
@@ -770,37 +1257,36 @@ export class FullScreenTui {
       case "backspace":
         if (this.input.length > 0) {
           this.input = [...this.input].slice(0, -1).join("");
-          this.refreshMenu();
+          this.afterInputChanged();
           this.frame();
         }
         return null;
       case "up":
-        if (this.menu) {
+        if (this.popupKind) {
           this.moveMenu(-1);
           return null;
         }
         this.scroll(-1);
         return null;
       case "down":
-        if (this.menu) {
+        if (this.popupKind) {
           this.moveMenu(1);
           return null;
         }
         this.scroll(1);
         return null;
       case "tab":
-        if (this.menu && this.menu.length > 0) {
-          this.acceptMenu(Math.min(this.menuSel, this.menu.length - 1));
-          return null;
+        if (this.popupKind) {
+          return this.acceptPopup(this.popupSel);
         }
         // no popup → toggle Build/Plan (caller owns the mode state)
         this.onModeToggle?.();
         return null;
       case "pageup":
-        this.scroll(-(this.height - 6));
+        this.scroll(-(this.height - this.bottomHeight() - 1));
         return null;
       case "pagedown":
-        this.scroll(this.height - 6);
+        this.scroll(this.height - this.bottomHeight() - 1);
         return null;
       case "end":
         this.scrollEnd();
@@ -819,21 +1305,33 @@ export class FullScreenTui {
       !key.meta &&
       !(key.name !== undefined && NAV_KEYS.has(key.name))
     ) {
-      if ((this.scrollOffset !== 0 && this.flow().length > this.height - 4)) {
+      if (this.scrollOffset !== 0 && this.flow().length > this.height - this.bottomHeight()) {
         this.scrollEnd();
       }
       this.input += key.sequence;
-      this.refreshMenu();
+      this.afterInputChanged();
       this.frame();
     }
     return null;
   }
 
-  /** Mouse wheel (SGR 1006): "<64 b ; c ; r M" up / "<65 … M" down. */
-  wheel(sequence: string): boolean {
-    const m = /^\x1b\[<(64|65);\d+;\d+M$/.exec(sequence);
-    if (!m) return false;
-    this.scroll((m[1] === "64" ? -1 : 1) * 3);
-    return true;
+  /** Re-filter the active popup after the editor text changed. */
+  private afterInputChanged(): void {
+    if (this.popupKind === "commands") {
+      this.refreshCmdItems(this.input);
+      if (this.popupKind !== "commands") {
+        // list emptied by filtering — reopened nothing
+      }
+    } else if (this.popupKind === "models") {
+      if (this.popupSel >= (this.popupFlat()?.length ?? 0)) this.popupSel = 0;
+    } else if (this.input.startsWith("/") && !this.input.includes(" ")) {
+      this.openCommandPopup();
+    }
   }
+}
+
+function fmtCtx(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(tokens % 1_000_000 === 0 ? 0 : 1)}M`;
+  if (tokens >= 1000) return `${(tokens / 1000).toFixed(tokens % 1000 === 0 ? 0 : 1)}k`;
+  return String(tokens);
 }

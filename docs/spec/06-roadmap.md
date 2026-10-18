@@ -414,3 +414,37 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   キー未解決のカスタム設定を `＋ 接続` ボタン(フォームを事前入力で開く)
   で提示。カード行にブランド色ドットを追加。
 
+## v1.1 の実装メモ㉓(2026-10-18、TUI OpenCode 風全面改修・/models ポップアップ)
+
+- **スプラッシュ wordmark**: 中央に大型ブロック文字 "familiar harness"
+  を配置(`harness` は hi 側バイト色の 2 トーン)。幅 61 未満は "familiar"、
+  28 未満では描画しない。会話開始後(トランスクリプト有)はロゴを消して
+  フロー表示へ切替(先頭行に ▲ 遺留マーカー)。高さ 12 未満でもロゴ省略。
+- **OpenCode 風レイアウト**: 外枠ボーダーを撤廃。下部固定は
+  [パッド行] プロンプトパネル(丸角・左アクセントバー)メタ行
+  (`Build · model provider`)の下に下線行(`╹`)+ヒント行。box 幅は
+  `min(75, w-4)` で中央。ヒントは opencode 同文言
+  `tab switch agent / ctrl+p commands`(busy 時は左に spinner+秒)。
+  cwd は $HOME を `~` 表記し、長い時は右側を残して省略。
+- **解析済み色パレット**: opencode v2 テーマ(blue #7699fe = Build、
+  purple #a383e2 = Plan)を ANSI 256 に写像。`sgr()` はスパン毎に bg を
+  再宣言し、`panelRow()` が全幅の bg パッドで埋める(bg 側に細線を出さない)。
+- **`/models` モデルピッカー**: `/model` は隠し alias に降格し、
+  正式コマンドは `/models`(引数なし = ポップアップ)。Enter で
+  `Select model` ダイアログ(タイトル行+esc)を開き、`models.list` を
+  provider 毎に逐次取得して進行充填(`setModelGroups` は group.provider で
+  正規化)。行は `┃` 選択バー+`●` 現行マーク+ctx(k/M)列、provider は
+  節見出し。↑/↓/Home/End/PgUp/PgDn/クリック(SGR 1006 押下)/Esc/Enter。
+  Esc は editor クリア、選択は `onModelPick` → `session.update`。
+- **コマンドパレット統合**: `/` 入力と ctrl+p(0x10)の両方が候補
+  ポップアップ(部分一致フィルタ、空マッチで閉じる)。Tab は argless を
+  即実行・needsArg は補完待ち。ポップアップ有 Tab=受理、ない Tab=
+  onModeToggle(Build/Plan 切替、toast 通知)。ポップアップ中のヒント行は
+  `enter select / esc close` に切替。
+- **単独 ESC の曖昧さ解消**: チャンク末尾の bare ESC は 40ms 待って
+  後続が来なければ escape キーとして処理(alt キー接頭との両立)。
+  クリックは header 行を click 無効、wheel はポップ中 moveMenu ±1、
+  非ポップは scroll ±3。
+- **line REPL も `/models`**: 引数あり直接設定・引数なし一覧表示。
+  `/help` 文言も追随。TUI の info は `(送信なし)` 開始でスプラッシュ面を
+  空に保ち、重要な通知は toast(下線行 2.6 秒)へ集約。

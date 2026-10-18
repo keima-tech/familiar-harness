@@ -15,7 +15,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
-import type { AgentEvent, ChatMessage, SessionRecord } from "@familiar/protocol";
+import type { AgentEvent, ChatMessage, ModelInfo, SessionRecord } from "@familiar/protocol";
 import {
   CONFIG_TEMPLATE,
   loadConfig,
@@ -31,7 +31,7 @@ import {
 } from "@familiar/core";
 import { AgentServer, startHttpTransport } from "@familiar/server";
 import { createPrettyPrinter, createJsonPrinter, ansi, useColor } from "./ui/display.js";
-import { FullScreenTui } from "./ui/tui.js";
+import { FullScreenTui, type TuiModelGroup } from "./ui/tui.js";
 import { CliApprovalAdapter } from "./ui/approvals.js";
 import { RemoteFamiliarClient } from "./client/remote.js";
 import { cmdWorktree } from "./worktree.js";
@@ -488,7 +488,7 @@ async function cmdChat(flags: Record<string, string | boolean>): Promise<void> {
               "  /new                 new session with the configured defaults\n" +
               "  /sessions           list recent sessions\n" +
               "  /session <id>       switch to a session\n" +
-              "  /model [p/m]        show or set provider/model for this session\n" +
+              "  /models [p/m]      pick provider/model (list popup in the TUI)\n" +
               "  /effort [l|m|h|off] reasoning effort (low/medium/high)\n" +
               "  /cwd <path>         change the session working folder\n" +
               "  /todo               show the session task list\n" +
@@ -591,7 +591,7 @@ async function cmdChat(flags: Record<string, string | boolean>): Promise<void> {
           process.stderr.write(red("usage: /effort low|medium|high|off\n"));
         }
       } else if (line.startsWith("/model")) {
-        const value = line.slice("/model".length).trim();
+        const value = (line.startsWith("/models") ? line.slice("/models".length) : line.slice("/model".length)).trim();
         if (!session && !value) {
           const s = await ensureSession();
           process.stdout.write(dim(`(model: ${s.provider}/${s.model})\n`));
@@ -642,19 +642,22 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
 
   const tui = new FullScreenTui();
   const modeOf = (): "build" | "plan" => (flagBool(flags, "plan") ? "plan" : "build");
-  /** Tab (with no suggestion popup open) toggles Build/Plan. */
+  /** Tab (with no popup open) toggles Build/Plan like opencode's agent switch. */
   tui.onModeToggle = (): void => {
     if (flagBool(flags, "plan")) delete flags["plan"];
     else flags["plan"] = true;
-    tui.setSessionInfo({ mode: modeOf() });
-    tui.setInfo(`mode: ${modeOf()} (Tab toggles build/plan)`);
+    const mode = modeOf();
+    tui.setSessionInfo({ mode });
+    tui.toast(`agent: ${mode}`);
   };
   const sessionBits = (s: SessionRecord): void => {
     tui.setSessionInfo({
       title: s.title || s.id.slice(0, 8),
-      model: `${s.provider}/${s.model}`,
+      provider: s.provider || providerId(flags) || cfg.default_provider,
+      model: s.model || "-",
       mode: modeOf(),
-      cwd: s.cwd,
+      effort: s.effort || flag(flags, "effort") || "",
+      cwd: s.cwd || cwd,
     });
   };
   if (session) {
@@ -665,16 +668,17 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
     session = got.session;
     tui.loadHistory(got.messages ?? []);
   }
-  sessionBits(session ?? { id: "", title: "", provider: `providerId(flags) ?? cfg.default_provider` as unknown as string, model: modelId(flags) ?? "", cwd, createdAt: 0, updatedAt: 0 });
-  tui.setSessionInfo({
-    model: session
-      ? `${session.provider}/${session.model}`
-      : `${providerId(flags) ?? cfg.default_provider}/${modelId(flags) ?? "-"}`,
-  });
-  tui.setInfo(
-    `◍ Familiar Harness v${readVersion()} — / for commands (↑/↓ + Tab) · Tab → build/plan · ↑/↓ scroll · Ctrl+C quit`,
+  sessionBits(
+    session ?? {
+      id: "",
+      title: "",
+      provider: providerId(flags) ?? cfg.default_provider,
+      model: modelId(flags) ?? cfg.default_model ?? "-",
+      cwd,
+      createdAt: 0,
+      updatedAt: 0,
+    },
   );
-  tui.showBanner(`v${readVersion()}`);
 
   tui.start();
 
@@ -685,6 +689,10 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
 
   const cleanup = (): void => {
     tui.stop();
+    if (escTimer) {
+      clearTimeout(escTimer);
+      escTimer = null;
+    }
     if (typeof process.stdin.setRawMode === "function") process.stdin.setRawMode(false);
   };
   const quit = (): void => {
@@ -704,6 +712,57 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
     session = created;
     sessionBits(created);
     return created;
+  };
+
+  /** hook from the /models popup: set provider/model like /model <p/m>. */
+  tui.onModelPick = async (provider: string, model: string): Promise<void> => {
+    try {
+      const updated = (await transport.dispatch("session.update", {
+        id: (session ?? (await ensureSession())).id,
+        provider,
+        model,
+      })) as SessionRecord;
+      session = updated;
+      sessionBits(updated);
+      tui.toast(`model: ${provider}/${model}`);
+    } catch (err) {
+      tui.toast(`✖ ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  /** Progressive model catalog: one models.list per configured provider
+   * (same pattern as the settings GUI). Groups arrive over time; each result
+   * is merged into the picker while it stays open. */
+  const loadModelsCatalog = (): void => {
+    const names = Object.keys(cfg.providers ?? {}).sort((a, b) =>
+      a === cfg.default_provider ? -1 : b === cfg.default_provider ? 1 : a.localeCompare(b),
+    );
+    if (names.length === 0) {
+      tui.toast("no providers configured");
+      return;
+    }
+    const groups = new Map<string, TuiModelGroup>();
+    const push = (provider: string, g: TuiModelGroup): void => {
+      groups.set(provider, g);
+      tui.setModelGroups(names.map((n) => groups.get(n) ?? { provider: n, models: [] }));
+    };
+    for (const provider of names) {
+      void (transport.dispatch("models.list", { provider }) as Promise<{ models?: ModelInfo[]; error?: string }>)
+        .then((res) =>
+          push(provider, {
+            provider,
+            models: (res.models ?? []).map((m) => ({
+              provider,
+              id: m.id,
+              ...(m.contextTokens !== undefined ? { contextTokens: m.contextTokens } : {}),
+            })),
+            error: res.error,
+          }),
+        )
+        .catch((err: unknown) =>
+          push(provider, { provider, models: [], error: err instanceof Error ? err.message : String(err) }),
+        );
+    }
   };
 
   const refreshSession = async (): Promise<void> => {
@@ -745,11 +804,11 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
     if (line === "/help") {
       tui.setInfo(
         [
-          "commands:  (type / for a popup menu — ↑/↓ select, Tab complete, ↵ run)",
+          "commands:  (type / or ctrl+p for the palette — ↑/↓ select, Tab complete, ↵ run)",
           "  /new            new session with the configured defaults",
           "  /sessions       list recent sessions",
           "  /session <id>   switch to a session",
-          "  /model [p/m]    show or set provider/model for this session",
+          "  /models [p/m]   pick provider/model (list popup; keeps /model alias)",
           "  /effort l|m|h|off  reasoning effort (low/medium/high)",
           "  /cwd <path>     change the session working folder",
           "  /todo           show the session task list",
@@ -758,7 +817,7 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
           "  /export <file>  dump the transcript as markdown",
           "  /clear          clear the transcript",
           "  /exit           quit",
-          "(Tab toggles build/plan when the popup is closed; any other text is sent)",
+          "(Tab switches build/plan when the popup is closed; any other text is sent)",
         ].join("\n"),
       );
       return;
@@ -882,7 +941,7 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
       return;
     }
     if (line.startsWith("/model")) {
-      const value = line.slice("/model".length).trim();
+      const value = (line.startsWith("/models") ? line.slice("/models".length) : line.slice("/model".length)).trim();
       if (value === "reset") {
         session = null;
         delete flags["model"];
@@ -899,9 +958,12 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
         })) as SessionRecord;
         session = updated;
         sessionBits(updated);
+        tui.toast(`model: ${updated.provider}/${updated.model}`);
         return;
       }
-      tui.setInfo(`model: ${session ? `${session.provider}/${session.model}` : "(no session)"}`);
+      // no argument → open the model picker (opencode-style dialog)
+      void loadModelsCatalog();
+      tui.openModelsPopup();
       return;
     }
     if (line.startsWith("/")) {
@@ -936,6 +998,7 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
   const StringDecoder = (await import("node:string_decoder")).StringDecoder;
   const decoder = new StringDecoder("utf8");
   let carry = "";
+  let escTimer: ReturnType<typeof setTimeout> | null = null;
   const submit = (line: string): void => {
     const trimmed = line.trim();
     pending.push(trimmed);
@@ -945,6 +1008,10 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
 
   const onData = (chunk: Buffer | string): void => {
     if (quitting) return;
+    if (escTimer) {
+      clearTimeout(escTimer); // new bytes complete the escape sequence
+      escTimer = null;
+    }
     let data = carry + decoder.write(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, "utf8"));
     // hold back a trailing incomplete escape sequence (or bare ESC)
     const escIdx = data.lastIndexOf("\x1b");
@@ -1000,6 +1067,11 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
           i += named[0].length;
           continue;
         }
+        if (!isMouseLike) {
+          // bare ESC: close any popup (opencode dialogs)
+          const r = tui.key({ name: "escape" });
+          void r;
+        }
         i += isMouseLike ? rest.length : 1;
         continue;
       }
@@ -1018,7 +1090,12 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
       }
       if (code === 21) {
         tui.clearInput(); // Ctrl+U: clear the editor
-        tui.frame();
+        i += consumed;
+        continue;
+      }
+      if (code === 16) {
+        const r = tui.key({ name: "p", ctrl: true }); // Ctrl+P: command palette
+        if (r !== null) submit(r);
         i += consumed;
         continue;
       }
@@ -1048,6 +1125,17 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
       const r = tui.key({ sequence: data.slice(i, i + consumed) });
       if (r !== null) submit(r);
       i += consumed;
+    }
+    if (carry === "\x1b") {
+      // a lone ESC is ambiguous (alt-keys vs escape); treat as escape after a beat
+      if (escTimer) clearTimeout(escTimer);
+      escTimer = setTimeout(() => {
+        escTimer = null;
+        if (carry === "\x1b" && !quitting) {
+          carry = "";
+          tui.key({ name: "escape" });
+        }
+      }, 40);
     }
   };
   process.stdin.on("data", onData);

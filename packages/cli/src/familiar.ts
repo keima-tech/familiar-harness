@@ -653,6 +653,7 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
   const sessionBits = (s: SessionRecord): void => {
     tui.setSessionInfo({
       title: s.title || s.id.slice(0, 8),
+      sessionId: s.id,
       provider: s.provider || providerId(flags) || cfg.default_provider,
       model: s.model || "-",
       mode: modeOf(),
@@ -728,6 +729,29 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
     } catch (err) {
       tui.toast(`✖ ${err instanceof Error ? err.message : String(err)}`);
     }
+  };
+
+  /** hook from the /sessions popup: switch to another session. */
+  tui.onSessionPick = async (id: string): Promise<void> => {
+    try {
+      const got = (await transport.dispatch("session.get", { id })) as {
+        session: SessionRecord;
+        messages: ChatMessage[];
+      };
+      session = got.session;
+      tui.clearTranscript();
+      tui.loadHistory(got.messages ?? []);
+      sessionBits(session);
+      tui.toast(`session: ${session.title || session.id.slice(0, 8)}`);
+    } catch (err) {
+      tui.toast(`✖ ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  /** Esc while streaming: abort the running turn (opencode "esc stop"). */
+  tui.onAbortTurn = (): void => {
+    if (!session) return;
+    void transport.dispatch("session.abort", { id: session.id }).catch(() => {});
   };
 
   /** Progressive model catalog: one models.list per configured provider
@@ -806,9 +830,9 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
         [
           "commands:  (type / or ctrl+p for the palette — ↑/↓ select, Tab complete, ↵ run)",
           "  /new            new session with the configured defaults",
-          "  /sessions       list recent sessions",
-          "  /session <id>   switch to a session",
+          "  /sessions       switch session from a list (or /session <id>)",
           "  /models [p/m]   pick provider/model (list popup; keeps /model alias)",
+          "  /rename <name>  rename this session",
           "  /effort l|m|h|off  reasoning effort (low/medium/high)",
           "  /cwd <path>     change the session working folder",
           "  /todo           show the session task list",
@@ -894,10 +918,40 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
       return;
     }
     if (line.startsWith("/sessions")) {
-      const list = (await transport.dispatch("session.list", {})) as SessionRecord[];
-      tui.setInfo(
-        ["sessions:", ...list.slice(0, 10).map((s) => `  ${s.id.slice(0, 8)}  ${s.provider}/${s.model}  ${s.title || "(untitled)"}`)].join("\n"),
-      );
+      if (line.trim() === "/sessions") {
+        // opencode-style dialog: recent sessions in a picker
+        const list = (await transport.dispatch("session.list", {})) as SessionRecord[];
+        tui.openSessionsPopup(
+          list.slice(0, 20).map((s) => ({
+            id: s.id,
+            title: s.title ?? "",
+            provider: s.provider ?? "",
+            model: s.model ?? "",
+            cwd: s.cwd ?? "",
+            updatedAt: s.updatedAt ?? 0,
+          })),
+        );
+      } else {
+        const list = (await transport.dispatch("session.list", {})) as SessionRecord[];
+        tui.setInfo(
+          ["sessions:", ...list.slice(0, 10).map((s) => `  ${s.id.slice(0, 8)}  ${s.provider}/${s.model}  ${s.title || "(untitled)"}`)].join("\n"),
+        );
+      }
+      return;
+    }
+    if (line.startsWith("/rename")) {
+      const name = line.slice("/rename".length).trim();
+      if (name === "") {
+        tui.toast("usage: /rename <title>");
+        return;
+      }
+      const updated = (await transport.dispatch("session.update", {
+        id: (session ?? (await ensureSession())).id,
+        title: name,
+      })) as SessionRecord;
+      session = updated;
+      sessionBits(updated);
+      tui.toast(`renamed: ${name}`);
       return;
     }
     if (line.startsWith("/session ")) {
@@ -999,6 +1053,11 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
   const decoder = new StringDecoder("utf8");
   let carry = "";
   let escTimer: ReturnType<typeof setTimeout> | null = null;
+  // bracketed paste (mode 2004, enabled by tui.start())
+  const PASTE_START = "\x1b[200~";
+  const PASTE_END = "\x1b[201~";
+  let inPaste = false;
+  let pasteBuf = "";
   const submit = (line: string): void => {
     const trimmed = line.trim();
     pending.push(trimmed);
@@ -1012,7 +1071,39 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
       clearTimeout(escTimer); // new bytes complete the escape sequence
       escTimer = null;
     }
-    let data = carry + decoder.write(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, "utf8"));
+    let buf = carry + decoder.write(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, "utf8"));
+    carry = "";
+    // Extract bracketed-paste segments first (terminals wrap pastes between
+    // "ESC[200~ … ESC[201~"; the markers can split across chunks).
+    while (true) {
+      if (inPaste) {
+        const end = buf.indexOf("\x1b[201~");
+        if (end === -1) {
+          pasteBuf += buf;
+          buf = "";
+          break;
+        }
+        pasteBuf += buf.slice(0, end);
+        buf = buf.slice(end + PASTE_END.length);
+        tui.pasteText(pasteBuf);
+        pasteBuf = "";
+        inPaste = false;
+        continue;
+      }
+      const start = buf.indexOf(PASTE_START);
+      if (start === -1) break;
+      const head = buf.slice(0, start);
+      buf = buf.slice(start + PASTE_START.length);
+      inPaste = true;
+      pasteBuf = "";
+      if (head !== "") feedKeys(head);
+    }
+    if (buf !== "" && !inPaste) feedKeys(buf);
+  };
+
+  /** Decode one chunk of keystrokes (escape sequences, mouse, control codes). */
+  const feedKeys = (inData: string): void => {
+    let data = inData;
     // hold back a trailing incomplete escape sequence (or bare ESC)
     const escIdx = data.lastIndexOf("\x1b");
     carry = "";

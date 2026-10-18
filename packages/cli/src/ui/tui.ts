@@ -310,9 +310,10 @@ export interface TuiCommand {
 export const TUI_COMMANDS: TuiCommand[] = [
   { name: "/help", desc: "show the command list" },
   { name: "/new", desc: "new session with the configured defaults" },
-  { name: "/sessions", desc: "list recent sessions" },
+  { name: "/sessions", desc: "switch session from a list" },
   { name: "/session", desc: "switch to a session (id)", needsArg: true },
   { name: "/models", desc: "pick provider/model from a list" },
+  { name: "/rename", desc: "rename this session", needsArg: true },
   { name: "/effort", desc: "reasoning effort low|medium|high|off", needsArg: true },
   { name: "/cwd", desc: "change the working folder", needsArg: true },
   { name: "/plan", desc: "toggle plan mode" },
@@ -336,11 +337,22 @@ export interface TuiModelGroup {
   error?: string;
 }
 
+/** One recent session (fed by the caller via session.list). */
+export interface TuiSessionSummary {
+  id: string;
+  title: string;
+  provider: string;
+  model: string;
+  cwd: string;
+  updatedAt: number;
+}
+
 /** One flat popup row. */
 type PopupRow =
   | { kind: "header"; text: string }
   | { kind: "cmd"; cmd: TuiCommand }
-  | { kind: "model"; entry: TuiModelEntry };
+  | { kind: "model"; entry: TuiModelEntry }
+  | { kind: "session"; entry: TuiSessionSummary };
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -359,6 +371,8 @@ export interface TuiInfo {
   mode: "build" | "plan" | string;
   effort?: string;
   cwd: string;
+  /** current session id (marks the ● row in the session picker) */
+  sessionId?: string;
 }
 
 // prompt metadata row (inside the raised panel), width-budgeted like
@@ -424,10 +438,12 @@ export class FullScreenTui {
   private toolCount = 0;
   private assistantStream: Block & { kind: "assistant" } | null = null;
   private reasoningStream: Block & { kind: "reasoning" } | null = null;
-  // popups: slash-command suggestions ("commands") or the model picker ("models")
-  private popupKind: "commands" | "models" | null = null;
+  // popups: slash-command suggestions ("commands"), the model picker
+  // ("models") or the session switcher ("sessions")
+  private popupKind: "commands" | "models" | "sessions" | null = null;
   private cmdItems: TuiCommand[] = [];
   private modelGroups: TuiModelGroup[] = [];
+  private sessions: TuiSessionSummary[] = [];
   private popupSel = 0;
   /** 0-based screen row → absolute popup row index (for mouse clicks) */
   private popupRowAt: number[] = [];
@@ -438,13 +454,18 @@ export class FullScreenTui {
   onModeToggle?: () => void;
   /** caller hook: a model is picked in the /models popup */
   onModelPick?: (provider: string, model: string) => void | Promise<void>;
+  /** caller hook: a session is picked in the /sessions popup */
+  onSessionPick?: (id: string) => void | Promise<void>;
+  /** caller hook: Esc pressed while streaming (≈ "stop the turn") */
+  onAbortTurn?: () => void | Promise<void>;
 
   // ---- lifecycle ---------------------------------------------------------
 
   start(): void {
     this.running = true;
     this.refreshSize();
-    process.stdout.write("\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1006h\x1b[2J");
+    process.stdout.write("\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1006h\x1b[?2004h\x1b[2J");
+    this.applyTitle();
     this.frame();
   }
 
@@ -453,7 +474,16 @@ export class FullScreenTui {
     this.running = false;
     if (this.spinnerTimer) clearInterval(this.spinnerTimer);
     this.clearFrameTimer();
-    process.stdout.write("\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[?1049l");
+    process.stdout.write("\x1b[?2004l\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[?1049l");
+  }
+
+  /** OSC 0 terminal title, updated alongside the session metadata. */
+  private applyTitle(): void {
+    if (!process.stdout.isTTY) return;
+    const home = process.env.HOME ?? "";
+    let label = this.info.cwd;
+    if (home && label.startsWith(home)) label = `~${label.slice(home.length)}`;
+    process.stdout.write(`\x1b]0;familiar — ${this.info.title || label}\x07`);
   }
 
   get isRunning(): boolean {
@@ -511,8 +541,24 @@ export class FullScreenTui {
     }
   }
 
+  /** Bracketed paste: insert pasted text into the editor (breaks/tabs flattened). */
+  pasteText(text: string): void {
+    if (!this.running || text === "") return;
+    const normalized = text
+      .replace(/\r\n?/g, "\n")
+      .replace(/[\n\t]+/g, " ") // single-line editor; keep content, drop breaks
+      .replace(/[ ]{2,}/g, " ")
+      .slice(0, 8000);
+    if (normalized === "" || this.input.length + normalized.length > 8000) return;
+    this.input += normalized;
+    this.afterInputChanged();
+    this.frame();
+  }
+
   setSessionInfo(info: Partial<TuiInfo>): void {
+    const titleOrCwd = info.title !== undefined || info.cwd !== undefined;
     Object.assign(this.info, info);
+    if (titleOrCwd) this.applyTitle();
     this.frameSoon();
   }
 
@@ -679,6 +725,12 @@ export class FullScreenTui {
       case "turn.error":
         this.closeStreams();
         this.blocks.push({ kind: "info", text: `✖ ${event.error}` });
+        this.frameSoon();
+        break;
+      case "turn.aborted":
+        this.closeStreams();
+        this.blocks.push({ kind: "info", text: "■ stopped" });
+        this.toast("stopped");
         this.frameSoon();
         break;
       case "turn.end": {
@@ -926,7 +978,9 @@ export class FullScreenTui {
     }
     const pairs: Array<[string, string]> = this.popupKind
       ? [["enter", "select"], ["esc", "close"]]
-      : [["tab", "switch agent"], ["ctrl+p", "commands"]];
+      : this.busy
+        ? [["esc", "stop"], ["ctrl+p", "commands"]]
+        : [["tab", "switch agent"], ["ctrl+p", "commands"]];
     const render = ([key, label]: [string, string]): string =>
       this.popupKind ? ` ${label} ${cc.gray(key)} ` : ` ${key} ${cc.gray(label)} `;
     const hintStr = pairs.map(render).join(" ");
@@ -1005,6 +1059,18 @@ export class FullScreenTui {
     if (this.popupKind === "commands") {
       return this.cmdItems.map((c): PopupRow => ({ kind: "cmd", cmd: c }));
     }
+    if (this.popupKind === "sessions") {
+      const q = this.input.trim().toLowerCase();
+      const rows: PopupRow[] = [];
+      const hit = (s: TuiSessionSummary): boolean =>
+        q === "" ||
+        `${s.title} ${s.id.slice(0, 8)} ${s.provider}/${s.model} ${s.cwd}`.toLowerCase().includes(q);
+      const list = this.sessions.filter(hit);
+      rows.push({ kind: "header", text: "Select session" });
+      for (const s of list) rows.push({ kind: "session", entry: s });
+      if (list.length === 0) rows.push({ kind: "header", text: q === "" ? "no sessions yet" : "no matching sessions" });
+      return rows;
+    }
     if (this.popupKind !== "models") return null;
     const q = this.input.trim().toLowerCase();
     const rows: PopupRow[] = [];
@@ -1036,7 +1102,26 @@ export class FullScreenTui {
   /** Open the /models picker (caller feeds groups via setModelGroups). */
   openModelsPopup(): void {
     this.popupKind = "models";
+    this.input = ""; // opencode dialogs open with an empty query
     this.landSelection();
+    this.frame();
+  }
+
+  /** Open the /sessions switcher (caller feeds the list here beforehand). */
+  openSessionsPopup(list: readonly TuiSessionSummary[]): void {
+    this.sessions = [...list];
+    this.popupKind = "sessions";
+    this.input = "";
+    const flat = this.popupFlat() ?? [];
+    let firstEntry = -1;
+    let current = -1;
+    for (let i = 0; i < flat.length; i++) {
+      const r = flat[i];
+      if (!r || r.kind !== "session") continue;
+      if (firstEntry === -1) firstEntry = i;
+      if (current === -1 && r.entry.id === this.info.sessionId) current = i;
+    }
+    this.popupSel = current !== -1 ? current : firstEntry !== -1 ? firstEntry : 0;
     this.frame();
   }
 
@@ -1049,7 +1134,7 @@ export class FullScreenTui {
   }
 
   private closePopup(): void {
-    if (this.popupKind === "models") this.input = "";
+    if (this.popupKind === "models" || this.popupKind === "sessions") this.input = "";
     this.popupKind = null;
     this.cmdItems = [];
     this.popupSel = 0;
@@ -1117,10 +1202,14 @@ export class FullScreenTui {
       this.frame();
       return c.name;
     }
-    // model picked — same contract as /model <provider/model>
-    const e = r.entry;
+    // model / session picked — dispatch through the caller hooks
     this.closePopup();
     this.frame();
+    if (r.kind === "session") {
+      void this.onSessionPick?.(r.entry.id);
+      return null;
+    }
+    const e = r.entry;
     void this.onModelPick?.(e.provider, e.id);
     return null;
   }
@@ -1147,7 +1236,11 @@ export class FullScreenTui {
     // title row
     let y = startY;
     if (headerH > 0) {
-      const titleText = this.popupKind === "models" ? "Select model" : "Select a command";
+      const titleText = this.popupKind === "models"
+        ? "Select model"
+        : this.popupKind === "sessions"
+          ? "Select session"
+          : "Select a command";
       const title = this.frag(N_WHITE, titleText, true);
       const esc = this.gap(1) + this.frag(N_GRAY, "esc");
       const used = visibleWidth(title) + visibleWidth(esc) + 2;
@@ -1179,6 +1272,31 @@ export class FullScreenTui {
           this.frag(null, truncateWidth(e.id, Math.max(3, pw - 12)), false, bg),
           ...(ctx ? [this.gap(2), this.frag(N_GRAY, ctx, false, bg)] : []),
         ];
+      } else if (r.kind === "session") {
+        // ┃● <title  id> <model provider> ………… <2m ago>
+        const s = r.entry;
+        const when = tsRel(s.updatedAt);
+        const pm = `${s.model} ${s.provider}`.trim();
+        const rightW = visibleWidth(pm) + 1 + when.length; // + separator
+        const labelBudget = Math.max(10, pw - 10 - rightW);
+        const head =
+          s.title && s.title !== ""
+            ? truncateWidth(s.title, labelBudget)
+            : `session ${s.id.slice(0, 8)}`;
+        const tail = `  ${s.id.slice(0, 8)}`;
+        const label = padLine(head + tail, labelBudget);
+        const labelW = visibleWidth(label);
+        const stretch = Math.max(1, pw - 2 - labelW - 1 - visibleWidth(pm) - 1 - when.length);
+        segs = [
+          selected ? this.frag(N_ACCENT, "┃", false, bg) : this.gap(1),
+          s.id === this.info.sessionId ? this.frag(N_ACCENT, "●", false, bg) : this.gap(1),
+          this.gap(1),
+          this.frag(null, label, false, bg),
+          this.gap(1),
+          this.frag(N_GRAY, truncateWidth(pm, Math.max(6, pw - 14 - labelW)), false, bg),
+          this.gap(stretch),
+          this.frag(N_GRAY, when, false, bg),
+        ];
       } else {
         const c = r.cmd;
         const bar = selected ? this.frag(N_ACCENT, "┃", false, bg) : this.gap(1);
@@ -1203,10 +1321,17 @@ export class FullScreenTui {
 
   // ---- mouse --------------------------------------------------------------
 
-  /** Mouse click (SGR): select/accept the popup row on the given row. */
+  /** Mouse click (SGR): accept the popup row under it; outside → close. */
   click(row: number, _col: number): string | null {
     const abs = this.popupRowAt[row - 1];
-    if (abs === undefined) return null;
+    if (abs === undefined) {
+      // opencode dialogs close when you click outside them
+      if (this.popupKind) {
+        this.closePopup();
+        this.frame();
+      }
+      return null;
+    }
     this.popupSel = abs;
     return this.acceptPopup(abs);
   }
@@ -1242,8 +1367,16 @@ export class FullScreenTui {
     }
     switch (key.name) {
       case "escape":
-        this.closePopup();
-        this.frame();
+        if (this.popupKind) {
+          this.closePopup();
+          this.frame();
+          return null;
+        }
+        if (this.busy) {
+          // opencode footer "esc stop": abort the running turn
+          void this.onAbortTurn?.();
+          return null;
+        }
         return null;
       case "return":
       case "enter": {
@@ -1334,4 +1467,14 @@ function fmtCtx(tokens: number): string {
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(tokens % 1_000_000 === 0 ? 0 : 1)}M`;
   if (tokens >= 1000) return `${(tokens / 1000).toFixed(tokens % 1000 === 0 ? 0 : 1)}k`;
   return String(tokens);
+}
+
+/** Short relative timestamp for the session picker ("now", "5m ago", "3d ago"). */
+function tsRel(ms: number): string {
+  if (!ms) return "—";
+  const s = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  if (s < 60) return "now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
 }

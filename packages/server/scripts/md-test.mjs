@@ -45,6 +45,7 @@ eq("h6 capped h5", mdRender("###### Deep"), "<h5>Deep</h5>");
 // 5) inline: bold / italic / code span
 eq("bold", mdRender("**bold**"), "<p><strong>bold</strong></p>");
 eq("italic", mdRender("say *hi* now"), "<p>say <em>hi</em> now</p>");
+eq("italic after CJK punctuation", mdRender("これは*斜体*です"), "<p>これは<em>斜体</em>です</p>");
 eq("code span", mdRender("use `npm test` ok"), "<p>use <code>npm test</code> ok</p>");
 // 6) links: only http(s), new tab
 eq("link", mdRender("[x](https://e.io/a)"), '<p><a href="https://e.io/a" target="_blank" rel="noreferrer noopener">x</a></p>');

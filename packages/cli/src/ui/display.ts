@@ -2,6 +2,7 @@
  * Shared UI helpers for the CLI (ANSI colors, event pretty-printing).
  */
 import type { AgentEvent } from "@familiar/protocol";
+import { TermMarkdown } from "./markdown.js";
 
 const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
@@ -29,6 +30,33 @@ const c = {
   faint: (s: string) => (useColor() ? ansi.dim(s) : s),
   plain: (s: string) => s,
 };
+
+/** Key argument for a tool line (command/path/pattern/url). */
+export function toolCallDetail(name: string, argsJson: string): string {
+  try {
+    const args = JSON.parse(argsJson || "{}") as Record<string, unknown>;
+    const keys = name === "bash" ? ["command", "path", "pattern", "url"] : ["path", "pattern", "command", "url", "query"];
+    for (const key of keys) {
+      const v = args[key];
+      if (typeof v === "string" && v !== "") {
+        const flat = v.replace(/\s+/g, " ").trim();
+        return flat.length > 90 ? `${flat.slice(0, 90)}…` : flat;
+      }
+    }
+    const json = JSON.stringify(args);
+    return json.length > 60 ? `${json.slice(0, 60)}…` : json;
+  } catch {
+    return "";
+  }
+}
+
+/** Indent a rendered diff block by two spaces with a dim gutter. */
+function indentDiff(diff: string): string {
+  return diff
+    .split("\n")
+    .map((line) => (line === "" ? line : `  ${line}`))
+    .join("\n");
+}
 
 /** Display one primary argument of a tool call compactly. */
 export function toolCallSummary(name: string, argsJson: string): string {
@@ -179,10 +207,14 @@ export function renderDiff(diff: string, maxLines = 40): string {
  */
 export function createPrettyPrinter(): (event: AgentEvent) => void {
   const think = new ThinkingFilter();
+  const md = new TermMarkdown();
   const spinner = new Spinner(process.stdout.isTTY === true && process.env["NO_COLOR"] === undefined);
   let turnStartedAt = 0;
   let toolCount = 0;
   let inThinking = false;
+  const write = (s: string): void => {
+    if (s !== "") process.stdout.write(s);
+  };
   return (event: AgentEvent) => {
     switch (event.type) {
       case "turn.start":
@@ -199,7 +231,7 @@ export function createPrettyPrinter(): (event: AgentEvent) => void {
             process.stdout.write("\n");
           }
           spinner.pause();
-          process.stdout.write(visible);
+          write(md.push(visible));
         }
         break;
       }
@@ -220,8 +252,12 @@ export function createPrettyPrinter(): (event: AgentEvent) => void {
       case "tool.call": {
         toolCount += 1;
         spinner.pause();
+        // "⏺ 2  edit · src/foo.ts" — number, name, key argument
+        const detail = toolCallDetail(event.toolCall.name, event.toolCall.arguments);
         process.stdout.write(
-          `\n${c.key(`⏺ ${toolCount}`)} ${c.faint(toolCallSummary(event.toolCall.name, event.toolCall.arguments))}\n`,
+          `\n${c.faint(`⏺ ${toolCount}`)}  ${c.key(event.toolCall.name)}` +
+            (detail ? ` ${c.faint(`· ${detail}`)}` : "") +
+            "\n",
         );
         spinner.resume();
         break;
@@ -230,14 +266,12 @@ export function createPrettyPrinter(): (event: AgentEvent) => void {
         spinner.pause();
         if (event.isError) {
           const first = event.content.split("\n")[0] ?? "";
-          process.stdout.write(`  ${c.err(`⚠ ${first.slice(0, 240)}`)}\n`);
-        } else if (event.name === "bash") {
-          process.stdout.write(c.faint(`  ↳ exit ok (${event.durationMs}ms)\n`));
+          process.stdout.write(`  ${c.err(`✗ ${first.slice(0, 240)}`)}\n`);
         } else {
-          process.stdout.write(c.faint(`  ↳ ok (${event.durationMs}ms)\n`));
+          process.stdout.write(`  ${c.ok("✓")} ${c.faint(`${event.durationMs}ms`)}\n`);
         }
         if (!event.isError && event.diff) {
-          process.stdout.write(`  ${renderDiff(event.diff)}\n\n`);
+          process.stdout.write(`${indentDiff(renderDiff(event.diff))}\n`);
         }
         spinner.resume();
         break;
@@ -251,10 +285,9 @@ export function createPrettyPrinter(): (event: AgentEvent) => void {
         break;
       case "message.end": {
         const tail = think.finish();
-        if (tail) {
-          spinner.pause();
-          process.stdout.write(tail);
-        }
+        spinner.pause();
+        if (tail) write(md.push(tail));
+        write(md.flush());
         if (inThinking) {
           inThinking = false;
           process.stdout.write("\n");

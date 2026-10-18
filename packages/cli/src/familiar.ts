@@ -105,6 +105,8 @@ const BOOL_FLAGS = new Set([
   "--dry-run",
   "--write",
   "--clear",
+  "--version",
+  "-V",
 ]);
 
 export interface ParsedArgs {
@@ -379,7 +381,24 @@ async function cmdChat(flags: Record<string, string | boolean>): Promise<void> {
     session = list.find((s) => s.cwd === cwd) ?? null;
   }
 
-  process.stdout.write(dim("familiar chat — /help for commands, /exit to quit\n"));
+  const modeLabel = (): string => (flagBool(flags, "plan") ? "plan" : "build");
+  const banner = (): void => {
+    const prov = session
+      ? `${session.provider}/${session.model}`
+      : `${providerId(flags) ?? cfg.default_provider}/${modelId(flags) ?? "default"}`;
+    const lines = [
+      "",
+      `  ${cyan("◍ Familiar Harness")} ${dim(`v${readVersion()}`)}`,
+      dim("  ────────────────────────────────────────────"),
+      `  ${dim("cwd")}      ${session?.cwd ?? cwd}`,
+      `  ${dim("model")}    ${prov}`,
+      session ? `  ${dim("session")}  ${session.id.slice(0, 8)}` : dim("  session  (created on first message)"),
+      dim("  /help for commands · /exit to quit · Tab completes /commands and @files"),
+      "",
+    ];
+    process.stdout.write(lines.join("\n") + "\n");
+  };
+  banner();
   const readline = await import("node:readline");
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
@@ -393,12 +412,13 @@ async function cmdChat(flags: Record<string, string | boolean>): Promise<void> {
     })) as SessionRecord;
     session = created;
     process.stdout.write(
-      dim(`(new session ${created.id.slice(0, 8)} · ${created.provider}/${created.model})\n`),
+      `${dim("●")} ${dim(`session ${created.id.slice(0, 8)} · ${created.provider}/${created.model}`)}\n`,
     );
     return created;
   };
 
-  rl.setPrompt("❯ ");
+  const promptText = (): string => `${dim(modeLabel())} ${cyan("❯")} `;
+  rl.setPrompt(promptText());
   rl.prompt();
   let busy = false;
   const pending: string[] = [];
@@ -544,7 +564,7 @@ async function cmdChat(flags: Record<string, string | boolean>): Promise<void> {
         const value = line.slice("/plan".length).trim();
         if (value === "off") delete flags["plan"];
         else flags["plan"] = true;
-        process.stdout.write(dim(`(plan mode ${flags["plan"] ? "ON" : "OFF"} for the next messages)\n`));
+        process.stdout.write(dim(`(mode: ${modeLabel()})\n`));
       } else if (line.startsWith("/model")) {
         const value = line.slice("/model".length).trim();
         if (!session && !value) {
@@ -1122,14 +1142,17 @@ function toNumber(value: string | undefined): number | undefined {
 // ---------------------------------------------------------------------------
 
 function readVersion(): string {
-  try {
-    const pkg = JSON.parse(
-      fs.readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
-    ) as { version: string };
-    return pkg.version;
-  } catch {
-    return "0.0.0";
+  for (const rel of ["../package.json", "../../package.json"]) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(new URL(rel, import.meta.url), "utf8")) as {
+        version?: string;
+      };
+      if (pkg.version) return pkg.version;
+    } catch {
+      /* try the next candidate */
+    }
   }
+  return "0.0.0";
 }
 
 async function main(): Promise<void> {
@@ -1138,6 +1161,12 @@ async function main(): Promise<void> {
   const command = positionals[0] ?? "";
 
   const rest = positionals.slice(1);
+
+  // `familiar --version` / `-V` (flag form; the command form is handled below too)
+  if (command === "" && (flags["version"] === true || flags["V"] === true)) {
+    process.stdout.write(`familiar ${readVersion()}\n`);
+    return;
+  }
 
   try {
     switch (command) {
@@ -1156,6 +1185,7 @@ async function main(): Promise<void> {
         process.stdout.write(USAGE);
         break;
       case "--version":
+      case "-V":
       case "version":
         process.stdout.write(`familiar ${readVersion()}\n`);
         break;

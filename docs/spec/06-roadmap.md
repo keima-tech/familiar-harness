@@ -573,7 +573,7 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   docs/spec/05-config.md)。例に「モデル名は流動的 — /models で要確認」
   の注記を追加。
 
-## v0.1.1 の実装メモ㉙(2026-10-19、familiar update・ベア familiar の周知)
+## v0.1.0 の実装メモ㉙(2026-10-19、familiar update・ベア familiar の周知)
 
 - **`familiar update`**: install.sh 由来のインストール(~/.local/lib/familiar/
   packages/... レイアウトを realpath で判定)向けセルフアップデート。
@@ -592,3 +592,16 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   `familiar` 先頭に変更し、`familiar chat` は同等コマンドとして明記。
   install.sh の完了メッセージも `familiar` 起点に。
 - README 両言語に「アップデート」節を追加。
+
+## v0.1.0 の実装メモ㉚(2026-10-19、Release へのデスクトップ同梱・冪等パブリッシュ)
+
+- **scripts/release.sh 拡張**: `--publish` で CLI tarball に加え
+  electron-builder 製 deb + AppImage を既定でビルド/添付
+  (`--desktop` でドライラン時もビルド、`--no-desktop` で除外)。
+  リリース作成はタグ既存時に GET /releases/tags/{tag} でリリースを
+  再利用、同名アセットは削除してから再アップロードする冪等パブリッシュ。
+  jq 不在環境向けに JSON フィールド抽出は node ワンライナーで処理。
+- **バージョン運用**: update コマンド実装(㉙)は v0.1.1 として一時発行
+  したが、初回リリースは v0.1.0 のままにする方針のため、
+  旧 Release v0.1.0/v0.1.1 とタグを削除し、現行 HEAD から
+  デスクトップ同梱で v0.1.0 を再発行する。

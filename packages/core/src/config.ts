@@ -505,6 +505,41 @@ export function configFilePath(explicit?: string): string {
   return familiarPaths.config();
 }
 
+/**
+ * Can this provider actually be called? A resolvable secret (key file /
+ * api_key / env) or an explicitly keyless auth (`env: "none"`, or no auth
+ * block at all on a plain-http endpoint = private/LAN deployment).
+ */
+function providerCallable(pc: ProviderConfig): boolean {
+  const secret = resolveAuthSecret(pc.auth);
+  if (secret !== undefined && secret !== "") return true;
+  if (pc.auth?.env === "none") return true;
+  if (pc.auth === undefined) return (pc.base_url ?? "").startsWith("http://");
+  return false;
+}
+
+/** First callable provider that also has a usable default model.
+ * User-added providers win over the built-ins (configured intentionally);
+ * keyless endpoints win over keyed ones within the same tier. */
+function pickUsableProvider(cfg: ResolvedConfig): { provider: string; model: string } | null {
+  const builtIn = DEFAULT_CONFIG.providers;
+  const order = [
+    ...Object.entries(cfg.providers).filter(([id]) => !(id in builtIn)),
+    ...Object.entries(cfg.providers).filter(([id]) => id in builtIn),
+  ];
+  let keyed: { provider: string; model: string } | null = null;
+  for (const [id, pc] of order) {
+    const model = pc.default_model ?? (pc.kind === "mock" ? "mock-fast" : undefined);
+    if (!model || !providerCallable(pc)) continue;
+    if (resolveAuthSecret(pc.auth) !== undefined) {
+      keyed ??= { provider: id, model };
+      continue;
+    }
+    return { provider: id, model }; // keyless endpoints take priority
+  }
+  return keyed;
+}
+
 export function loadConfig(options: LoadConfigOptions = {}): ResolvedConfig {
   const file = configFilePath(options.configFile);
   let doc: Record<string, unknown> = {};
@@ -534,6 +569,26 @@ export function loadConfig(options: LoadConfigOptions = {}): ResolvedConfig {
   }
   if (cfg.default_provider && !(cfg.default_provider in cfg.providers)) {
     log.warn(`default_provider "${cfg.default_provider}" is not configured`);
+  }
+
+  // Fresh configs inherit openai/gpt-5.2, which cannot be called without an
+  // API key. Unless the user picked a default explicitly (yaml or CLI flag),
+  // make the effective default the first provider that actually works so the
+  // out-of-the-box experience is a model that responds.
+  const explicitDefault =
+    (typeof doc.default_provider === "string" && doc.default_provider !== "") ||
+    options.overrides?.default_provider !== undefined;
+  const currentPc = cfg.providers[cfg.default_provider];
+  if (!explicitDefault && (currentPc === undefined || !providerCallable(currentPc))) {
+    const fb = pickUsableProvider(cfg);
+    if (fb && fb.provider !== cfg.default_provider) {
+      log.warn(
+        `default provider "${cfg.default_provider}" has no usable credentials — ` +
+          `defaulting to "${fb.provider}" (${fb.model}); set default_provider/default_model to override`,
+      );
+      cfg.default_provider = fb.provider;
+      cfg.default_model = fb.model;
+    }
   }
 
   cfg.homeDir = familiarPaths.home();

@@ -166,19 +166,54 @@ export class OpenAiCompatibleProvider implements Provider {
         signal: AbortSignal.timeout(10_000),
       });
       await assertOk(res, this.id);
-      const data = (await res.json()) as { data?: { id?: string }[] };
+      const data = (await res.json()) as {
+        data?: Array<Record<string, unknown>>;
+      };
       const list = data.data ?? [];
       const out: ModelInfo[] = [];
       for (const m of list) {
-        if (m.id) out.push({ id: m.id, provider: this.id });
+        if (typeof m.id !== "string" || m.id === "") continue;
+        // Context window: field names differ across servers (vLLM/llama.cpp/
+        // OpenRouter all expose it differently) — sum up the common ones.
+        const meta = m.meta as Record<string, unknown> | undefined;
+        const raw =
+          m.context_length ?? m.context_tokens ?? m.max_model_len ?? meta?.n_ctx_train ?? meta?.n_ctx;
+        const ctx = typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : undefined;
+        out.push({ id: m.id, provider: this.id, ...(ctx !== undefined ? { contextTokens: ctx } : {}) });
+      }
+      // Ollama's OpenAI-compat /models omits context — ask /api/show for it
+      // (best effort, local endpoints only, bounded to keep pickers snappy).
+      if ((this.cfg.base_url ?? "").startsWith("http://")) {
+        const missing = out.filter((m) => m.contextTokens === undefined).slice(0, 8);
+        for (const m of missing) {
+          const ctx = await this.ollamaContext(m.id).catch(() => undefined);
+          if (ctx) m.contextTokens = ctx;
+        }
       }
       return out;
     } catch (err) {
-      // Surface the failure instead of looking like "no models" — an
-      // unreachable endpoint must report an error to the caller.
-      log.warn(`models.list failed for provider ${this.id}: ${String(err)}`);
+      // Surface the failure to the caller: models.list wraps it in an error
+      // field and pickers show the provider as unavailable — no stderr noise
+      // (it would overwrite full-screen TUIs).
       throw err;
     }
+  }
+
+  /** Ollama native /api/show — the only source of context length there. */
+  private async ollamaContext(model: string): Promise<number | undefined> {
+    const origin = this.baseUrl().replace(/\/v1\/?$/, "");
+    const res = await fetch(`${origin}/api/show`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model }),
+      signal: AbortSignal.timeout(4_000),
+    });
+    if (!res.ok) return undefined;
+    const data = (await res.json()) as { model_info?: Record<string, unknown> };
+    for (const [key, value] of Object.entries(data.model_info ?? {})) {
+      if (key.endsWith("context_length") && typeof value === "number" && value > 0) return value;
+    }
+    return undefined;
   }
 }
 

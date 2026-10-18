@@ -164,8 +164,8 @@ export class AnthropicProvider implements Provider {
       }
       return out;
     } catch (err) {
-      // Surface the failure instead of looking like "no models".
-      log.warn(`models.list failed for provider ${this.id}: ${String(err)}`);
+      // The models.list RPC surfaces the error message; no stderr noise
+      // (it would overwrite full-screen TUIs).
       throw err;
     }
   }

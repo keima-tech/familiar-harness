@@ -502,3 +502,31 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
 - **reasoning ブロックの閉鎖表示**: ストリーム終了後も
   `◌ thinking…` のままだったのを、closeStreams で `done` を立て
   `· thinking…` に切替(回転中/終了の区別が付く)。
+
+## v1.1 の実装メモ㉖(2026-10-19、既定モデルの自動フォールバック・コンテキスト長)
+
+- **既定プロバイダの自動フォールバック**: 新規設定は
+  DEFAULT_CONFIG 由来の openai/gpt-5.2 が既定になり、API キーが無いと
+  何も動かなかった。`loadConfig` で ユーザーが明示指定していない場合
+  (yaml にも CLI 上書きにも無い)に限り、呼び出し可能な
+  (`providerCallable`: 秘密鍵が解決できる / `env: none` / auth 未設定で
+  http:// のローカルエンドポイント)プロバイダへ既定を差し替える。
+  優先順は ①ユーザー追加プロバイダ(ビルトイン以外)→②ビルトイン、
+  同 tier 内は キーレス > キー付き、どちらも default_model が要る。
+  実効既定は config.get 経由で GUI/TUI にもそのまま反映。
+  warn 一行(`default provider "openai" has no usable credentials —
+  defaulting to ...`)を出すので、意図通りに戻すには
+  default_provider/default_model を書けばよい。
+- **コンテキスト長の取得**: openai_compatible の listModels は id しか
+  見ておらず、GUI のコンテキストゲージ/セッション情報が
+  「(不明)」になっていた。`context_length` / `context_tokens` /
+  `max_model_len` / `meta.n_ctx(_train)` を吸って contextTokens へ。
+  さらに Ollama は /v1/models にコンテキストが無いため、ローカル
+  (http://)エンドポイントのみ 8 モデルまで上限で /api/show を
+  best-effort 参照(qwen2.context_length 等のサフィックス一致)。
+  halogen=524288、ollama LFM2.5=131072 を実機確認。
+- **/models の画面ノイズ**: ピッカーを開くと各プロバイダの
+  `models.list failed ... HTTP 401` が stderr に流れ alt-screen を
+  上書きしていた(実害なし・見苦しい)。openai-compatible/anthropic の
+  listModels から log.warn を除去(RPC の error フィールドで十分。
+  ピッカー内には `provider · unavailable` +理由が既に出る)。

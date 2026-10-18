@@ -557,3 +557,18 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
     の入れ子 install が失敗)のため非対応。ソースからは
     `git clone && npm install && npm run build && cd packages/cli && npm link`
     を案内(実機確認済み)。
+
+## v0.1.0 の実装メモ㉘(2026-10-19、リリース調整)
+
+- **README 単一ファイル化**: README.md + README.ja.md を統合し、冒頭の
+  アンカー(`#english` / `#日本語`)で切替る単一ドキュメントに。
+  タイトルを「Familiar Harness」に変更(desktop の productName と統一)。
+  両言語に**アンインストール手順**を追加(curl 版は
+  `~/.local/lib/familiar` + symlink + 任意で `~/.familiar`(設定・履歴・
+  secrets を消す注意書き)、npm link 版は `npm unlink`、デスクトップは
+  AppImage 削除 / `apt remove familiar-desktop` / Windows のアプリ設定)。
+  release.sh のステージングから README.ja.md を除外。
+- **既定モデルの現行化**: OpenAI 既定 `gpt-5.2`(提供終了)を
+  `gpt-6.1-sol` に更新(DEFAULT_CONFIG・CONFIG_TEMPLATE・README・
+  docs/spec/05-config.md)。例に「モデル名は流動的 — /models で要確認」
+  の注記を追加。

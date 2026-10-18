@@ -1,6 +1,6 @@
 {
   "name": "familiar-harness",
-  "description": "Familiar - a client/server agent harness (CLI + Desktop) inspired by OpenCode, HermEs Agent, and Claude Code",
+  "description": "Familiar Harness - a client/server agent harness (CLI + Web UI + Desktop) inspired by OpenCode, HermEs Agent, and Claude Code",
   "private": true,
   "type": "module",
   "license": "MIT",

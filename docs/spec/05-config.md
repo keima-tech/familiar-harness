@@ -9,7 +9,7 @@
 version: 1
 
 default_provider: openai      # ollama / anthropic / openrouter ...
-default_model: "gpt-5.2"      # provider 別の未指定時に使用(e.g. ollama: qwen2.5-coder:3b)
+default_model: "gpt-6.1-sol"  # provider 別の未指定時に使用(e.g. ollama: qwen2.5-coder:3b)
 
 providers:
   openai:

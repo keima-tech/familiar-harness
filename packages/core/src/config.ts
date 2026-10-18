@@ -183,7 +183,7 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
       kind: "openai_compatible",
       base_url: "https://api.openai.com/v1",
       auth: { env: "OPENAI_API_KEY" },
-      default_model: "gpt-5.2",
+      default_model: "gpt-6.1-sol",
     },
     google: {
       kind: "openai_compatible",
@@ -571,7 +571,7 @@ export function loadConfig(options: LoadConfigOptions = {}): ResolvedConfig {
     log.warn(`default_provider "${cfg.default_provider}" is not configured`);
   }
 
-  // Fresh configs inherit openai/gpt-5.2, which cannot be called without an
+  // Fresh configs inherit openai/gpt-6.1-sol, which cannot be called without an
   // API key. Unless the user picked a default explicitly (yaml or CLI flag),
   // make the effective default the first provider that actually works so the
   // out-of-the-box experience is a model that responds.
@@ -620,14 +620,14 @@ export const CONFIG_TEMPLATE = `# Familiar configuration (~/.familiar/config.yam
 version: 1
 
 default_provider: openai
-default_model: gpt-5.2
+default_model: gpt-6.1-sol
 
 providers:
   openai:
     kind: openai_compatible
     base_url: https://api.openai.com/v1
     auth: { env: OPENAI_API_KEY }
-    default_model: gpt-5.2
+    default_model: gpt-6.1-sol
   google:
     kind: openai_compatible
     base_url: https://generativelanguage.googleapis.com/v1beta/openai

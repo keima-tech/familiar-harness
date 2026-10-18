@@ -22,7 +22,7 @@ client/server 型エージェントハーネス。コア(`packages/core`)は UI 
   - パスは `node:path` の API で組み立て(OS 固有の `/` 直書き禁止)
   - シェル実行は `resolveShellCommand()` を経由(Windows は PowerShell 既定)
   - 改行・エンコーディングを決め打ちしない
-- UI 文字列: CLI表示は英語、README/spec は日本語
+- UI 文字列: CLI表示は英語。README は二言語(README.md=英語・README.ja.md=日本語、内容を同期)、docs/spec は日本語
 
 ## セキュリティ(最重要)
 

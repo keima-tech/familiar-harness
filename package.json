@@ -3,7 +3,7 @@
   "description": "Familiar - a client/server agent harness (CLI + Desktop) inspired by OpenCode, HermEs Agent, and Claude Code",
   "private": true,
   "type": "module",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "workspaces": [
     "packages/*"
   ],
@@ -24,5 +24,6 @@
     "@types/ws": "^8.18.0",
     "typescript": "^5.8.0",
     "ws": "^8.18.0"
-  }
+  },
+  "version": "1.1.0"
 }

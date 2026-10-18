@@ -1,12 +1,12 @@
 {
   "name": "@familiar/desktop",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Familiar desktop shell (Electron) — client for familiar-server; packaged via electron-builder (M6)",
   "main": "main.js",
   "author": "Familiar contributors",
   "homepage": "https://example.invalid/familiar",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "scripts": {
     "start": "electron .",
     "stage": "node scripts/stage.mjs",
@@ -20,8 +20,10 @@
   "build": {
     "appId": "dev.familiar.harness",
     "productName": "Familiar Harness",
-    "directories": { "output": "release" },
-  "artifactName": "familiar-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "release"
+    },
+    "artifactName": "familiar-${version}-${os}-${arch}.${ext}",
     "files": [
       "main.js",
       "preload.js",
@@ -31,23 +33,37 @@
       {
         "from": "stage/familiar/packages",
         "to": "familiar/packages",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "stage/familiar/node_modules",
         "to": "familiar/node_modules",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }]
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     },
     "linux": {
-      "target": ["deb", "AppImage"],
+      "target": [
+        "deb",
+        "AppImage"
+      ],
       "category": "Development",
       "executableName": "familiar",
       "maintainer": "Familiar contributors <familiar@example.invalid>"

@@ -530,3 +530,30 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   上書きしていた(実害なし・見苦しい)。openai-compatible/anthropic の
   listModels から log.warn を除去(RPC の error フィールドで十分。
   ピッカー内には `provider · unavailable` +理由が既に出る)。
+
+## v1.1 の実装メモ㉗(2026-10-19、公開準備:README 二言語化・CLI インストーラ)
+
+- **README 二言語**: README.md(英語・公開用の主ドキュメント)+ README.ja.md
+  (日本語・運用ノウハウやサーバ再起動手順を含む)。AGENTS.md の
+  UI 文字列ポリシーも更新。旧 README の「特徴(計画)」を実装済み
+  事実ベースに書き直し、インストール/クイックスタート/設定例/
+  リモートアクセス/アーキテクチャ/開発/リリース手順を整理。
+- **ライセンス**: MIT(LICENSE 追加、全 package.json を version 1.1.0 +
+  license: MIT)。
+- **CLI 配布**:
+  - `install.sh`(リポジトリ直下、raw 配布): Forgejo API で最新
+    Release の `familiar-*.tar.gz` を取得 → `~/.local/lib/familiar` へ展開 →
+    `~/.local/bin/familiar` に symlink。Node ≥ 24 を事前チェック、jq 不要の
+    JSON パース(tr -d 空白 → grep)、`FAMILIAR_FORGEJO` / `FAMILIAR_REPO` /
+    `FAMILIAR_INSTALL_DIR` / `FAMILIAR_BIN_DIR` で上書き可、バージョン引数対応。
+    ローカル HTTP モックで E2E 検証済み(展開→symlink→`familiar --version`
+    →`familiar serve` の Web UI 200)。
+  - `scripts/release.sh`: ビルド → ステージング(packages/*/dist +
+    server/public + package.json/lock + README/LICENSE/install.sh)→
+    `npm ci --omit=dev`(実行時依存は yaml・ws のみ)→ ステージ CLI の
+    `--version` 冒煙 → tarball(≈500KB)。`--publish` で Forgejo Release
+    作成+アセット添付(FORGEJO_TOKEN / FORGEJO_TOKEN_FILE)。
+  - `npm i -g git+URL` は npm の制約(workspaces+git 依存で prepare 内
+    の入れ子 install が失敗)のため非対応。ソースからは
+    `git clone && npm install && npm run build && cd packages/cli && npm link`
+    を案内(実機確認済み)。

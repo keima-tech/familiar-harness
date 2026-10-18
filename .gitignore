@@ -23,3 +23,6 @@ tmp/
 # Runtime data (created at user level ~/.familiar, but guard anyway)
 state.db
 state.db-*
+
+# release artifacts
+familiar-v*.tar.gz

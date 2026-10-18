@@ -1,6 +1,6 @@
 {
   "name": "@familiar/server",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "AgentServer dispatch layer + HTTP/WebSocket transport",
   "type": "module",
   "main": "dist/index.js",
@@ -19,5 +19,6 @@
     "@familiar/core": "*",
     "@familiar/protocol": "*",
     "ws": "^8.18.0"
-  }
+  },
+  "license": "MIT"
 }

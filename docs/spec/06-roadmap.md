@@ -355,3 +355,22 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   2 スペースインデントで色付き表示。turn サマリーは
   `✓ 4.2s · ↑1k ↓210 tok · 50 tok/s`。
 - `familiar`(引数なし)で TTY なら REPL 起動(前回実装)+ 非 TTY は USAGE。
+## v1.1 の実装メモ㉑(2026-10-18、OpenCode 風フルスクリーン TUI)
+
+- `packages/cli/src/ui/tui.ts` を新規実装(依存ゼロ・生 ANSI)。代替スクリーン +
+  外側の角丸ボーダー枠(上辺にタイトル+モデル、下辺にモード/モデル/トークン統計)、
+  スクロール可能なトランスクリプト、下段 1 行エディタ(+反転カーソル)、
+  動作中はスピナー + 経過秒。行差分描画で変更行のみ再出力。
+- `familiar`(TTY)/ `familiar chat`(TTY)がこの TUI を起動。パイプ/CI は従来の
+  行 REPL、`--line` で強制。入力は readline を使わず自前デコーダ
+  (UTF-8 StringDecoder + 不完全 ESC 保持、マウスホイール SGR 1006 揃い)。
+- transcript はブロック列(user=`❯`、assistant=TermMarkdown、thinking=`◌`、
+  tool=`● name · arg ✓ ms` + diff、info=システム出力)。スクロール中は
+  ビューポートをアンカー固定し、End で追従。
+- ツール行・diff・ターン統計は行 REPL と共通のヘルパ
+  (toolCallDetail / renderDiff / ThinkingFilter)を再利用。
+- GUI: プロバイダ設定行は名前(+既定バッジ)だけに簡素化。コンポーザの「＋」の
+  アクセント漏れを修正(.menu-wrap 再構成により直子セレクタが外れていた)。
+  サイドバー「＋」もゴースト化。
+- 新規組み込みプロバイダ **nvidia**(OpenAI互換、
+  https://integrate.api.nvidia.com/v1、認証は環境変数 NVIDIA_API_KEY)。

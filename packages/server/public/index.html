@@ -207,16 +207,17 @@
       <div class="pane-tabs">
         <button type="button" data-tab="inbox"><span data-i18n="pane.inbox">承認</span><span id="inbox-count" class="badge"></span></button>
         <button type="button" data-tab="todo"><span data-i18n="pane.todo">タスク</span><span id="todo-count" class="badge"></span></button>
-        <button type="button" data-tab="status"><span data-i18n="pane.status">状態</span></button>
-        <button type="button" data-tab="session-info"><span data-i18n="pane.info">情報</span></button>
+        <button type="button" data-tab="files"><span data-i18n="pane.files">ファイル</span></button>
         <button type="button" data-tab="ctx"><span data-i18n="pane.ctx">コンテキスト</span></button>
         <button id="close-pane" class="ghost" title="✕">✕</button>
       </div>
       <div class="pane-body">
         <div id="inbox" class="pane-panel" hidden><div id="inbox-body"></div></div>
         <div id="todo" class="pane-panel" hidden><div id="todo-body"></div></div>
-        <div id="status" class="pane-panel" hidden><div id="status-body"></div></div>
-        <div id="session-info" class="pane-panel" hidden><div id="info-body"></div></div>
+        <div id="files" class="pane-panel" hidden>
+          <div id="files-tree"></div>
+          <div id="files-view" hidden></div>
+        </div>
         <div id="ctx" class="pane-panel" hidden><div id="ctx-pane-body"></div></div>
       </div>
     </aside>

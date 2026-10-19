@@ -95,6 +95,8 @@ export const RPC_METHODS = [
   "skills.approve",
   "skills.reject",
   "curator.status",
+  "fs.list",
+  "fs.read",
   "curator.run",
   "mcp.status",
   "cron.status",

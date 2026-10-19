@@ -319,6 +319,10 @@ export class AgentServer {
         return this.modelsList(params);
       case "models.probe":
         return this.modelsProbe(params);
+      case "fs.list":
+        return this.fsList(params);
+      case "fs.read":
+        return this.fsRead(params);
       case "fs.dirs":
         return this.fsDirs(params);
       case "fs.suggest":
@@ -525,6 +529,68 @@ export class AgentServer {
       return path.resolve(cwd, raw);
     }
     return path.resolve(raw);
+  }
+
+  /** Directory listing with files, for the GUI file tree (read-only). */
+  private fsList(params: Record<string, unknown>): {
+    path: string;
+    entries: Array<{ name: string; path: string; dir: boolean; size: number }>;
+    home: string;
+  } {
+    const raw = (str(params, "path") ?? "").trim();
+    const target = this.resolveFsPath(raw);
+    let dirents: fs.Dirent[];
+    try {
+      dirents = fs.readdirSync(target, { withFileTypes: true });
+    } catch {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, `cannot list directory: ${target}`);
+    }
+    const mapped = dirents
+      .filter((e) => !e.name.startsWith("."))
+      .map((e) => {
+        let size = 0;
+        if (e.isFile()) {
+          try {
+            size = fs.statSync(path.join(target, e.name)).size;
+          } catch {
+            /* unreadable entry — report size 0 */
+          }
+        }
+        return { name: e.name, path: path.join(target, e.name), dir: e.isDirectory(), size };
+      })
+      .sort((a, b) => (a.dir === b.dir ? a.name.localeCompare(b.name) : a.dir ? -1 : 1))
+      .slice(0, 500);
+    return { path: target, entries: mapped, home: os.homedir() };
+  }
+
+  /** Read a text file for the GUI viewer. Capped at 256 KiB; binary files
+   * (NUL byte sniff) are rejected rather than rendered as mojibake. */
+  private fsRead(params: Record<string, unknown>): {
+    path: string;
+    content: string;
+    truncated: boolean;
+    size: number;
+  } {
+    const raw = (str(params, "path") ?? "").trim();
+    const target = this.resolveFsPath(raw);
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(target);
+    } catch {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, `cannot stat: ${target}`);
+    }
+    if (!stat.isFile()) throw new RpcError(RPC_ERROR_INVALID_PARAMS, `not a file: ${target}`);
+    const CAP = 256 * 1024;
+    const buf = fs.readFileSync(target);
+    if (buf.subarray(0, Math.min(buf.length, 8192)).includes(0)) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, `binary file: ${target}`);
+    }
+    return {
+      path: target,
+      content: buf.subarray(0, CAP).toString("utf8"),
+      truncated: buf.length > CAP,
+      size: buf.length,
+    };
   }
 
   private fsDirs(params: Record<string, unknown>): { dirs: string[]; home: string } {

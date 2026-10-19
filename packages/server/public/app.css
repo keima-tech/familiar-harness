@@ -957,3 +957,32 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
 #ctx-pane-body .ctx-big-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 #ctx-pane-body .ctx-big-text b { font-size: 14px; }
 #ctx-pane-body .ctx-big-text span { color: var(--dim); font-size: 11.5px; word-break: break-all; }
+
+/* ---- files tab: lazy tree + in-app text viewer ---- */
+#files-tree, #files-view { display: flex; flex-direction: column; gap: 2px; }
+.files-head {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+}
+.files-root {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text); font-weight: 600; font-size: 12px;
+}
+.files-row {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  background: none; border: none; color: var(--text); font: inherit; font-size: 12px;
+  padding: 4px 8px; border-radius: 6px; cursor: pointer; text-align: left;
+}
+.files-row:hover { background: var(--hover); }
+.files-row.selected { background: var(--panel2); }
+.files-row .f-ic { flex: none; }
+.files-row .f-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.files-row .f-size { color: var(--dim); font-size: 10.5px; flex: none; }
+.files-row .f-chev { color: var(--dim); font-size: 10px; flex: none; }
+.files-children { display: flex; flex-direction: column; gap: 1px; }
+.files-note { color: var(--dim); font-size: 11.5px; padding: 4px 8px; }
+.files-pre {
+  margin: 0; padding: 10px; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; font-family: var(--mono); font-size: 11.5px; line-height: 1.55;
+  overflow: auto; max-height: 52vh; white-space: pre; color: var(--text);
+}
+.files-truncated { color: var(--dim); font-size: 10.5px; }

@@ -85,9 +85,14 @@ const STR = {
     "top.pane": "サイドペイン",
     "pane.inbox": "承認",
     "pane.todo": "タスク",
-    "pane.status": "状態",
-    "pane.info": "情報",
     "pane.ctx": "コンテキスト",
+    "pane.files": "ファイル",
+    "files.loading": "読み込み中…",
+    "files.loadFailed": "読み込めませんでした: {0}",
+    "files.refresh": "再読み込み",
+    "files.empty": "(空のフォルダー)",
+    "files.back": "一覧に戻る",
+    "files.truncated": "先頭 256KB のみ表示",
     "notify.approvalTitle": "Familiar Harness — 承認が必要",
     "notify.turnDone": "Familiar Harness — ターン完了",
     "notify.turnFailed": "Familiar Harness — ターン失敗",
@@ -375,9 +380,14 @@ const STR = {
     "top.pane": "side pane",
     "pane.inbox": "approvals",
     "pane.todo": "tasks",
-    "pane.status": "status",
-    "pane.info": "info",
     "pane.ctx": "context",
+    "pane.files": "files",
+    "files.loading": "loading…",
+    "files.loadFailed": "cannot load: {0}",
+    "files.refresh": "refresh",
+    "files.empty": "(empty folder)",
+    "files.back": "back to the list",
+    "files.truncated": "first 256 KB shown",
     "notify.approvalTitle": "Familiar Harness — approval needed",
     "notify.turnDone": "Familiar Harness — turn completed",
     "notify.turnFailed": "Familiar Harness — turn failed",
@@ -1350,8 +1360,8 @@ function renderCtxPaneBody() {
   const ring = document.createElement("div");
   ring.className = "ctx-big";
   const R = 30, C = 2 * Math.PI * R;
-  const dash = used === undefined || !win
-    ? `${C * 0.5} ${C}`
+  const dash = used === undefined || !win || used <= 0
+    ? `0 ${C}`
     : `${C * Math.min(1, used / win)} ${C}`;
   const ringLabel = used === undefined ? "—" : win ? `${pct}%` : formatTokens(used);
   ring.innerHTML =
@@ -2406,7 +2416,7 @@ function proposalNode(kind, item, act) {
 // ---------------------------------------------------------------------------
 // status drawer (curator / MCP / cron)
 // ---------------------------------------------------------------------------
-const PANE_TABS = ["inbox", "todo", "status", "session-info", "ctx"];
+const PANE_TABS = ["inbox", "todo", "files", "ctx"];
 
 function showPane(which) {
   $("#rightpane").hidden = false;
@@ -2418,9 +2428,8 @@ function showPane(which) {
   }
   localStorage.setItem("familiar.paneTab", which);
   if (which === "inbox") void loadInbox();
-  if (which === "status") void loadStatus();
   if (which === "todo") void loadTodo();
-  if (which === "session-info") void loadSessionInfo();
+  if (which === "files") void renderFilesTab();
   if (which === "ctx") renderCtxPaneBody();
 }
 
@@ -2528,46 +2537,152 @@ async function refreshTodo() {
   }
 }
 
-async function loadStatus() {
-  const body = $("#status-body");
-  body.innerHTML = "";
+// ---------------------------------------------------------------------------
+// files tab: lazy tree of the session folder + in-app file viewer
+// ---------------------------------------------------------------------------
+let filesSessionKey = null;   // "sessionId:cwd" the tree was rendered for
+let filesSelectedPath = null; // file currently open in the viewer
+
+function formatBytes(n) {
+  if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${n} B`;
+}
+
+/** Open the files tab: render the tree when the session/cwd changed. */
+async function renderFilesTab() {
+  const root = state.currentSession?.cwd ?? "";
+  const key = `${state.sessionId}:${root}`;
+  if (filesSessionKey === key) return; // DOM persists across tab switches
+  filesSessionKey = key;
+  filesSelectedPath = null;
+  $("#files-tree").hidden = false;
+  $("#files-view").hidden = true;
+  const tree = $("#files-tree");
+  tree.innerHTML = `<div class="files-note">${esc(t("files.loading"))}</div>`;
+  tree.innerHTML = "";
+  const head = document.createElement("div");
+  head.className = "files-head";
+  head.innerHTML = `<span class="files-root" title="${esc(root)}">📁 ${esc(baseName(root) || root)}</span>`;
+  const refresh = document.createElement("button");
+  refresh.type = "button";
+  refresh.className = "ghost";
+  refresh.textContent = "↻";
+  refresh.title = t("files.refresh");
+  refresh.addEventListener("click", () => {
+    filesSessionKey = null;
+    void renderFilesTab();
+  });
+  head.appendChild(refresh);
+  tree.appendChild(head);
+  const list = document.createElement("div");
+  list.className = "files-list";
+  tree.appendChild(list);
+  let res;
   try {
-    const res = await rpc("curator.status");
-    const c = res.curator ?? {};
-    body.appendChild(sectionCard("curator", [
-      [t("stat.state"), `${c.enabled ? t("stat.enabled") : t("stat.disabled")}${c.paused ? " · " + t("stat.paused") : ""}`],
-      [t("stat.lastRun"), `${fmtTime(c.lastRunAt)}${c.lastRunAt ? ` (${relTime(c.lastRunAt)})` : ""}`],
-      [t("stat.nextDue"), fmtTime(c.nextDueAt)],
-      [t("stat.stale"), (c.stale ?? []).join(", ") || "—"],
-      [t("stat.archived"), `${(c.archived ?? []).length} (${t("stat.snapshots")}: ${c.snapshots ?? 0})`],
-      [t("stat.consolidation"), c.consolidate ? t("stat.enabled") : t("stat.disabled")],
-    ]));
+    res = await rpc("fs.list", { path: root });
   } catch (err) {
-    body.appendChild(sectionError("curator", err));
+    list.innerHTML = `<div class="files-note">${esc(t("files.loadFailed", err.message))}</div>`;
+    return;
   }
-  try {
-    const res = await rpc("mcp.status");
-    const servers = res.servers ?? [];
-    const rows = servers.map((sv) => [
-      sv.name ?? "(unknown)",
-      `${sv.state ?? "?"} · ${(sv.tools ?? []).length} tools${sv.error ? " · " + sv.error : ""}`,
-    ]);
-    body.appendChild(sectionCard("mcp servers", rows.length > 0 ? rows : [["—", t("stat.noServers")]]));
-  } catch (err) {
-    body.appendChild(sectionError("mcp servers", err));
+  list.innerHTML = "";
+  if (res.entries.length === 0) {
+    list.innerHTML = `<div class="files-note">${esc(t("files.empty"))}</div>`;
+    return;
   }
-  try {
-    const res = await rpc("cron.status");
-    const jobs = res.jobs ?? [];
-    const rows = jobs.map((j) => [
-      j.name ?? "(unnamed)",
-      j.enabled === false ? t("stat.disabled") : t("stat.everyMinutes", j.every_minutes),
-    ]);
-    body.appendChild(sectionCard("cron scheduler", rows.length > 0 ? rows : [["—", t("stat.noJobs")]], res.started ? t("stat.running") : t("stat.stopped")));
-  } catch (err) {
-    body.appendChild(sectionError("cron scheduler", err));
+  for (const e of res.entries) {
+    list.appendChild(await filesRowFor(e, 0, list));
   }
 }
+
+/** Expand a directory: fetch + fill its child container. */
+async function filesExpand(dirPath, childBox, depth) {
+  childBox.innerHTML = `<div class="files-note">${esc(t("files.loading"))}</div>`;
+  let res;
+  try {
+    res = await rpc("fs.list", { path: dirPath });
+  } catch (err) {
+    childBox.innerHTML = `<div class="files-note">${esc(t("files.loadFailed", err.message))}</div>`;
+    return;
+  }
+  childBox.innerHTML = "";
+  if (res.entries.length === 0) {
+    childBox.innerHTML = `<div class="files-note">${esc(t("files.empty"))}</div>`;
+    return;
+  }
+  for (const e of res.entries) {
+    childBox.appendChild(await filesRowFor(e, depth, childBox));
+  }
+}
+
+async function filesRowFor(entry, depth, parentBox) {
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = "files-row";
+  row.style.paddingLeft = `${8 + depth * 13}px`;
+  row.innerHTML =
+    `<span class="f-ic">${entry.dir ? "📁" : "📄"}</span>` +
+    `<span class="f-name">${esc(entry.name)}</span>` +
+    (entry.dir
+      ? `<span class="f-chev">▸</span>`
+      : `<span class="f-size">${formatBytes(entry.size)}</span>`);
+  if (entry.dir) {
+    let childBox = null;
+    row.addEventListener("click", async () => {
+      if (childBox && childBox.isConnected) {
+        childBox.remove();
+        childBox = null;
+        row.querySelector(".f-chev").textContent = "▸";
+        return;
+      }
+      childBox = document.createElement("div");
+      childBox.className = "files-children";
+      parentBox.appendChild(childBox);
+      row.querySelector(".f-chev").textContent = "▾";
+      await filesExpand(entry.path, childBox, depth + 1);
+    });
+  } else {
+    row.addEventListener("click", () => {
+      filesSelectedPath = entry.path;
+      void openFileViewer(entry.path);
+    });
+  }
+  return row;
+}
+
+/** In-app text file viewer (capped; binary files are rejected by the RPC). */
+async function openFileViewer(filePath) {
+  const tree = $("#files-tree");
+  const view = $("#files-view");
+  view.innerHTML = `<div class="files-note">${esc(t("files.loading"))}</div>`;
+  tree.hidden = true;
+  view.hidden = false;
+  let res;
+  try {
+    res = await rpc("fs.read", { path: filePath });
+  } catch (err) {
+    view.innerHTML = `<div class="files-note">${esc(t("files.loadFailed", err.message))}</div>`;
+    return;
+  }
+  view.innerHTML = "";
+  const head = document.createElement("div");
+  head.className = "files-head";
+  head.innerHTML =
+    `<button type="button" class="ghost" id="files-back" title="${esc(t("files.back"))}">⬅</button>` +
+    `<span class="files-root" title="${esc(res.path)}">📄 ${esc(baseName(res.path))}</span>` +
+    (res.truncated ? `<span class="files-truncated">${esc(t("files.truncated"))}</span>` : "");
+  head.querySelector("#files-back").addEventListener("click", () => {
+    view.hidden = true;
+    tree.hidden = false;
+  });
+  view.appendChild(head);
+  const pre = document.createElement("pre");
+  pre.className = "files-pre";
+  pre.textContent = res.content;
+  view.appendChild(pre);
+}
+
+
 
 // ---------------------------------------------------------------------------
 // UI preferences (localStorage "familiar.prefs") + settings modal
@@ -3332,64 +3447,6 @@ async function renderSystemSection(content) {
 
 // ---------------------------------------------------------------------------
 // session info drawer (context usage + counts, OpenCode 実装準拠の概要)
-// ---------------------------------------------------------------------------
-async function loadSessionInfo() {
-  const body = $("#info-body");
-  body.innerHTML = "";
-  if (!state.sessionId) {
-    body.innerHTML = `<div class="empty">${esc(t("top.noSession"))}</div>`;
-    return;
-  }
-  let data;
-  try {
-    data = await rpc("session.get", { id: state.sessionId });
-  } catch (err) {
-    body.innerHTML = `<div class="status-err">${esc(err.message)}</div>`;
-    return;
-  }
-  const s = data.session;
-  const msgs = (data.messages ?? []).filter((m) => m.meta?.ephemeral !== true);
-  const counts = { user: 0, assistant: 0, tool: 0 };
-  for (const m of msgs) counts[m.role === "system" ? "user" : m.role] = (counts[m.role] ?? 0) + 1;
-  body.appendChild(sectionCard(t("info.session"), [
-    [t("info.title"), s.title || s.id.slice(0, 8)],
-    [t("info.id"), s.id],
-    [t("info.providerModel"), `${s.provider}${s.model ? ` / ${s.model}` : ""}`],
-    [t("info.profile"), s.profile ?? t("none")],
-    [t("info.cwd"), s.cwd],
-    [t("info.created"), fmtTime(s.createdAt)],
-    [t("info.updated"), fmtTime(s.updatedAt)],
-  ]));
-  body.appendChild(sectionCard(t("info.messages"), [
-    [t("info.user"), counts.user],
-    [t("info.assistant"), counts.assistant],
-    [t("info.toolCalls"), counts.tool],
-    [t("info.total"), msgs.length],
-  ]));
-  const used = state.lastPromptTokensBySession[s.id];
-  const tot = state.usageBySession[s.id] ?? { prompt: 0, completion: 0 };
-  const win = await contextWindowFor(s.provider, s.model).catch(() => null);
-  body.appendChild(sectionCard(t("info.context"), [
-    [t("info.currentContext"), used !== undefined ? `${formatTokens(used)} tok` : t("info.notMeasured")],
-    [t("info.contextWindow"), win ? `${formatTokens(win)} tok` : t("info.unknown")],
-    ["usage", win && used !== undefined ? `${Math.round(Math.min(1, used / win) * 100)}%` : "—"],
-  ]));
-  body.appendChild(sectionCard(t("info.usageVisit"), [
-    [t("info.input"), `${formatTokens(tot.prompt)} tok`],
-    [t("info.output"), `${formatTokens(tot.completion)} tok`],
-  ]));
-  const list = document.createElement("div");
-  list.className = "card";
-  list.innerHTML = `<h4>${esc(t("info.rawMessages"))}</h4>`;
-  for (const m of msgs.slice(-14)) {
-    const line = document.createElement("div");
-    line.className = "rawmsg";
-    const preview = String(m.content ?? "").replace(/\s+/g, " ").trim().slice(0, 90);
-    line.innerHTML = `<span class="r ${esc(m.role)}">${esc(m.role === "tool" ? (m.name ?? "tool") : m.role)}</span>${esc(preview)}`;
-    list.appendChild(line);
-  }
-  body.appendChild(list);
-}
 
 // ---------------------------------------------------------------------------
 // session list context menu (right click)

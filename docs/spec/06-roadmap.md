@@ -494,7 +494,7 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
 - **usage 既定取得(openai_compatible)**: `stream_options.include_usage`
   を既定で送る(`stream_options: false` で無効化、ollama は DEFAULT_CONFIG
   で false のまま)。400/422 で `stream_options` が原因の拒否の場合は
-  1 回だけ外して再送し失敗させる。halogen 実機で turn.end に
+  1 回だけ外して再送し失敗させる。実機の llama.cpp 互換サーバで turn.end に
   usage が乗ることを確認(これが GUI の tok/s 非表示の原因)。
 - **GUI の tok/s 概算**: usage が取れない場合、ターン内ストリーム文字列から
   `estimateTokens`(CJK≈1字/トークン、その他≈4字/トークン)で概算し
@@ -524,7 +524,7 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   さらに Ollama は /v1/models にコンテキストが無いため、ローカル
   (http://)エンドポイントのみ 8 モデルまで上限で /api/show を
   best-effort 参照(qwen2.context_length 等のサフィックス一致)。
-  halogen=524288、ollama LFM2.5=131072 を実機確認。
+  ローカル llama.cpp 互換サーバ=524288、ollama モデル=131072 を実機確認。
 - **/models の画面ノイズ**: ピッカーを開くと各プロバイダの
   `models.list failed ... HTTP 401` が stderr に流れ alt-screen を
   上書きしていた(実害なし・見苦しい)。openai-compatible/anthropic の

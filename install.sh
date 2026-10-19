@@ -30,7 +30,16 @@ fetch() { $DOWNLOAD "$1"; }
 
 # --- resolve the latest release asset ---------------------------------------
 VERSION="${1:-}"
-API="$REPO_HOST/api/v1/repos/$REPO_SLUG/releases"
+# Forgejo and GitHub both expose releases with the same asset fields
+# (browser_download_url); only the API base differs
+case "$REPO_HOST" in
+  *github.com*)
+    API="${FAMILIAR_GITHUB_API:-https://api.github.com}/repos/$REPO_SLUG/releases"
+    ;;
+  *)
+    API="$REPO_HOST/api/v1/repos/$REPO_SLUG/releases"
+    ;;
+esac
 if [ -n "$VERSION" ]; then
   API="$API/tags/v$VERSION"
   log "installing familiar v$VERSION"

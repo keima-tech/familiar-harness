@@ -58,7 +58,10 @@ body {
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 14px;
 }
-.logo { font-weight: 600; letter-spacing: 0.3px; }
+.logo { font-weight: 600; letter-spacing: 0.3px; display: inline-flex; align-items: center; gap: 6px; }
+.logo-ic { width: 17px; height: 17px; border-radius: 4px; display: block; }
+.settings-brand { display: inline-flex; align-items: center; gap: 10px; }
+.brand-ic { width: 30px; height: 30px; border-radius: 8px; display: block; }
 #new-session {
   padding: 3px 9px; border-radius: 6px; font-size: 13px;
   background: transparent; border: none; color: var(--dim); font-weight: 400;

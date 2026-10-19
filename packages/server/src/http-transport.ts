@@ -42,6 +42,11 @@ const STATIC_FILES: Record<string, { file: string; type: string }> = {
   "/index.html": { file: "index.html", type: "text/html; charset=utf-8" },
   "/app.js": { file: "app.js", type: "text/javascript; charset=utf-8" },
   "/app.css": { file: "app.css", type: "text/css; charset=utf-8" },
+  "/favicon.ico": { file: "favicon.ico", type: "image/x-icon" },
+  "/icon-32.png": { file: "icon-32.png", type: "image/png" },
+  "/icon-192.png": { file: "icon-192.png", type: "image/png" },
+  "/icon-512.png": { file: "icon-512.png", type: "image/png" },
+  "/brand.png": { file: "brand.png", type: "image/png" },
 };
 
 function publicDir(): string {

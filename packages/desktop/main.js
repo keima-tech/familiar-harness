@@ -109,6 +109,9 @@ function spawnServe(port) {
 }
 
 function createWindow(url) {
+  // dev: packages/desktop/build/icon.png — packaged installs get the icon
+  // from the electron-builder desktop entries, so this is only a fallback
+  const iconPath = path.join(__dirname, "build", "icon.png");
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 840,
@@ -116,6 +119,7 @@ function createWindow(url) {
     minHeight: 600,
     title: "Familiar Harness",
     backgroundColor: "#0f1117",
+    ...(fs.existsSync(iconPath) ? { icon: iconPath } : {}),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

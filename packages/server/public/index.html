@@ -4,13 +4,16 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Familiar Harness</title>
+  <link rel="icon" href="/favicon.ico" sizes="any" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+  <link rel="apple-touch-icon" href="/icon-192.png" />
   <link rel="stylesheet" href="/app.css" />
 </head>
 <body>
   <div id="app">
     <aside id="sidebar">
       <div class="side-head">
-        <span class="logo">◍ Familiar Harness</span>
+        <span class="logo"><img class="logo-ic" src="/icon-32.png" alt="" /> Familiar Harness</span>
         <button id="new-session" title="新規セッション" data-i18n-title="side.newSession">＋</button>
       </div>
       <div id="session-search" class="search-row">
@@ -211,7 +214,7 @@
     <div id="settings-overlay" class="overlay" hidden>
     <div class="modal" role="dialog" aria-label="settings">
       <div class="modal-head">
-        <b data-i18n="settings.title">設定</b>
+        <span class="settings-brand"><img class="brand-ic" src="/brand.png" alt="" /><b data-i18n="settings.title">設定</b></span>
         <button id="close-settings" class="iconbtn" title="閉じる (Esc)" data-i18n-title="search.close">✕</button>
       </div>
       <div class="modal-body">

@@ -656,3 +656,19 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   リング %・ペイン開閉と数値・モーダル表示/選択/作成/自動クローズ。
   過去テスト実行の残留 serve がポート 46210 を占有しセッションが
   蓄積する問題があるため、テストは起動時に残留 serve を掃除。
+
+## v0.1.0 の実装メモ㉝(2026-10-19、アプリアイコン・ファビコン)
+
+- ユーザー制作のアイコン 2 種(ワードマーク入り/なし)を組み込み。
+  PIL で中心スクエア+角丸マスク(半径 15.5%)を適用し透過 RGBA 化:
+  - `packages/desktop/build/icon.png`(512)+ `icon.ico`(16-256 多解像度)
+    + `build/icons/<n>.png` — electron-builder が deb/AppImage/NSIS/
+    rcedit に自動適用。`win.signExecutable: false`(署名のみスキップ、
+    rcedit によるアイコン/バージョン情報は wine で適用)。
+  - `public/favicon.ico`(16/32/48)+ `icon-32/192/512.png` +
+    `brand.png`(ワードマーク版)。http-transport の静的ホワイトリストに
+    追加。index.html に favicon/apple-touch-icon リンク、
+    sidebar ロゴを ◍ テキストから img に置換、設定モーダルヘッダに
+    brand.png を表示。
+- 検証: favicon/icon-32/brand が 200(image/x-icon, image/png)で配信、
+  GUI テスト 23 項目再合格、リリース資産 5 点を冪等差し替え。

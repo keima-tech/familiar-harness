@@ -605,3 +605,18 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   したが、初回リリースは v0.1.0 のままにする方針のため、
   旧 Release v0.1.0/v0.1.1 とタグを削除し、現行 HEAD から
   デスクトップ同梱で v0.1.0 を再発行する。
+
+## v0.1.0 の実装メモ㉛(2026-10-19、Windows portable 同梱・release.sh --attach)
+
+- **Windows portable exe**: Linux から `electron-builder --win portable` は
+  wine 不要でビルド可能(アンインストーラ生成を行わないため)。
+  NSIS はアンインストーラ生成に wine を使うため ENOENT。
+  `build.win.signAndEditExecutable: false` で rcedit/signtool をスキップ
+  (インストール後の exe は素の Electron アイコン)。portable exe
+  (familiar-0.1.0-win-x64-portable.exe ≈ 85MB、サーバ同梱 stage/familiar 込み)
+  を v0.1.0 Release に添付。
+- **release.sh --attach FILE**: 追加アセットを冪等に添付するオプション
+  (同名アセットは削除して再アップロード)。409 時の既存リリース再利用と
+  組み合わせて再発行が安全。
+- README 両言語: Release 添付バイナリ(deb/AppImage/win portable)の案内、
+  アンインストール手順に portable 版を追記。

@@ -56,9 +56,14 @@ cd packages/cli && npm link   # puts `familiar` on your PATH
 
 **Desktop app (Electron):**
 
+- Ready-made binaries are attached to each [release](https://example.invalid:3000/owner/familiar-harness/releases):
+  `familiar-<version>-linux-amd64.deb` / `familiar-<version>-linux-x86_64.AppImage` and
+  `familiar-<version>-win-x64-portable.exe` (Windows: download and run, no install needed).
+- Or build them yourself:
+
 ```bash
 npm run -w packages/desktop pack:linux   # deb + AppImage
-npm run -w packages/desktop pack:win     # NSIS (run on Windows)
+npm run -w packages/desktop pack:win     # NSIS (needs wine when cross-built on Linux)
 ```
 
 ### Updating
@@ -85,7 +90,7 @@ npm unlink                     # removes the global `familiar` symlink
 # then delete the repository checkout if you no longer need it
 ```
 
-**Desktop app:** delete the AppImage file, or `sudo apt remove familiar-harness` (deb). Windows: uninstall "Familiar Harness" from the Apps settings.
+**Desktop app:** delete the AppImage file, or `sudo apt remove familiar-harness` (deb). Windows: delete the portable exe, or uninstall "Familiar Harness" from the Apps settings (NSIS install).
 
 ### Quick start
 
@@ -235,9 +240,14 @@ cd packages/cli && npm link   # `familiar` コマンドを PATH に登録
 
 **デスクトップアプリ(Electron):**
 
+- 各 [Release](https://example.invalid:3000/owner/familiar-harness/releases) にバイナリを同梱:
+  `familiar-<version>-linux-amd64.deb` / `familiar-<version>-linux-x86_64.AppImage`、
+  Windows は `familiar-<version>-win-x64-portable.exe`(ダウンロードしてそのまま実行、インストール不要)。
+- 自前でビルドする場合:
+
 ```bash
 npm run -w packages/desktop pack:linux   # deb + AppImage
-npm run -w packages/desktop pack:win     # NSIS(Windows 上で実行)
+npm run -w packages/desktop pack:win     # NSIS(Linux でクロスビルドする場合は wine が必要)
 ```
 
 ### アップデート
@@ -264,7 +274,7 @@ npm unlink                     # グローバルの `familiar` シンボリッ�
 # リポジトリ自体も不要なら checkout を削除
 ```
 
-**デスクトップアプリ:** AppImage はファイルを削除。deb は `sudo apt remove familiar-harness`。Windows は「アプリ設定」から Familiar Harness をアンインストールしてください。
+**デスクトップアプリ:** AppImage はファイルを削除。deb は `sudo apt remove familiar-harness`。Windows の portable 版は exe を削除、NSIS 版は「アプリ設定」からアンインストールしてください。
 
 ### クイックスタート
 

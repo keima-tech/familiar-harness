@@ -5,6 +5,7 @@
 #   scripts/release.sh --desktop              # also build deb + AppImage
 #   scripts/release.sh --publish              # release = tarball + desktop
 #   scripts/release.sh --publish --no-desktop # tarball-only release
+#   scripts/release.sh --publish --attach EXTRA.exe   # attach extra assets
 #
 # Publishing needs a token with repo write access:
 #   FORGEJO_TOKEN=... scripts/release.sh --publish
@@ -18,15 +19,26 @@ REPO_HOST="${FAMILIAR_FORGEJO:-https://example.invalid:3000}"
 REPO_SLUG="${FAMILIAR_REPO:-owner/familiar-harness}"
 PUBLISH=0
 DESKTOP=-1 # unset — decided by --publish below
+ATTACH_FILES=""
+PENDING_ATTACH=0
 for arg in "$@"; do
   case "$arg" in
     --publish) PUBLISH=1 ;;
     --desktop) DESKTOP=1 ;;
     --no-desktop) DESKTOP=0 ;;
-    *) echo "unknown option: $arg"; exit 1 ;;
+    --attach) PENDING_ATTACH=1 ;;
+    *)
+      if [ "$PENDING_ATTACH" -eq 1 ]; then
+        ATTACH_FILES="$ATTACH_FILES $arg"
+        PENDING_ATTACH=0
+      else
+        echo "unknown option: $arg"; exit 1
+      fi
+      ;;
   esac
 done
 [ "$DESKTOP" -eq -1 ] && DESKTOP=$PUBLISH # publishing includes desktop by default
+[ "$PENDING_ATTACH" -eq 0 ] || { echo "error: --attach needs a file argument"; exit 1; }
 
 VERSION="$(node -p 'require("./package.json").version')"
 TARBALL="familiar-v${VERSION}.tar.gz"
@@ -104,7 +116,7 @@ fi
 [ -n "$RELEASE_ID" ] || { echo "error: cannot create or find release v$VERSION"; exit 1; }
 echo "release id: $RELEASE_ID"
 
-for f in $ARTIFACTS; do
+for f in $ARTIFACTS $ATTACH_FILES; do
   name="$(basename "$f")"
   # replace a same-name asset (idempotent re-publish)
   old_id="$(curl -fsS "$API/releases/$RELEASE_ID/assets" -H "$AUTH" | json_field '(v.find(a=>a.name===process.argv[2])||{}).id' "$name")" || old_id=""

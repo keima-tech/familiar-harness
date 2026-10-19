@@ -620,3 +620,14 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   組み合わせて再発行が安全。
 - README 両言語: Release 添付バイナリ(deb/AppImage/win portable)の案内、
   アンインストール手順に portable 版を追記。
+
+## v0.1.0 の実装メモ㉜(2026-10-19、NSIS インストーラ同梱)
+
+- ユーザー環境に wine64(10.0)導入により、Linux からの NSIS クロスビルドが
+  完走(electron-builder はアンインストーラ生成のためビルド済み
+  インストーラを wine で 2 回実行する)。`familiar-0.1.0-win-x64.exe`
+  (≈95MB・PE32/NSIS)を v0.1.0 Release に追加添付し、アセットは
+  tarball + deb + AppImage + win NSIS + win portable の 5 点構成。
+  なお `signAndEditExecutable: false` は維持(rcedit/signtool を使わない —
+  カスタムアイコン未設定のため実用上の差はなし)。
+- README 両言語の Release バイナリ一覧に NSIS インストーラを追記。

@@ -58,7 +58,8 @@ cd packages/cli && npm link   # puts `familiar` on your PATH
 
 - Ready-made binaries are attached to each [release](https://example.invalid:3000/owner/familiar-harness/releases):
   `familiar-<version>-linux-amd64.deb` / `familiar-<version>-linux-x86_64.AppImage` and
-  `familiar-<version>-win-x64-portable.exe` (Windows: download and run, no install needed).
+  for Windows `familiar-<version>-win-x64.exe` (NSIS installer) or
+  `familiar-<version>-win-x64-portable.exe` (download and run, no install needed).
 - Or build them yourself:
 
 ```bash
@@ -242,7 +243,8 @@ cd packages/cli && npm link   # `familiar` コマンドを PATH に登録
 
 - 各 [Release](https://example.invalid:3000/owner/familiar-harness/releases) にバイナリを同梱:
   `familiar-<version>-linux-amd64.deb` / `familiar-<version>-linux-x86_64.AppImage`、
-  Windows は `familiar-<version>-win-x64-portable.exe`(ダウンロードしてそのまま実行、インストール不要)。
+  Windows は NSIS インストーラ `familiar-<version>-win-x64.exe`、または
+  `familiar-<version>-win-x64-portable.exe`(ダウンロードしてそのまま実行、インストール不要)。
 - 自前でビルドする場合:
 
 ```bash

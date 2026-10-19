@@ -2,8 +2,8 @@
 
 # Familiar Harness
 
-A client/server agent harness with a terminal UI, a Web UI and a desktop app sharing one core engine.
-Inspired by OpenCode, HermEs Agent and Claude Code — **MIT licensed**, runs on Node.js 24+ (Linux / Windows / macOS).
+A client/server agent harness with a full-screen terminal UI, a Web UI and a desktop app sharing one core engine.
+**MIT licensed**, runs on Node.js 24+ (Linux / Windows / macOS).
 
 **English** · [日本語](#日本語)
 
@@ -17,13 +17,13 @@ Inspired by OpenCode, HermEs Agent and Claude Code — **MIT licensed**, runs on
 
 ### What is Familiar Harness?
 
-`familiar serve` runs the agent core as a daemon (JSON-RPC over HTTP + WebSocket). The CLI with its OpenCode-style TUI, the Web UI, and the Electron desktop app are all thin clients of that same core — start a CLI while `serve` is alive and it attaches to it automatically.
+`familiar serve` runs the agent core as a daemon (JSON-RPC over HTTP + WebSocket). The CLI with its full-screen TUI, the Web UI, and the Electron desktop app are all thin clients of that same core — start a CLI while `serve` is alive and it attaches to it automatically.
 
 ### Highlights
 
 - **Client/server separation** — one core engine, three frontends; sessions persist server-side in SQLite.
 - **Provider abstraction** — OpenAI-compatible APIs (OpenAI / OpenRouter / NVIDIA / vLLM / llama.cpp …), Anthropic, and keyless local endpoints (Ollama, LAN LLM servers). If the configured default provider has no credentials, Familiar falls back to the first usable one automatically, so `familiar chat` works out of the box with a local model.
-- **OpenCode-style TUI** — splash + frameless layout, `/models` and `/sessions` pickers, bracketed paste, CJK-IME friendly caret, in-TUI tool approvals (`y/N`), Esc to stop a turn, tok/s readouts, context sizes per model.
+- **Full-screen TUI** — splash + frameless layout, `/models` and `/sessions` pickers, bracketed paste, CJK-IME friendly caret, in-TUI tool approvals (`y/N`), Esc to stop a turn, tok/s readouts, context sizes per model.
 - **Web UI** — served by `familiar serve` (default `http://127.0.0.1:46210`): sessions, provider/model pickers, context gauge, tok/s, diff cards, settings.
 - **Agent toolset** — read/write/edit, glob/grep, bash, webfetch/websearch, todos, sub-agent `task` (parallel), git worktrees, MCP servers (stdio, hot-loaded).
 - **Self-improvement loop** — persistent memory, `SKILL.md` procedures with a curator (usage stats, staleness, archival), background self-review, and staged writes with human approval.
@@ -96,7 +96,7 @@ npm unlink                     # removes the global `familiar` symlink
 ### Quick start
 
 ```bash
-# full-screen TUI (opencode-style) — same as `familiar chat`
+# full-screen TUI — same as `familiar chat`
 familiar
 
 # one-shot, headless
@@ -202,13 +202,13 @@ FORGEJO_TOKEN=... scripts/release.sh --publish   # create the release + upload
 
 ### Familiar Harness とは?
 
-`familiar serve` がエージェントコアをデーモン化し(JSON-RPC over HTTP+WebSocket)、OpenCode 風 TUI の CLI・Web UI・Electron デスクトップアプリが**同一のコアエンジン**を共有します。`serve` が生きていれば CLI は自動で RPC 接続に切り替わり、セッションはサーバ側の SQLite に永続化されます。
+`familiar serve` がエージェントコアをデーモン化し(JSON-RPC over HTTP+WebSocket)、フルスクリーン TUI の CLI・Web UI・Electron デスクトップアプリが**同一のコアエンジン**を共有します。`serve` が生きていれば CLI は自動で RPC 接続に切り替わり、セッションはサーバ側の SQLite に永続化されます。
 
 ### 特徴
 
 - **client/server 分離** — 1 つのコア、3 つのフロントエンド。
 - **プロバイダ抽象** — OpenAI 互換 API(OpenAI / OpenRouter / NVIDIA / vLLM / llama.cpp 等)・Anthropic・キーレスのローカルエンドポイント(Ollama、LAN 内 LLM サーバ)。既定プロバイダに認証情報が無い場合、呼び出し可能なプロバイダへ自動フォールバックするため、ローカルモデルで `familiar chat` がそのまま動きます。
-- **OpenCode 風 TUI** — スプラッシュ+外枠なしレイアウト、`/models`・`/sessions` ピッカー、bracketed paste、CJK IME 対応カーソル、TUI 内ツール承認(`y/N`)、Esc でターン中断、tok/s 表示、モデル別コンテキスト長表示。
+- **フルスクリーン TUI** — スプラッシュ+外枠なしレイアウト、`/models`・`/sessions` ピッカー、bracketed paste、CJK IME 対応カーソル、TUI 内ツール承認(`y/N`)、Esc でターン中断、tok/s 表示、モデル別コンテキスト長表示。
 - **Web UI** — `familiar serve` が配信(既定 `http://127.0.0.1:46210`):セッション一覧、provider/model ピッカー、コンテキストゲージ、tok/s、diff カード、設定。
 - **ツール群** — read/write/edit、glob/grep、bash、webfetch/websearch、todo、サブエージェント `task`(並列)、git worktree、MCP サーバ(stdio・ホットロード)。
 - **自己改善ループ** — 永続 memory、`SKILL.md` 手続き+curator(使用統計・staleness・archival)、バックグラウンド自己レビュー、staging された書き込みの人間承認。
@@ -281,7 +281,7 @@ npm unlink                     # グローバルの `familiar` シンボリッ�
 ### クイックスタート
 
 ```bash
-# フルスクリーン TUI(opencode 風)— `familiar chat` と同じ
+# フルスクリーン TUI — `familiar chat` と同じ
 familiar
 
 # ワンショット実行(ヘッドレス)

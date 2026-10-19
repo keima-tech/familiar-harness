@@ -109,6 +109,15 @@
             </div>
           </div>
           <div class="menu-wrap">
+            <button id="effort-chip" type="button" title="推論エフォート" data-i18n-title="chip.effort">既定 ▾</button>
+            <div id="effort-pop" class="pop up" hidden>
+              <button type="button" data-effort=""><b data-i18n="effort.default">既定</b><small data-i18n="effort.defaultDesc">エフォートなし</small></button>
+              <button type="button" data-effort="low"><b>low</b><small data-i18n="effort.lowDesc">低</small></button>
+              <button type="button" data-effort="medium"><b>medium</b><small data-i18n="effort.mediumDesc">中</small></button>
+              <button type="button" data-effort="high"><b>high</b><small data-i18n="effort.highDesc">高</small></button>
+            </div>
+          </div>
+          <div class="menu-wrap">
             <button id="ctx-btn" type="button" title="コンテキスト使用量" data-i18n-title="chip.ctx">
               <svg viewBox="0 0 22 22" width="16" height="16">
                 <circle class="gauge-track" cx="11" cy="11" r="8"></circle>
@@ -134,15 +143,6 @@
                 <div><small data-i18n="ctx.free">残り</small><span id="ctx-free">—</span></div>
               </div>
               <div id="ctx-note" class="ctx-note"></div>
-            </div>
-          </div>
-          <div class="menu-wrap">
-            <button id="effort-chip" type="button" title="推論エフォート" data-i18n-title="chip.effort">既定 ▾</button>
-            <div id="effort-pop" class="pop up" hidden>
-              <button type="button" data-effort=""><b data-i18n="effort.default">既定</b><small data-i18n="effort.defaultDesc">エフォートなし</small></button>
-              <button type="button" data-effort="low"><b>low</b><small data-i18n="effort.lowDesc">低</small></button>
-              <button type="button" data-effort="medium"><b>medium</b><small data-i18n="effort.mediumDesc">中</small></button>
-              <button type="button" data-effort="high"><b>high</b><small data-i18n="effort.highDesc">高</small></button>
             </div>
           </div>
           <button id="send" type="submit" title="送信 (Enter)" data-i18n-title="send.enter">↑</button>

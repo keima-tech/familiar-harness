@@ -5,10 +5,12 @@
 "use strict";
 
 const { app, BrowserWindow, shell, dialog, ipcMain } = require("electron");
-const { spawn } = require("node:child_process");
+const { spawn, execFile } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const http = require("node:http");
+const https = require("node:https");
+const os = require("node:os");
 
 const CFG = {
   ports: [46210, 46211, 46212], // try in order; first free lives
@@ -26,6 +28,170 @@ ipcMain.handle("dialog:pickDirectory", async (ev) => {
     properties: ["openDirectory", "createDirectory"],
   });
   return res.canceled ? null : (res.filePaths[0] ?? null);
+});
+
+// ---------------------------------------------------------------------------
+// self-update: check the Forgejo releases, surface a ⬇ in the topbar, and
+// replace the installation on request (same swap scheme as `familiar update`)
+// ---------------------------------------------------------------------------
+const UPDATE_CFG = {
+  host: process.env.FAMILIAR_FORGEJO || "https://example.invalid:3000",
+  repo: process.env.FAMILIAR_REPO || "owner/familiar-harness",
+  pollMs: 6 * 60 * 60 * 1000, // auto re-check every 6h
+};
+
+let updateStatus = { status: "idle" };
+
+function semverCmp(a, b) {
+  const triple = (v) => {
+    const [nums] = String(v).split("-");
+    const p = (nums ?? "").split(".").map((n) => Number.parseInt(n, 10));
+    return [p[0] ?? 0, p[1] ?? 0, p[2] ?? 0];
+  };
+  const [pa, pb] = [triple(a), triple(b)];
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) - (pb[i] ?? 0);
+  }
+  return 0;
+}
+
+/** GET a URL as a buffer, tolerating self-signed CAs on the second try
+ * (self-hosted Forgejo). FAMILIAR_TLS_STRICT=1 disables the fallback. */
+function httpGetBuffer(url) {
+  const viaHttps = () =>
+    new Promise((resolve, reject) => {
+      const req = https.get(url, { rejectUnauthorized: false }, (res) => {
+        const chunks = [];
+        res.on("data", (c) => chunks.push(c));
+        res.on("end", () =>
+          resolve({ ok: (res.statusCode ?? 500) < 400, status: res.statusCode ?? 0, buffer: Buffer.concat(chunks) }),
+        );
+      });
+      req.on("error", reject);
+      req.setTimeout(300_000, () => req.destroy(new Error("timeout")));
+    });
+  return fetch(url, { signal: AbortSignal.timeout(300_000) })
+    .then(async (res) => ({ ok: res.ok, status: res.status, buffer: Buffer.from(await res.arrayBuffer()) }))
+    .catch((err) => {
+      const code = String(err?.cause?.code ?? "");
+      if (!/CERT|SSL|TLS/i.test(code) || process.env.FAMILIAR_TLS_STRICT === "1") throw err;
+      return viaHttps();
+    });
+}
+
+function pushUpdateStatus(patch) {
+  updateStatus = { ...updateStatus, ...patch };
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("update:status", updateStatus);
+  }
+}
+
+/** The asset matching this platform (NSIS on Windows, AppImage on Linux). */
+function pickUpdateAsset(assets) {
+  const list = assets ?? [];
+  if (process.platform === "win32") {
+    return list.find((a) => /^familiar-\d+\.\d+\.\d+-win-x64\.exe$/.test(a.name ?? "")) ?? null;
+  }
+  if (process.platform === "linux") {
+    return list.find((a) => /^familiar-\d+\.\d+\.\d+-linux-x86_64\.AppImage$/.test(a.name ?? "")) ?? null;
+  }
+  return null;
+}
+
+async function checkForUpdate() {
+  if (updateStatus.status === "downloading") return updateStatus;
+  try {
+    const res = await httpGetBuffer(`${UPDATE_CFG.host}/api/v1/repos/${UPDATE_CFG.repo}/releases`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const releases = JSON.parse(res.buffer.toString("utf8"));
+    const current = app.getVersion();
+    let pick = null;
+    for (const r of releases) {
+      const asset = pickUpdateAsset(r.assets);
+      if (!asset) continue;
+      const v = (r.tag_name ?? "").replace(/^v/, "");
+      if (semverCmp(v, current) > 0 && (!pick || semverCmp(v, pick.version) > 0)) {
+        pick = { version: v, url: asset.browser_download_url };
+      }
+    }
+    if (pick) pushUpdateStatus({ status: "available", version: pick.version, url: pick.url, error: "" });
+    else pushUpdateStatus({ status: "upToDate", version: current, error: "" });
+  } catch (err) {
+    pushUpdateStatus({ status: "error", error: String(err?.message ?? err) });
+  }
+  return updateStatus;
+}
+
+/** The directory an update replaces (extracted-AppImage layout), or null when
+ * the install layout is unknown (dev checkout → update via git pull). */
+function installRoot() {
+  if (process.env.FAMILIAR_INSTALL_ROOT) return process.env.FAMILIAR_INSTALL_ROOT;
+  if (process.platform === "win32" || process.env.APPIMAGE) return null;
+  try {
+    const dir = path.dirname(fs.realpathSync(process.execPath));
+    return fs.existsSync(path.join(dir, "resources", "familiar")) ? dir : null;
+  } catch {
+    return null;
+  }
+}
+
+async function applyUpdate() {
+  if (updateStatus.status !== "available") return updateStatus;
+  const url = updateStatus.url ?? "";
+  const version = updateStatus.version ?? "";
+  try {
+    pushUpdateStatus({ status: "downloading" });
+    if (process.platform === "win32") {
+      // NSIS: download the installer, then the ↻ click launches it and quits
+      const tmp = path.join(os.tmpdir(), `familiar-setup-v${version}.exe`);
+      const dl = await httpGetBuffer(url);
+      if (!dl.ok) throw new Error(`download failed (HTTP ${dl.status})`);
+      fs.writeFileSync(tmp, dl.buffer);
+      pushUpdateStatus({ status: "applied", version, installer: tmp });
+      return updateStatus;
+    }
+    const root = installRoot();
+    if (!root) throw new Error("unsupported install layout — update via the release page");
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "familiar-update-"));
+    try {
+      const appimg = path.join(tmp, "familiar.AppImage");
+      const dl = await httpGetBuffer(url);
+      if (!dl.ok) throw new Error(`download failed (HTTP ${dl.status})`);
+      fs.writeFileSync(appimg, dl.buffer);
+      fs.chmodSync(appimg, 0o755);
+      // --appimage-extract is handled by the AppImage runtime itself (no FUSE)
+      await new Promise((resolve, reject) =>
+        execFile(appimg, ["--appimage-extract"], { cwd: tmp }, (err) => (err ? reject(err) : resolve())),
+      );
+      const staged = path.join(tmp, "squashfs-root");
+      if (!fs.existsSync(path.join(staged, "resources", "familiar", "packages", "cli", "dist", "familiar.js"))) {
+        throw new Error("staged update looks incomplete — refusing to swap");
+      }
+      const backup = `${root}.bak-${process.pid}`;
+      if (fs.existsSync(backup)) fs.rmSync(backup, { recursive: true, force: true });
+      fs.renameSync(root, backup);
+      try {
+        fs.renameSync(staged, root);
+      } catch (err) {
+        fs.renameSync(backup, root); // restore
+        throw err;
+      }
+      fs.rmSync(backup, { recursive: true, force: true });
+      pushUpdateStatus({ status: "applied", version, error: "" });
+    } finally {
+      if (fs.existsSync(tmp)) fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  } catch (err) {
+    pushUpdateStatus({ status: "available", version, url, error: String(err?.message ?? err) });
+  }
+  return updateStatus;
+}
+
+ipcMain.handle("update:check", () => checkForUpdate());
+ipcMain.handle("update:apply", () => applyUpdate());
+ipcMain.handle("update:restart", () => {
+  app.relaunch();
+  app.exit(0);
 });
 
 function probeOnce(port) {
@@ -162,6 +328,12 @@ if (!gotLock) {
       return;
     }
     createWindow(server.token ? `${server.url}/?token=${encodeURIComponent(server.token)}` : server.url);
+    // auto-check for updates once the window is up, then every 6h — only when
+    // the install layout is updatable (dev checkouts update via git pull)
+    if (installRoot() !== null || process.platform === "win32") {
+      setTimeout(() => void checkForUpdate(), 4_000);
+      setInterval(() => void checkForUpdate(), UPDATE_CFG.pollMs);
+    }
   });
 
   app.on("window-all-closed", () => {

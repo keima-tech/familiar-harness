@@ -74,6 +74,14 @@ const STR = {
     "top.gaugeNoTurn": "コンテキスト使用量 — 次のターン送信後に表示",
     "side.noFolder": "フォルダーなし",
     "chip.ctx": "コンテキスト使用量",
+    "update.available": "アップデートがあります — v{0}(⬇ から適用)",
+    "update.downloading": "アップデートをダウンロード中…",
+    "update.applied": "v{0} を適用しました — ↻ で再起動してください",
+    "update.restartTitle": "再起動して v{0} を適用",
+    "update.uptodate": "最新です (v{0})",
+    "update.failed": "アップデートに失敗しました: {0}",
+    "update.cliHint": "ブラウザ版の更新は `familiar update` で実行できます",
+    "menu.updateCheck": "アップデートを確認",
     "ctx.used": "使用",
     "ctx.window": "上限",
     "ctx.free": "残り",
@@ -346,6 +354,14 @@ const STR = {
     "top.gaugeNoTurn": "context usage — shown after the next turn is sent",
     "side.noFolder": "no folder",
     "chip.ctx": "context usage",
+    "update.available": "Update available — v{0} (apply from ⬇)",
+    "update.downloading": "Downloading the update…",
+    "update.applied": "v{0} applied — press ↻ to restart",
+    "update.restartTitle": "Restart to apply v{0}",
+    "update.uptodate": "Up to date (v{0})",
+    "update.failed": "Update failed: {0}",
+    "update.cliHint": "Browser builds update via `familiar update`",
+    "menu.updateCheck": "Check for updates",
     "ctx.used": "used",
     "ctx.window": "window",
     "ctx.free": "free",
@@ -3472,6 +3488,66 @@ async function applyModelChoice(provider, model) {
   }
 }
 
+// ---- desktop self-update UI (⬇ in the topbar; main process does the work) ----
+let updateState = null;
+
+function renderUpdateBtn(st) {
+  updateState = st;
+  const btn = $("#update-btn");
+  if (!btn) return;
+  if (!st || st.status === "idle" || st.status === "upToDate" || st.status === "error") {
+    btn.hidden = true;
+    return;
+  }
+  btn.hidden = false;
+  if (st.status === "available") {
+    btn.textContent = "⬇";
+    btn.title = t("update.available", st.version ?? "");
+  } else if (st.status === "downloading") {
+    btn.textContent = "◌";
+    btn.title = t("update.downloading");
+  } else if (st.status === "applied") {
+    btn.textContent = "↻";
+    btn.title = t("update.restartTitle", st.version ?? "");
+  }
+}
+
+function initUpdateUi() {
+  const od = window.familiarDesktop;
+  if (!od?.onUpdateStatus) return; // plain browser — updates via `familiar update`
+  let prev = null;
+  od.onUpdateStatus((st) => {
+    prev = updateState;
+    renderUpdateBtn(st);
+    if (st?.status === "applied" && prev?.status === "downloading") {
+      toast(t("update.applied", st.version ?? ""), "ok");
+    } else if (st?.status === "available" && st.error) {
+      toast(t("update.failed", st.error), "err");
+    }
+  });
+  void od.checkForUpdate();
+  $("#update-btn").addEventListener("click", () => {
+    if (!updateState) return;
+    if (updateState.status === "applied") {
+      void od.restartApp();
+      return;
+    }
+    if (updateState.status === "available") void od.applyUpdate();
+  });
+}
+
+async function manualUpdateCheck() {
+  const od = window.familiarDesktop;
+  if (!od?.checkForUpdate) {
+    toast(t("update.cliHint"), "info");
+    return;
+  }
+  const res = await od.checkForUpdate();
+  if (res?.status === "available") toast(t("update.available", res.version ?? ""), "ok");
+  else if (res?.status === "upToDate") toast(t("update.uptodate", res.version ?? ""), "ok");
+  else toast(t("update.failed", res?.error ?? res?.status ?? ""), "err");
+}
+
 /** "+" opens the new-session dialog (Claude-desktop-style: the working
  * folder list sits centered in the dialog). Selecting a folder + 作成
  * creates the session with that cwd. */
@@ -3734,6 +3810,7 @@ function boot() {
   });
 
   $("#new-session").addEventListener("click", () => openNewSessionModal());
+  initUpdateUi();
   $("#ns-close").addEventListener("click", closeNewSessionModal);
   $("#ns-cancel").addEventListener("click", closeNewSessionModal);
   $("#ns-create").addEventListener("click", () => void createSessionFromModal());
@@ -3874,6 +3951,7 @@ function boot() {
     if (btn.dataset.act === "rename") startRename();
     else if (btn.dataset.act === "export") void exportMarkdown();
     else if (btn.dataset.act === "delete") void deleteSession(state.sessionId);
+    else if (btn.dataset.act === "update-check") void manualUpdateCheck();
   });
 
   // composer chips

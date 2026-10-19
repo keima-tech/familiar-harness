@@ -672,3 +672,27 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
     brand.png を表示。
 - 検証: favicon/icon-32/brand が 200(image/x-icon, image/png)で配信、
   GUI テスト 23 項目再合格、リリース資産 5 点を冪等差し替え。
+
+## v0.1.0 の実装メモ㉞(2026-10-19、デスクトップからのアップデート)
+
+- **デスクトップ シェルのセルフアップデート**: main.js に update モジュール
+  を追加(Forgejo Release API → プラットフォーム別アセット解決 →
+  semver 比較)。起動 4 秒後 + 6 時間ごとに自動チェック
+  (FAMILIAR_FORGEJO / FAMILIAR_REPO で接続先変更、dev チェックアウトは
+  自動チェック対象外)。
+- **トップバーの ⬇**: 更新があるとき top-actions の先頭に下矢印アイコン
+  (点滅)を表示。クリックで適用:
+  - Linux(抽出済み AppImage レイアウト): 新しい AppImage を
+    ダウンロード → `--appimage-extract`(FUSE 不要)→ レイアウト検査 →
+    rename スワップ(失敗時は旧ツリーへ復元)→ ↻ ボタンに変化。
+  - Windows: NSIS インストーラを %TEMP% にダウンロード → ↻ で
+    インストーラ起動 + アプリ終了。
+  - ↻ クリックで `app.relaunch()` + 再起動適用。
+- preload に `checkForUpdate / applyUpdate / restartApp / onUpdateStatus`
+  を公開。UI は preloader 経由の IPC イベントで状態遷移
+  (available → downloading → applied)。エラーは toast で表示し ⬇ は
+  残存。⋯ メニューに「アップデートを確認」を追加(手動チェック)。
+- **検証**: モック Forgejo で実フロー E2E 9 項目(⬇ 表示→tooltip の
+  バージョン→クリック→スワップ完了→↻→インストールツリーの入れ替わり・
+  残骸なし・UI アセット同梱)。開発チェックアウトは `FAMILIAR_INSTALL_ROOT`
+  環境変数でレイアウトを注入してテスト可能。

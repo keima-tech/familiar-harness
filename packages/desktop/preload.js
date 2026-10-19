@@ -14,4 +14,11 @@ contextBridge.exposeInMainWorld("familiarDesktop", {
       return "";
     }
   },
+  /** Self-update surface (main process; see main.js `update:*` handlers). */
+  checkForUpdate: () => ipcRenderer.invoke("update:check"),
+  applyUpdate: () => ipcRenderer.invoke("update:apply"),
+  restartApp: () => ipcRenderer.invoke("update:restart"),
+  onUpdateStatus: (cb) => {
+    ipcRenderer.on("update:status", (_ev, st) => cb(st));
+  },
 });

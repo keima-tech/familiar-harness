@@ -30,7 +30,20 @@
         <div class="title-wrap">
           <span class="ticon">◍</span>
           <div class="title-col">
-            <div id="session-title" class="title">no session</div>
+            <div class="title-row">
+              <div id="session-title" class="title">no session</div>
+              <div class="menu-wrap">
+                <button id="session-menu-btn" class="iconbtn" title="セッション操作" data-i18n-title="top.sessionActions">⋯</button>
+                <div id="session-menu-pop" class="pop" hidden>
+                  <button data-act="rename" data-i18n="menu.rename">名前を変更…</button>
+                  <button data-act="export" data-i18n="menu.export">Markdown で出力</button>
+                  <button data-act="update-check" data-i18n="menu.updateCheck">アップデートを確認</button>
+                  <hr />
+                  <button data-act="delete" class="danger" data-i18n="menu.delete">セッションを削除…</button>
+                </div>
+              </div>
+              <button id="search-toggle" class="iconbtn" title="トランスクリプト内検索 (Ctrl+F)" data-i18n-title="top.search">⌕</button>
+            </div>
             <div class="meta-row">
               <div id="session-meta" class="meta"></div>
               <button id="edit-cwd" type="button" class="cwd-btn" title="作業フォルダーを変更" data-i18n-title="cwd.title" hidden>📁</button>
@@ -42,27 +55,14 @@
           <div id="turn-state" class="state">
             <span id="turn-spinner" class="spinner" hidden></span><span id="turn-label"></span>
           </div>
-          <button id="ctx-gauge" class="gauge" title="コンテキスト使用量 — クリックでセッション情報" data-i18n-title="top.gaugeTitle">
+          <button id="ctx-gauge" class="gauge" title="コンテキスト使用量" data-i18n-title="chip.ctx">
             <svg viewBox="0 0 22 22" width="20" height="20">
               <circle class="gauge-track" cx="11" cy="11" r="8"></circle>
               <circle class="gauge-bar" cx="11" cy="11" r="8"></circle>
-              <text x="11" y="14.5" text-anchor="middle">—</text>
             </svg>
+            <span id="gauge-pct" class="gauge-pct">—</span>
           </button>
-          <button id="toggle-inbox" class="iconbtn" title="承認インボックス" data-i18n-title="top.inbox">✎<span id="inbox-count" class="badge">0</span></button>
-          <button id="toggle-todo" class="iconbtn" title="タスク" data-i18n-title="top.todo">☑<span id="todo-count" class="badge">0</span></button>
-          <button id="toggle-status" class="iconbtn" title="ステータス" data-i18n-title="top.status">ⓘ</button>
-          <button id="search-toggle" class="iconbtn" title="トランスクリプト内検索 (Ctrl+F)" data-i18n-title="top.search">⌕</button>
-          <div class="menu-wrap">
-            <button id="session-menu-btn" class="iconbtn" title="セッション操作" data-i18n-title="top.sessionActions">⋯</button>
-            <div id="session-menu-pop" class="pop" hidden>
-              <button data-act="rename" data-i18n="menu.rename">名前を変更…</button>
-              <button data-act="export" data-i18n="menu.export">Markdown で出力</button>
-              <button data-act="update-check" data-i18n="menu.updateCheck">アップデートを確認</button>
-              <hr />
-              <button data-act="delete" class="danger" data-i18n="menu.delete">セッションを削除…</button>
-            </div>
-          </div>
+          <button id="pane-toggle" class="iconbtn" title="サイドペイン" data-i18n-title="top.pane">▤</button>
         </div>
       </header>
 
@@ -150,30 +150,6 @@
       </form>
     </main>
 
-    <aside id="inbox" hidden>
-      <div class="drawer-head">
-        <b data-i18n="drawer.inbox">承認インボックス</b>
-        <button id="close-inbox" class="ghost">✕</button>
-      </div>
-      <div id="inbox-body"></div>
-    </aside>
-
-    <aside id="todo" hidden>
-      <div class="drawer-head">
-        <b data-i18n="drawer.todo">タスク (todo)</b>
-        <button id="close-todo" class="ghost">✕</button>
-      </div>
-      <div id="todo-body"></div>
-    </aside>
-
-    <aside id="status" hidden>
-      <div class="drawer-head">
-        <b data-i18n="drawer.status">システム状態</b>
-        <button id="close-status" class="ghost">✕</button>
-      </div>
-      <div id="status-body"></div>
-    </aside>
-
     <div id="cwd-overlay" class="overlay" hidden>
       <div class="modal cwd-modal">
         <h3 data-i18n="cwd.title">作業フォルダーを変更</h3>
@@ -226,12 +202,22 @@
     </div>
   </div>
 
-    <aside id="session-info" hidden>
-      <div class="drawer-head">
-        <b data-i18n="drawer.info">セッション情報</b>
-        <button id="close-info" class="ghost">✕</button>
+    <aside id="rightpane" hidden>
+      <div class="pane-tabs">
+        <button type="button" data-tab="inbox"><span data-i18n="pane.inbox">承認</span><span id="inbox-count" class="badge"></span></button>
+        <button type="button" data-tab="todo"><span data-i18n="pane.todo">タスク</span><span id="todo-count" class="badge"></span></button>
+        <button type="button" data-tab="status"><span data-i18n="pane.status">状態</span></button>
+        <button type="button" data-tab="session-info"><span data-i18n="pane.info">情報</span></button>
+        <button type="button" data-tab="ctx"><span data-i18n="pane.ctx">コンテキスト</span></button>
+        <button id="close-pane" class="ghost" title="✕">✕</button>
       </div>
-      <div id="info-body"></div>
+      <div class="pane-body">
+        <div id="inbox" class="pane-panel" hidden><div id="inbox-body"></div></div>
+        <div id="todo" class="pane-panel" hidden><div id="todo-body"></div></div>
+        <div id="status" class="pane-panel" hidden><div id="status-body"></div></div>
+        <div id="session-info" class="pane-panel" hidden><div id="info-body"></div></div>
+        <div id="ctx" class="pane-panel" hidden><div id="ctx-pane-body"></div></div>
+      </div>
     </aside>
   </div>
   <div id="ctx-menu" class="pop ctx" hidden>

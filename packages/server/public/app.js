@@ -82,6 +82,12 @@ const STR = {
     "update.failed": "アップデートに失敗しました: {0}",
     "update.cliHint": "ブラウザ版の更新は `familiar update` で実行できます",
     "menu.updateCheck": "アップデートを確認",
+    "top.pane": "サイドペイン",
+    "pane.inbox": "承認",
+    "pane.todo": "タスク",
+    "pane.status": "状態",
+    "pane.info": "情報",
+    "pane.ctx": "コンテキスト",
     "notify.approvalTitle": "Familiar Harness — 承認が必要",
     "notify.turnDone": "Familiar Harness — ターン完了",
     "notify.turnFailed": "Familiar Harness — ターン失敗",
@@ -366,6 +372,12 @@ const STR = {
     "update.failed": "Update failed: {0}",
     "update.cliHint": "Browser builds update via `familiar update`",
     "menu.updateCheck": "Check for updates",
+    "top.pane": "side pane",
+    "pane.inbox": "approvals",
+    "pane.todo": "tasks",
+    "pane.status": "status",
+    "pane.info": "info",
+    "pane.ctx": "context",
     "notify.approvalTitle": "Familiar Harness — approval needed",
     "notify.turnDone": "Familiar Harness — turn completed",
     "notify.turnFailed": "Familiar Harness — turn failed",
@@ -1247,10 +1259,12 @@ function updateContextGauge() {
     void contextWindowFor(state.currentSession.provider, state.currentSession.model).then(() => {
       renderTopbarGauge();
       renderCtxPane();
+      if (activePaneTab() === "ctx") renderCtxPaneBody();
     });
   }
   renderTopbarGauge();
   renderCtxPane();
+  if (activePaneTab() === "ctx") renderCtxPaneBody();
 }
 
 function ctxNumbers() {
@@ -1263,7 +1277,7 @@ function setGaugeSvg(svg, used, win) {
   const textEl = svg.querySelector("text");
   const bar = svg.querySelector(".gauge-bar");
   if (used === undefined) {
-    textEl.textContent = "—";
+    if (textEl) textEl.textContent = "—";
     bar.style.display = "none";
     return;
   }
@@ -1273,10 +1287,10 @@ function setGaugeSvg(svg, used, win) {
     const c = 2 * Math.PI * 8;
     bar.style.strokeDasharray = `${c}`;
     bar.style.strokeDashoffset = `${c * (1 - pct)}`;
-    textEl.textContent = `${Math.round(pct * 100)}%`;
+    if (textEl) textEl.textContent = `${Math.round(pct * 100)}%`;
   } else {
     bar.style.strokeDashoffset = `${2 * Math.PI * 8 * 0.5}`;
-    textEl.textContent = formatTokens(used);
+    if (textEl) textEl.textContent = formatTokens(used);
   }
 }
 
@@ -1284,13 +1298,20 @@ function renderTopbarGauge() {
   const btn = $("#ctx-gauge");
   const { used, win } = ctxNumbers();
   setGaugeSvg(btn.querySelector("svg"), used, win);
+  const pctEl = $("#gauge-pct");
   if (used === undefined) {
+    pctEl.textContent = "—";
     btn.title = t("top.gaugeNoTurn");
     return;
   }
-  btn.title = win
-    ? `${t("top.gaugeTitle")}: ${formatTokens(used)} / ${formatTokens(win)} tok (${Math.round((used / win) * 100)}%)`
-    : `${t("top.gaugeTitle")}: ${formatTokens(used)} tok`;
+  if (win) {
+    const pct = Math.round((used / win) * 100);
+    pctEl.textContent = `${pct}%`;
+    btn.title = `${t("chip.ctx")}: ${formatTokens(used)} / ${formatTokens(win)} tok (${pct}%)`;
+  } else {
+    pctEl.textContent = formatTokens(used);
+    btn.title = `${t("chip.ctx")}: ${formatTokens(used)} tok`;
+  }
 }
 
 /** The composer gauge + its pane (context usage details). */
@@ -1316,6 +1337,29 @@ function renderCtxPane() {
   } else {
     note.textContent = t("ctx.noteHint", formatTokens(used), formatTokens(win));
   }
+}
+
+/** The context tab inside the right pane (same numbers, card layout). */
+function renderCtxPaneBody() {
+  const body = $("#ctx-pane-body");
+  if (!body) return;
+  const { used, win } = ctxNumbers();
+  const s = state.currentSession;
+  body.innerHTML = "";
+  const pct = used === undefined ? null : win ? Math.round((used / win) * 100) : null;
+  body.appendChild(sectionCard(t("chip.ctx"), [
+    [t("ctx.used"), used === undefined ? t("info.unknown") : `${formatTokens(used)} tok`],
+    [t("ctx.window"), win ? `${formatTokens(win)} tok` : t("info.unknown")],
+    [t("ctx.free"), used === undefined || !win ? "—" : `${formatTokens(Math.max(0, win - used))} tok`],
+    ["%", pct === null ? "—" : `${pct}%`],
+    ["model", s ? `${s.provider}/${s.model}` : "—"],
+  ], pct === null ? undefined : `${pct}%`));
+  const note = document.createElement("div");
+  note.className = "ctx-note";
+  if (used === undefined) note.textContent = t("ctx.noteNoTurn");
+  else if (!win) note.textContent = t("ctx.noteNoWindow");
+  else note.textContent = t("ctx.noteHint", formatTokens(used), formatTokens(win));
+  body.appendChild(note);
 }
 
 async function contextWindowFor(provider, model) {
@@ -2346,15 +2390,47 @@ function proposalNode(kind, item, act) {
 // ---------------------------------------------------------------------------
 // status drawer (curator / MCP / cron)
 // ---------------------------------------------------------------------------
-function openDrawer(which) {
-  const drawers = ["inbox", "status", "session-info", "todo"];
-  for (const id of drawers) {
+const PANE_TABS = ["inbox", "todo", "status", "session-info", "ctx"];
+
+function showPane(which) {
+  $("#rightpane").hidden = false;
+  for (const id of PANE_TABS) {
     $(`#${id}`).hidden = id !== which;
   }
+  for (const b of document.querySelectorAll(".pane-tabs [data-tab]")) {
+    b.classList.toggle("active", b.dataset.tab === which);
+  }
+  localStorage.setItem("familiar.paneTab", which);
   if (which === "inbox") void loadInbox();
   if (which === "status") void loadStatus();
   if (which === "todo") void loadTodo();
   if (which === "session-info") void loadSessionInfo();
+  if (which === "ctx") renderCtxPaneBody();
+}
+
+function activePaneTab() {
+  return PANE_TABS.find((id) => !$(`#${id}`).hidden) ?? null;
+}
+
+function closePane() {
+  $("#rightpane").hidden = true;
+}
+
+function togglePane() {
+  if ($("#rightpane").hidden) {
+    const last = localStorage.getItem("familiar.paneTab");
+    showPane(PANE_TABS.includes(last) ? last : "inbox");
+  } else {
+    closePane();
+  }
+}
+
+function openDrawer(which) {
+  if (which === "none") {
+    closePane();
+    return;
+  }
+  showPane(which);
 }
 
 function sectionCard(title, rows, note) {
@@ -3958,14 +4034,10 @@ function boot() {
   $("#search-toggle").addEventListener("click", () => toggleSearch());
   $("#search-close").addEventListener("click", () => toggleSearch(false));
   $("#transcript-search").addEventListener("input", applyTranscriptFilter);
-  $("#ctx-gauge").addEventListener("click", () => openDrawer("session-info"));
   $("#open-settings").addEventListener("click", () => openSettingsModal());
   $("#close-settings").addEventListener("click", () => closeSettingsModal());
   $("#settings-overlay").addEventListener("click", (ev) => {
     if (ev.target === ev.currentTarget) closeSettingsModal();
-  });
-  $("#close-info").addEventListener("click", () => {
-    $("#session-info").hidden = true;
   });
   $("#session-menu-btn").addEventListener("click", () => {
     const opening = $("#session-menu-pop").hidden;
@@ -4053,17 +4125,16 @@ function boot() {
     void updateComposerPop();
   });
 
-  $("#toggle-inbox").addEventListener("click", () => openDrawer("inbox"));
-  $("#close-inbox").addEventListener("click", () => {
-    $("#inbox").hidden = true;
+  $("#pane-toggle").addEventListener("click", () => togglePane());
+  $("#close-pane").addEventListener("click", closePane);
+  $(".pane-tabs").addEventListener("click", (ev) => {
+    const tab = ev.target.closest("[data-tab]");
+    if (tab) showPane(tab.dataset.tab);
   });
-  $("#toggle-todo").addEventListener("click", () => openDrawer("todo"));
-  $("#close-todo").addEventListener("click", () => {
-    $("#todo").hidden = true;
-  });
-  $("#toggle-status").addEventListener("click", () => openDrawer("status"));
-  $("#close-status").addEventListener("click", () => {
-    $("#status").hidden = true;
+  $("#ctx-gauge").addEventListener("click", () => {
+    // gauge click: open the context tab; clicking again closes the pane
+    if (!$("#rightpane").hidden && activePaneTab() === "ctx") closePane();
+    else showPane("ctx");
   });
 
   document.addEventListener("keydown", (ev) => {
@@ -4103,12 +4174,7 @@ function boot() {
         toggleSearch(false);
         return;
       }
-      const status = $("#status");
-      const inbox = $("#inbox");
-      const info = $("#session-info");
-      if (!status.hidden) openDrawer("none");
-      else if (!inbox.hidden) openDrawer("none");
-      else if (!info.hidden) openDrawer("none");
+      if (!$("#rightpane").hidden) closePane();
     }
   });
 

@@ -82,6 +82,10 @@ const STR = {
     "update.failed": "アップデートに失敗しました: {0}",
     "update.cliHint": "ブラウザ版の更新は `familiar update` で実行できます",
     "menu.updateCheck": "アップデートを確認",
+    "notify.approvalTitle": "Familiar Harness — 承認が必要",
+    "notify.turnDone": "Familiar Harness — ターン完了",
+    "notify.turnFailed": "Familiar Harness — ターン失敗",
+    "notify.turnFailed": "ターンがエラーで終了",
     "ctx.used": "使用",
     "ctx.window": "上限",
     "ctx.free": "残り",
@@ -362,6 +366,10 @@ const STR = {
     "update.failed": "Update failed: {0}",
     "update.cliHint": "Browser builds update via `familiar update`",
     "menu.updateCheck": "Check for updates",
+    "notify.approvalTitle": "Familiar Harness — approval needed",
+    "notify.turnDone": "Familiar Harness — turn completed",
+    "notify.turnFailed": "Familiar Harness — turn failed",
+    "notify.turnFailed": "turn failed",
     "ctx.used": "used",
     "ctx.window": "window",
     "ctx.free": "free",
@@ -2220,6 +2228,7 @@ function onEvent(sessionId, e) {
       for (const b of state.turnBubbles) if (b.caret) b.caret.remove();
       state.turnBubbles = [];
       appendMessage("assistant", `⚠ ${e.error}`, null);
+      void notifyDesktop(t("notify.turnFailed"), String(e.error ?? "").slice(0, 140), { urgent: true });
       break;
     case "turn.aborted":
       setBusy(false);
@@ -2242,6 +2251,8 @@ function onEvent(sessionId, e) {
 // ---------------------------------------------------------------------------
 function showApproval(e) {
   $("#turn-label").textContent = t("approval.needed", e.tool);
+  // approvals block the whole turn — always surface, even when focused
+  void notifyDesktop(t("notify.approvalTitle"), `${e.tool}: ${e.summary ?? ""}`.trim(), { urgent: true });
   const dock = $("#approval-dock");
   const node = document.createElement("div");
   node.className = "dock";
@@ -2474,7 +2485,7 @@ const DEFAULT_PREFS = {
   tabModeToggle: true,      // Tab toggles Build/Plan
   autoscroll: true,         // stick to bottom while streaming
   toolsExpanded: false,     // tool rows expanded by default
-  notify: false,            // desktop notification when a turn completes
+  notify: true,             // desktop notification on turn end + approvals
   notifyOnlyUnfocused: true,
   fontSize: "m",            // s | m | l | xl
   width: "normal",          // normal | wide | full
@@ -2508,18 +2519,30 @@ function applyUiPrefs() {
   document.documentElement.dataset.uiWidth = prefs.width;
 }
 
-/** Desktop notification on turn completion (~OpenCode tui "attention"). */
-function maybeNotify() {
+/** Desktop notification plumbing. The Electron shell routes through the main
+ * process (real desktop notification + taskbar flash); plain browsers use the
+ * Web Notification API. Urgent = approvals, which bypass the focus gate. */
+function notifyDesktop(title, body, { urgent = false } = {}) {
   if (!prefs.notify) return;
-  if (prefs.notifyOnlyUnfocused && document.hasFocus()) return;
+  if (!urgent && prefs.notifyOnlyUnfocused && document.hasFocus()) return;
+  if (window.familiarDesktop?.notify) {
+    window.familiarDesktop.notify({ title, body });
+    return;
+  }
   if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
   try {
-    const title = $("#session-title").textContent;
-    new Notification("familiar — turn completed", {
-      body: title !== t("top.noSession") ? title : t("taskDone"),
-      silent: false,
-    });
+    new Notification(title, { body, silent: false });
   } catch { /* notification API quirks */ }
+}
+
+function sessionLabel() {
+  const title = $("#session-title").textContent;
+  return title !== t("top.noSession") ? title : t("taskDone");
+}
+
+/** Desktop notification on turn completion (~OpenCode tui "attention"). */
+function maybeNotify() {
+  void notifyDesktop(t("notify.turnDone"), sessionLabel());
 }
 
 /** Dropdown control for settings rows (replaces the old segmented buttons). */
@@ -3805,6 +3828,11 @@ function boot() {
   applyTheme();
   applyUiPrefs();
   applyI18n();
+  // notifications default on: secure the browser permission early (Electron
+  // grants it automatically; browsers may show a one-time prompt)
+  if (prefs.notify && typeof Notification !== "undefined" && Notification.permission === "default") {
+    void Notification.requestPermission();
+  }
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
     if (currentModePref() === "system") applyTheme();
   });

@@ -21,4 +21,6 @@ contextBridge.exposeInMainWorld("familiarDesktop", {
   onUpdateStatus: (cb) => {
     ipcRenderer.on("update:status", (_ev, st) => cb(st));
   },
+  /** Native desktop notification (turn finished / approval needed). */
+  notify: (payload) => ipcRenderer.send("app:notify", payload),
 });

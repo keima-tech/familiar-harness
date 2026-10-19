@@ -4,7 +4,7 @@
 // Packaging (electron-builder installers) is the M6 milestone.
 "use strict";
 
-const { app, BrowserWindow, shell, dialog, ipcMain } = require("electron");
+const { app, BrowserWindow, shell, dialog, ipcMain, Notification } = require("electron");
 const { spawn, execFile } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -192,6 +192,40 @@ ipcMain.handle("update:apply", () => applyUpdate());
 ipcMain.handle("update:restart", () => {
   app.relaunch();
   app.exit(0);
+});
+
+// Desktop notifications requested by the web UI (turn finished, approval
+// needed). Falls back to a taskbar flash when no notification daemon is
+// available (common on bare X11 sessions).
+const appIconPath = path.join(__dirname, "build", "icon.png");
+ipcMain.on("app:notify", (_ev, payload) => {
+  const title = String(payload?.title ?? "Familiar Harness").slice(0, 120);
+  const body = String(payload?.body ?? "").slice(0, 300);
+  console.log(`[familiar] notify: ${title} — ${body}`);
+  try {
+    if (mainWindow && !mainWindow.isFocused()) mainWindow.flashFrame(true);
+  } catch {
+    /* ignore */
+  }
+  try {
+    if (!Notification.isSupported()) return;
+    const n = new Notification({
+      title,
+      body,
+      silent: false,
+      ...(fs.existsSync(appIconPath) ? { icon: appIconPath } : {}),
+    });
+    n.on("click", () => {
+      if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    });
+    n.show();
+  } catch (err) {
+    console.warn(`[familiar] notification failed: ${err?.message ?? err}`);
+  }
 });
 
 function probeOnce(port) {

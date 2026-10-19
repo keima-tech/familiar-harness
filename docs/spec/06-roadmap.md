@@ -696,3 +696,22 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   バージョン→クリック→スワップ完了→↻→インストールツリーの入れ替わり・
   残骸なし・UI アセット同梱)。開発チェックアウトは `FAMILIAR_INSTALL_ROOT`
   環境変数でレイアウトを注入してテスト可能。
+
+## v0.1.0 の実装メモ㉟(2026-10-19、デスクトップ通知:ターン完了・承認)
+
+- 既存の turn 完了通知(maybeNotify・設定トグル・既定 OFF)を拡張し、
+  **通知を既定 ON**(notifyOnlyUnfocused は既定 true:フォーカス中は完了
+  通知を抑制)。ブラウザでは boot 時に Notification.permission が
+  default なら要求。
+- **承認リクエストでも通知**(showApproval → urgent:true —
+  フォーカスの有無に関わらず出る。ツール+概要を本文に)。turn.error でも
+  通知(urgent)。
+- **Electron は main プロセス経由**: preload に `notify` を追加し、
+  main の `app:notify` ハンドラが Electron Notification(アイコン付き・
+  クリックでウィンドウ復帰)+ タスクバーフラッシュ(flashFrame)。
+  通知デーモン不在の環境では flash のみ。ブラウザは従来どおり
+  Web Notification API。
+- **検証**: Electron+CDP で 6 項目 — 既定 ON・renderer→main IPC 到達
+  (main の stdout ログでアサート)・承認 dock 描画+緊急通知・
+  turn.end イベント経路の通知。xvfb ではウィンドウにフォーカスがある
+  ため非緊急通知はフォーカスゲートで抑制される点も確認(仕様どおり)。

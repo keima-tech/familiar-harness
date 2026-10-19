@@ -71,6 +71,23 @@ const STR = {
     "none": "(なし)",
     "top.noSession": "セッションなし",
     "top.gaugeTitle": "コンテキスト使用量 — クリックでセッション情報",
+    "top.gaugeNoTurn": "コンテキスト使用量 — 次のターン送信後に表示",
+    "side.noFolder": "フォルダーなし",
+    "chip.ctx": "コンテキスト使用量",
+    "ctx.used": "使用",
+    "ctx.window": "上限",
+    "ctx.free": "残り",
+    "ctx.noteNoTurn": "最初のターン送信後に表示されます(毎ターン全文を再送するため、直前のプロンプト=現在のコンテキスト)",
+    "ctx.noteNoWindow": "このモデルの上限コンテキストは未取得です(モデル一覧から取得できませんでした)",
+    "ctx.noteHint": "{0} / {1} tok を使用",
+    "ns.title": "新規セッション",
+    "ns.search": "フォルダーを検索・入力… (例: ~/work)",
+    "ns.pickFolder": "作業フォルダーを選択",
+    "ns.create": "作成",
+    "ns.noRecent": "最近のフォルダーはまだありません — 上に入力してください",
+    "ns.noMatch": "一致するフォルダーがありません",
+    "ns.sessions": "{0} セッション",
+    "ns.errNoFolder": "作業フォルダーを選択するか入力してください",
     "top.search": "トランスクリプト内検索 (Ctrl+F)",
     "top.sessionActions": "セッション操作",
     "menu.rename": "名前を変更…",
@@ -326,6 +343,23 @@ const STR = {
     "none": "(none)",
     "top.noSession": "no session",
     "top.gaugeTitle": "context usage — click for session info",
+    "top.gaugeNoTurn": "context usage — shown after the next turn is sent",
+    "side.noFolder": "no folder",
+    "chip.ctx": "context usage",
+    "ctx.used": "used",
+    "ctx.window": "window",
+    "ctx.free": "free",
+    "ctx.noteNoTurn": "Shown after the first turn is sent (each turn re-sends the full context, so the last prompt = the current context)",
+    "ctx.noteNoWindow": "This model's context window is unknown (not exposed by the model list)",
+    "ctx.noteHint": "{0} / {1} tok used",
+    "ns.title": "New session",
+    "ns.search": "search or type a folder… (e.g. ~/work)",
+    "ns.pickFolder": "Pick a working folder",
+    "ns.create": "Create",
+    "ns.noRecent": "No recent folders yet — type a path above",
+    "ns.noMatch": "No matching folders",
+    "ns.sessions": "{0} sessions",
+    "ns.errNoFolder": "Pick or type a working folder first",
     "top.search": "search in transcript (Ctrl+F)",
     "top.sessionActions": "session actions",
     "menu.rename": "Rename…",
@@ -1010,22 +1044,73 @@ function setThemeName(name) {
 // ---------------------------------------------------------------------------
 // sessions sidebar
 // ---------------------------------------------------------------------------
+const FOLDER_FOLDS_KEY = "familiar.folderFolds";
+
+function loadFolderFolds() {
+  try {
+    const v = JSON.parse(localStorage.getItem(FOLDER_FOLDS_KEY) ?? "{}");
+    return v && typeof v === "object" ? v : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveFolderFolds(folds) {
+  localStorage.setItem(FOLDER_FOLDS_KEY, JSON.stringify(folds));
+}
+
+function baseName(p) {
+  return (p ?? "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() || (p || "");
+}
+
+function sessionLi(s) {
+  const li = document.createElement("li");
+  li.dataset.id = s.id;
+  li.dataset.cwd = s.cwd || "";
+  const title = s.title || s.id.slice(0, 8);
+  const model = s.model ? "/" + s.model : "";
+  const when = fmtTime(s.updatedAt);
+  li.innerHTML =
+    `<div class="row-line"><span class="t">${esc(title)}</span>` +
+    `<button class="del" data-id="${esc(s.id)}" title="delete session">✕</button></div>` +
+    `<span class="when" title="${esc(when)}">${esc(relTime(s.updatedAt))} · ${esc(s.provider)}${esc(model)}</span>`;
+  if (s.id === state.sessionId) li.classList.add("active");
+  return li;
+}
+
 async function refreshSessions() {
   state.sessions = await rpc("session.list");
   const ul = $("#sessions");
   ul.innerHTML = "";
+  // Claude-desktop-style grouping: one collapsible folder (cwd) section,
+  // newest folder first, newest session first within the folder.
+  const groups = new Map();
   for (const s of state.sessions) {
-    const li = document.createElement("li");
-    li.dataset.id = s.id;
-    const title = s.title || s.id.slice(0, 8);
-    const model = s.model ? "/" + s.model : "";
-    const when = fmtTime(s.updatedAt);
-    li.innerHTML =
-      `<div class="row-line"><span class="t">${esc(title)}</span>` +
-      `<button class="del" data-id="${esc(s.id)}" title="delete session">✕</button></div>` +
-      `<span class="when" title="${esc(when)}">${esc(relTime(s.updatedAt))} · ${esc(s.provider)}${esc(model)}</span>`;
-    if (s.id === state.sessionId) li.classList.add("active");
-    ul.appendChild(li);
+    const key = s.cwd || "";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(s);
+  }
+  const sorted = [...groups.entries()].sort(
+    (a, b) =>
+      Math.max(...b[1].map((x) => x.updatedAt ?? 0)) - Math.max(...a[1].map((x) => x.updatedAt ?? 0)),
+  );
+  const folds = loadFolderFolds();
+  for (const [cwd, list] of sorted) {
+    list.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+    const collapsed = folds[cwd] === true;
+    const head = document.createElement("li");
+    head.className = "folder-row";
+    head.dataset.cwd = cwd;
+    head.title = cwd || t("side.noFolder");
+    head.innerHTML =
+      `<button class="folder-toggle" type="button">` +
+      `<span class="chev">${collapsed ? "▸" : "▾"}</span>` +
+      `<span class="fname">📁 ${esc(baseName(cwd) || t("side.noFolder"))}</span>` +
+      `<span class="fcount">${list.length}</span></button>`;
+    ul.appendChild(head);
+    if (!collapsed) {
+      for (const s of list) ul.appendChild(sessionLi(s));
+    }
   }
   applySessionFilter();
   if (!state.sessionId && state.sessions.length > 0) {
@@ -1040,12 +1125,25 @@ function esc(text) {
 function applySessionFilter() {
   const query = ($("#session-filter").value || "").trim().toLowerCase();
   let visible = 0;
-  for (const li of document.querySelectorAll("#sessions li")) {
-    const s = state.sessions.find((x) => x.id === li.dataset.id) ?? {};
+  const matchesQuery = (s) => {
+    if (query === "") return true;
     const hay = `${s.title ?? ""} ${s.provider ?? ""} ${s.model ?? ""}`.toLowerCase();
-    const show = query === "" || hay.includes(query);
+    return hay.includes(query);
+  };
+  for (const li of document.querySelectorAll("#sessions li[data-id]")) {
+    const s = state.sessions.find((x) => x.id === li.dataset.id) ?? {};
+    const show = matchesQuery(s);
     li.classList.toggle("filtered", !show);
     if (show) visible += 1;
+  }
+  // folder headers: hide when nothing inside matches; auto-expand while filtering
+  for (const row of document.querySelectorAll("#sessions .folder-row")) {
+    const matches = state.sessions.filter((s) => (s.cwd || "") === row.dataset.cwd && matchesQuery(s));
+    row.classList.toggle("filtered", query !== "" && matches.length === 0);
+    if (query !== "" && matches.length > 0) {
+      const chev = row.querySelector(".chev");
+      if (chev && chev.textContent === "▸") row.querySelector(".folder-toggle")?.click();
+    }
   }
   let none = document.querySelector("#sessions .filter-none");
   if (visible === 0 && state.sessions.length > 0) {
@@ -1060,8 +1158,22 @@ function applySessionFilter() {
   }
 }
 
+function toggleFolderFold(row) {
+  const cwd = row.dataset.cwd;
+  const folds = loadFolderFolds();
+  folds[cwd] = !folds[cwd];
+  saveFolderFolds(folds);
+  void refreshSessions();
+}
+
 function ulSessionsClick() {
   $("#sessions").addEventListener("click", (ev) => {
+    const fold = ev.target.closest("button.folder-toggle");
+    if (fold) {
+      const row = fold.closest("li.folder-row");
+      if (row) toggleFolderFold(row);
+      return;
+    }
     const del = ev.target.closest("button.del");
     if (del) {
       void deleteSession(del.dataset.id);
@@ -1106,36 +1218,80 @@ function formatTokens(n) {
  * tokens, since every call re-sends the full context) against the model's
  * context window from models.list. Unknown values show an em-dash. */
 function updateContextGauge() {
-  const btn = $("#ctx-gauge");
-  const textEl = btn.querySelector("text");
-  const bar = btn.querySelector(".gauge-bar");
-  let used = state.lastPromptTokensBySession[state.sessionId];
-  let win = state.modelCtxCache[`${state.currentSession?.provider}/${state.currentSession?.model}`];
-  const finish = () => {
-    if (used === undefined) {
-      textEl.textContent = "—";
-      btn.title = "context usage — unknown yet (sends after the next turn)";
-      bar.style.display = "none";
-      return;
-    }
-    bar.style.display = "";
-    if (win) {
-      const pct = Math.min(1, used / win);
-      const c = 2 * Math.PI * 8;
-      bar.style.strokeDasharray = `${c}`;
-      bar.style.strokeDashoffset = `${c * (1 - pct)}`;
-      textEl.textContent = `${Math.round(pct * 100)}%`;
-      btn.title = `context: ${formatTokens(used)} / ${formatTokens(win)} tok (${Math.round(pct * 100)}%) — click for session info`;
-    } else {
-      bar.style.strokeDashoffset = `${2 * Math.PI * 8 * 0.5}`;
-      textEl.textContent = formatTokens(used);
-      btn.title = `context: ${formatTokens(used)} tok (window unknown) — click for session info`;
-    }
-  };
+  const { used, win } = ctxNumbers();
   if (used !== undefined && win === undefined && state.currentSession) {
-    void contextWindowFor(state.currentSession.provider, state.currentSession.model).then(finish);
+    void contextWindowFor(state.currentSession.provider, state.currentSession.model).then(() => {
+      renderTopbarGauge();
+      renderCtxPane();
+    });
   }
-  finish();
+  renderTopbarGauge();
+  renderCtxPane();
+}
+
+function ctxNumbers() {
+  const used = state.lastPromptTokensBySession[state.sessionId];
+  const win = state.modelCtxCache[`${state.currentSession?.provider}/${state.currentSession?.model}`];
+  return { used, win };
+}
+
+function setGaugeSvg(svg, used, win) {
+  const textEl = svg.querySelector("text");
+  const bar = svg.querySelector(".gauge-bar");
+  if (used === undefined) {
+    textEl.textContent = "—";
+    bar.style.display = "none";
+    return;
+  }
+  bar.style.display = "";
+  if (win) {
+    const pct = Math.min(1, used / win);
+    const c = 2 * Math.PI * 8;
+    bar.style.strokeDasharray = `${c}`;
+    bar.style.strokeDashoffset = `${c * (1 - pct)}`;
+    textEl.textContent = `${Math.round(pct * 100)}%`;
+  } else {
+    bar.style.strokeDashoffset = `${2 * Math.PI * 8 * 0.5}`;
+    textEl.textContent = formatTokens(used);
+  }
+}
+
+function renderTopbarGauge() {
+  const btn = $("#ctx-gauge");
+  const { used, win } = ctxNumbers();
+  setGaugeSvg(btn.querySelector("svg"), used, win);
+  if (used === undefined) {
+    btn.title = t("top.gaugeNoTurn");
+    return;
+  }
+  btn.title = win
+    ? `${t("top.gaugeTitle")}: ${formatTokens(used)} / ${formatTokens(win)} tok (${Math.round((used / win) * 100)}%)`
+    : `${t("top.gaugeTitle")}: ${formatTokens(used)} tok`;
+}
+
+/** The composer gauge + its pane (context usage details). */
+function renderCtxPane() {
+  const { used, win } = ctxNumbers();
+  const btnSvg = $("#ctx-btn").querySelector("svg");
+  const popSvg = $("#ctx-pop").querySelector("svg");
+  setGaugeSvg(btnSvg, used, win);
+  setGaugeSvg(popSvg, used, win);
+  $("#ctx-used").textContent = used === undefined ? "—" : `${formatTokens(used)} tok`;
+  $("#ctx-window").textContent = win ? `${formatTokens(win)} tok` : t("info.unknown");
+  $("#ctx-free").textContent =
+    used === undefined ? "—" : win ? `${formatTokens(Math.max(0, win - used))} tok` : "—";
+  $("#ctx-head-pct").textContent =
+    used === undefined ? "—" : win ? `${Math.round((used / win) * 100)}%` : `${formatTokens(used)} tok`;
+  const s = state.currentSession;
+  $("#ctx-head-model").textContent = s ? `${s.provider}/${s.model}` : "";
+  const note = $("#ctx-note");
+  if (used === undefined) {
+    note.textContent = t("ctx.noteNoTurn");
+  } else if (!win) {
+    note.textContent = t("ctx.noteNoWindow");
+  } else {
+    note.textContent = t("ctx.noteHint", formatTokens(used), formatTokens(win));
+  }
 }
 
 async function contextWindowFor(provider, model) {
@@ -1488,7 +1644,7 @@ function applyTranscriptFilter() {
 // ---------------------------------------------------------------------------
 /** Composer slash commands (OpenCode-style): type "/" to list, Enter to run. */
 const COMMANDS = [
-  { cmd: "/new", key: "cmd.new", run: () => void newSession() },
+  { cmd: "/new", key: "cmd.new", run: () => openNewSessionModal() },
   { cmd: "/model", key: "cmd.model", run: () => void openModelPopover() },
   { cmd: "/plan", key: "cmd.plan", run: () => setMode("plan") },
   { cmd: "/build", key: "cmd.build", run: () => setMode("build") },
@@ -1605,7 +1761,7 @@ function runFirstCommand() {
 }
 
 function closeAllPops() {
-  for (const id of ["session-menu-pop", "mode-pop", "model-pop", "plus-pop", "effort-pop", "cmd-pop"]) {
+  for (const id of ["session-menu-pop", "mode-pop", "model-pop", "plus-pop", "effort-pop", "cmd-pop", "ctx-pop"]) {
     $(`#${id}`).hidden = true;
   }
 }
@@ -3316,17 +3472,139 @@ async function applyModelChoice(provider, model) {
   }
 }
 
-/** "+" creates a session immediately with the configured defaults; the
- * provider/model can be changed afterwards via the composer picker. */
-async function newSession() {
+/** "+" opens the new-session dialog (Claude-desktop-style: the working
+ * folder list sits centered in the dialog). Selecting a folder + 作成
+ * creates the session with that cwd. */
+let nsSuggestTimer = null;
+let nsSelectedFolder = "";
+
+function openNewSessionModal() {
+  nsSelectedFolder = state.currentSession?.cwd || "";
+  const input = $("#ns-folder-input");
+  input.value = "";
+  const errBox = $("#new-session-overlay .form-error");
+  errBox.hidden = true;
+  errBox.textContent = "";
+  $("#ns-browse").hidden = typeof window.familiarDesktop?.pickDirectory !== "function";
+  $("#new-session-overlay").hidden = false;
+  renderNsRecent();
+  input.focus();
+}
+
+function closeNewSessionModal() {
+  $("#new-session-overlay").hidden = true;
+}
+
+/** Recent working folders from the session history (deduped, newest first). */
+function renderNsRecent() {
+  const box = $("#ns-list");
+  box.innerHTML = "";
+  const seen = new Map();
+  for (const s of state.sessions) {
+    const cwd = s.cwd || "";
+    if (!cwd) continue;
+    if (!seen.has(cwd)) seen.set(cwd, { cwd, count: 0, last: s.updatedAt ?? 0 });
+    const e = seen.get(cwd);
+    e.count += 1;
+    e.last = Math.max(e.last, s.updatedAt ?? 0);
+  }
+  const list = [...seen.values()].sort((a, b) => b.last - a.last);
+  if (list.length === 0) {
+    box.innerHTML = `<div class="mp-note">${esc(t("ns.noRecent"))}</div>`;
+    return;
+  }
+  for (const e of list) {
+    box.appendChild(nsFolderRow(e.cwd, `${esc(t("ns.sessions", e.count))}`, e.cwd));
+  }
+}
+
+/** One selectable folder row (label + sub line). Clicking selects it. */
+function nsFolderRow(cwd, label, sub) {
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = "ns-row" + (cwd === nsSelectedFolder ? " selected" : "");
+  row.innerHTML =
+    `<span class="ns-icon">📁</span>` +
+    `<span class="ns-text"><span class="ns-name">${esc(label)}</span>` +
+    `<span class="ns-path">${esc(sub)}</span></span>` +
+    (cwd === nsSelectedFolder ? `<span class="ns-check">✓</span>` : "");
+  row.addEventListener("click", () => {
+    nsSelectedFolder = cwd;
+    $("#ns-folder-input").value = cwd;
+    renderNsList();
+  });
+  return row;
+}
+
+/** The dialog's center list: recent folders when the search box is empty,
+ * fs.dirs suggestions while typing. */
+async function renderNsList() {
+  const box = $("#ns-list");
+  const q = $("#ns-folder-input").value.trim();
+  if (q === "") {
+    renderNsRecent();
+    return;
+  }
+  const { dir, prefix } = cwdQueryParts(q);
+  let res;
   try {
-    const s = await rpc("session.create", {});
+    res = await rpc("fs.dirs", { path: dir });
+  } catch {
+    box.innerHTML = `<div class="mp-note">${esc(t("ns.noMatch"))}</div>`;
+    return;
+  }
+  const needle = prefix.toLowerCase();
+  const items = (res.dirs ?? []).filter((d) => baseName(d).toLowerCase().startsWith(needle));
+  box.innerHTML = "";
+  if (items.length === 0) {
+    box.innerHTML = `<div class="mp-note">${esc(t("ns.noMatch"))}</div>`;
+    return;
+  }
+  for (const d of items.slice(0, 60)) {
+    // a typed path is only "selected" once the user clicks a suggestion
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "ns-row" + (d === nsSelectedFolder ? " selected" : "");
+    row.innerHTML =
+      `<span class="ns-icon">📁</span>` +
+      `<span class="ns-text"><span class="ns-name">${esc(baseName(d))}</span>` +
+      `<span class="ns-path">${esc(d)}</span></span>` +
+      (d === nsSelectedFolder ? `<span class="ns-check">✓</span>` : "");
+    row.addEventListener("click", () => {
+      nsSelectedFolder = d;
+      $("#ns-folder-input").value = d;
+      void renderNsList();
+    });
+    box.appendChild(row);
+  }
+}
+
+async function createSessionFromModal() {
+  const errBox = $("#new-session-overlay .form-error");
+  const showErr = (msg) => {
+    errBox.textContent = msg;
+    errBox.hidden = false;
+  };
+  // accept the typed path as-is when nothing is picked from the list
+  const typed = $("#ns-folder-input").value.trim();
+  const folder = nsSelectedFolder || typed;
+  if (!folder) {
+    showErr(t("ns.errNoFolder"));
+    return;
+  }
+  const btn = $("#ns-create");
+  btn.disabled = true;
+  try {
+    const s = await rpc("session.create", { cwd: folder });
     state.sessionId = s.id;
+    closeNewSessionModal();
     await refreshSessions();
     await openSession(s.id);
     $("#input").focus();
   } catch (err) {
-    toast(t("toast.createFailed", err.message), "err");
+    showErr(t("toast.createFailed", err.message));
+  } finally {
+    btn.disabled = false;
   }
 }
 
@@ -3455,7 +3733,41 @@ function boot() {
     if (currentModePref() === "system") applyTheme();
   });
 
-  $("#new-session").addEventListener("click", () => void newSession());
+  $("#new-session").addEventListener("click", () => openNewSessionModal());
+  $("#ns-close").addEventListener("click", closeNewSessionModal);
+  $("#ns-cancel").addEventListener("click", closeNewSessionModal);
+  $("#ns-create").addEventListener("click", () => void createSessionFromModal());
+  $("#ns-folder-input").addEventListener("input", () => {
+    clearTimeout(nsSuggestTimer);
+    nsSuggestTimer = setTimeout(() => void renderNsList(), 200);
+  });
+  $("#ns-folder-input").addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      void createSessionFromModal();
+    }
+  });
+  $("#ns-browse").addEventListener("click", async () => {
+    try {
+      const picked = await window.familiarDesktop.pickDirectory();
+      if (picked) {
+        nsSelectedFolder = picked;
+        $("#ns-folder-input").value = picked;
+        await renderNsList();
+      }
+    } catch {
+      /* dialog dismissed */
+    }
+  });
+  $("#new-session-overlay").addEventListener("click", (ev) => {
+    if (ev.target === $("#new-session-overlay")) closeNewSessionModal();
+  });
+  $("#ctx-btn").addEventListener("click", () => {
+    const opening = $("#ctx-pop").hidden;
+    closeAllPops();
+    $("#ctx-pop").hidden = !opening;
+    if (opening) renderCtxPane();
+  });
   $("#retry").addEventListener("click", retryLastTurn);
   $("#edit-cwd").addEventListener("click", () => openCwdModal());
   $("#cwd-cancel").addEventListener("click", closeCwdModal);

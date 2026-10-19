@@ -631,3 +631,28 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   なお `signAndEditExecutable: false` は維持(rcedit/signtool を使わない —
   カスタムアイコン未設定のため実用上の差はなし)。
 - README 両言語の Release バイナリ一覧に NSIS インストーラを追記。
+
+## v0.1.0 の実装メモ㉝(2026-10-19、GUI:フォルダ別セッション一覧・コンテキストペイン・新規作成モーダル)
+
+- **セッション一覧のフォルダ別グループ化(Claude デスクトップ風)**:
+  sidebar を cwd でグループ化し、`▸ 📁 <basename> <件数>` の折りたたみ
+  ヘッダ行を追加。折りたたみ状態は localStorage(`familiar.folderFolds`)に
+  永続化。グループは最新セッションの新しい順、中も新しい順。
+  フィルタ時は一致するグループを自動展開し、一致なしグループは隠す。
+- **コンテキスト使用量ペイン**: composer のエフォートチップ左横に
+  リングゲージアイコン(#ctx-btn)を追加。クリックでポップオーバー
+  (#ctx-pop)を開閉し、大きなリング+使用/上限/残り+model/provider+
+  説明ノートを表示。updateContextGauge がトップバー gauge と
+  composer ゲージ/ペインの両方を更新(未取得時は contextWindowFor を
+  非同期取得してから再描画)。closeAllPops に ctx-pop を追加。
+- **新規セッション モーダル(中央フォルダ選択)**: 「+」と /new を
+  即時作成からモーダル(`#new-session-overlay`)に変更。中央に最近の
+  作業フォルダ(recent cwd をセッション数付きで dedup・新しい順)を
+  一覧表示、入力すると fs.dirs でサジェスト。行クリックで選択(✓)、
+  Enter/作成で `session.create { cwd }`。Electron では 📁 参照ダイアログ
+  も使用可。選択未指定時はエラー表示。
+- **検証**: Electron+CDP の実 UI テスト(/tmp/opencode/gui-test.mjs)
+  23 項目 — グループ化・件数・折りたたみ/展開・localStorage 永続化・
+  リング %・ペイン開閉と数値・モーダル表示/選択/作成/自動クローズ。
+  過去テスト実行の残留 serve がポート 46210 を占有しセッションが
+  蓄積する問題があるため、テストは起動時に残留 serve を掃除。

@@ -104,6 +104,34 @@
             </div>
           </div>
           <div class="menu-wrap">
+            <button id="ctx-btn" type="button" title="コンテキスト使用量" data-i18n-title="chip.ctx">
+              <svg viewBox="0 0 22 22" width="16" height="16">
+                <circle class="gauge-track" cx="11" cy="11" r="8"></circle>
+                <circle class="gauge-bar" cx="11" cy="11" r="8"></circle>
+                <text x="11" y="14.5" text-anchor="middle">—</text>
+              </svg>
+            </button>
+            <div id="ctx-pop" class="pop up ctx-pop" hidden>
+              <div class="ctx-head">
+                <svg viewBox="0 0 22 22" width="44" height="44">
+                  <circle class="gauge-track" cx="11" cy="11" r="8"></circle>
+                  <circle class="gauge-bar" cx="11" cy="11" r="8"></circle>
+                  <text x="11" y="14.5" text-anchor="middle">—</text>
+                </svg>
+                <div class="ctx-head-text">
+                  <b id="ctx-head-pct">—</b>
+                  <span id="ctx-head-model"></span>
+                </div>
+              </div>
+              <div class="ctx-grid">
+                <div><small data-i18n="ctx.used">使用</small><span id="ctx-used">—</span></div>
+                <div><small data-i18n="ctx.window">上限</small><span id="ctx-window">—</span></div>
+                <div><small data-i18n="ctx.free">残り</small><span id="ctx-free">—</span></div>
+              </div>
+              <div id="ctx-note" class="ctx-note"></div>
+            </div>
+          </div>
+          <div class="menu-wrap">
             <button id="effort-chip" type="button" title="推論エフォート" data-i18n-title="chip.effort">既定 ▾</button>
             <div id="effort-pop" class="pop up" hidden>
               <button type="button" data-effort=""><b data-i18n="effort.default">既定</b><small data-i18n="effort.defaultDesc">エフォートなし</small></button>
@@ -151,6 +179,31 @@
           <button id="cwd-browse" type="button" class="ghost link-left" hidden data-i18n="cwd.browse">📁 参照…</button>
           <button id="cwd-ok" type="button" data-i18n="cwd.ok">設定</button>
           <button id="cwd-cancel" type="button" class="ghost" data-i18n="cwd.cancel">キャンセル</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="new-session-overlay" class="overlay" hidden>
+      <div class="modal new-session-modal">
+        <div class="modal-head">
+          <b data-i18n="ns.title">新規セッション</b>
+          <button id="ns-close" class="ghost">✕</button>
+        </div>
+        <div class="ns-body">
+          <div class="ns-search">
+            <input id="ns-folder-input" type="text" spellcheck="false" autocomplete="off"
+              placeholder="フォルダーを検索・入力… (例: ~/work)" data-i18n-ph="ns.search" />
+          </div>
+          <div class="ns-center">
+            <div class="ns-label" data-i18n="ns.pickFolder">作業フォルダーを選択</div>
+            <div id="ns-list" class="ns-folders"></div>
+          </div>
+        </div>
+        <div class="form-error" hidden></div>
+        <div class="pop-actions">
+          <button id="ns-browse" type="button" class="ghost link-left" hidden data-i18n="cwd.browse">📁 参照…</button>
+          <button id="ns-create" type="button" data-i18n="ns.create">作成</button>
+          <button id="ns-cancel" type="button" class="ghost" data-i18n="cwd.cancel">キャンセル</button>
         </div>
       </div>
     </div>

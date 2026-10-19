@@ -85,7 +85,7 @@ npm unlink                     # removes the global `familiar` symlink
 # then delete the repository checkout if you no longer need it
 ```
 
-**Desktop app:** delete the AppImage file, or `sudo apt remove familiar-desktop` (deb). Windows: uninstall "Familiar Harness" from the Apps settings.
+**Desktop app:** delete the AppImage file, or `sudo apt remove familiar-harness` (deb). Windows: uninstall "Familiar Harness" from the Apps settings.
 
 ### Quick start
 
@@ -264,7 +264,7 @@ npm unlink                     # グローバルの `familiar` シンボリッ�
 # リポジトリ自体も不要なら checkout を削除
 ```
 
-**デスクトップアプリ:** AppImage はファイルを削除。deb は `sudo apt remove familiar-desktop`。Windows は「アプリ設定」から Familiar Harness をアンインストールしてください。
+**デスクトップアプリ:** AppImage はファイルを削除。deb は `sudo apt remove familiar-harness`。Windows は「アプリ設定」から Familiar Harness をアンインストールしてください。
 
 ### クイックスタート
 

@@ -86,8 +86,8 @@ fi
 AUTH="Authorization: token $TOKEN"
 API="$REPO_HOST/api/v1/repos/$REPO_SLUG"
 
-json_field() { # json_field JSON EXPR — extract a field with node (no jq needed)
-  node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const v=(JSON.parse(s));console.log(eval(process.argv[1])??"")}catch{console.log("")}})' "$2" <<< "$1"
+json_field() { # stdin: JSON; $1 = JS expr over `v`; $2 = optional extra as process.argv[2]
+  node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const v=JSON.parse(s);const out=eval(process.argv[1]);console.log(out===undefined||out===null?"":String(out))}catch{console.log("")}})' "$1" "${2:-}"
 }
 
 echo "== creating (or reusing) release v$VERSION =="
@@ -95,11 +95,11 @@ RELEASE_ID="$(
   curl -fsS -X POST "$API/releases" \
     -H "$AUTH" -H "Content-Type: application/json" \
     -d "{\"tag_name\":\"v${VERSION}\",\"name\":\"v${VERSION}\",\"body\":\"Familiar Harness v${VERSION} — see README.md for install instructions.\",\"draft\":false,\"prerelease\":false}" |
-    json_field - '.id'
+    json_field 'v.id'
 )"
 if [ -z "$RELEASE_ID" ]; then
   # tag already released — reuse it (idempotent re-publish)
-  RELEASE_ID="$(curl -fsS "$API/releases/tags/v${VERSION}" -H "$AUTH" | json_field - '.id')"
+  RELEASE_ID="$(curl -fsS "$API/releases/tags/v${VERSION}" -H "$AUTH" | json_field 'v.id')"
 fi
 [ -n "$RELEASE_ID" ] || { echo "error: cannot create or find release v$VERSION"; exit 1; }
 echo "release id: $RELEASE_ID"
@@ -107,7 +107,7 @@ echo "release id: $RELEASE_ID"
 for f in $ARTIFACTS; do
   name="$(basename "$f")"
   # replace a same-name asset (idempotent re-publish)
-  old_id="$(curl -fsS "$API/releases/$RELEASE_ID/assets" -H "$AUTH" | json_field - "(JSON.parse(s).find(a=>a.name===\"$name\")||{}).id")" || old_id=""
+  old_id="$(curl -fsS "$API/releases/$RELEASE_ID/assets" -H "$AUTH" | json_field '(v.find(a=>a.name===process.argv[2])||{}).id' "$name")" || old_id=""
   if [ -n "$old_id" ]; then
     curl -fsS -X DELETE "$API/releases/$RELEASE_ID/assets/$old_id" -H "$AUTH" >/dev/null || true
     echo "  - replaced $name"

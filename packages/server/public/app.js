@@ -1347,6 +1347,22 @@ function renderCtxPaneBody() {
   const s = state.currentSession;
   body.innerHTML = "";
   const pct = used === undefined ? null : win ? Math.round((used / win) * 100) : null;
+  const ring = document.createElement("div");
+  ring.className = "ctx-big";
+  const R = 30, C = 2 * Math.PI * R;
+  const dash = used === undefined || !win
+    ? `${C * 0.5} ${C}`
+    : `${C * Math.min(1, used / win)} ${C}`;
+  const ringLabel = used === undefined ? "—" : win ? `${pct}%` : formatTokens(used);
+  ring.innerHTML =
+    `<svg viewBox="0 0 72 72" width="72" height="72">` +
+    `<circle class="gauge-track" cx="36" cy="36" r="${R}"></circle>` +
+    `<circle class="gauge-bar" cx="36" cy="36" r="${R}" stroke-dasharray="${dash}"></circle>` +
+    `<text x="36" y="41" text-anchor="middle">${ringLabel}</text>` +
+    `</svg>` +
+    `<div class="ctx-big-text"><b>${esc(s ? `${s.provider}/${s.model}` : "—")}</b>` +
+    `<span>${used === undefined ? t("ctx.noteNoTurn") : `${formatTokens(used)} / ${win ? formatTokens(win) : "?"} tok`}</span></div>`;
+  body.appendChild(ring);
   body.appendChild(sectionCard(t("chip.ctx"), [
     [t("ctx.used"), used === undefined ? t("info.unknown") : `${formatTokens(used)} tok`],
     [t("ctx.window"), win ? `${formatTokens(win)} tok` : t("info.unknown")],
@@ -4081,7 +4097,7 @@ function boot() {
   // close popovers / context menu on outside click, scroll or resize
   document.addEventListener("click", (ev) => {
     if (!ev.target.closest(".menu-wrap")) closeAllPops();
-    if (!ev.target.closest("#ctx-menu") && !ev.target.closest("#sessions")) hideCtxMenu();
+    if (!ev.target.closest("#ctx-menu")) hideCtxMenu();
   });
   for (const evt of ["scroll", "resize"]) {
     $("#transcript").addEventListener(evt, hideCtxMenu, { passive: true });
@@ -4126,6 +4142,27 @@ function boot() {
   });
 
   $("#pane-toggle").addEventListener("click", () => togglePane());
+  const rp = $("#rightpane");
+  const savedW = Number(localStorage.getItem("familiar.paneW"));
+  if (savedW >= 280 && savedW <= 760) rp.style.width = `${savedW}px`;
+  $("#pane-resizer").addEventListener("mousedown", (ev) => {
+    ev.preventDefault();
+    const startX = ev.clientX;
+    const startW = rp.getBoundingClientRect().width;
+    $("#pane-resizer").classList.add("dragging");
+    const move = (e) => {
+      const w = Math.min(760, Math.max(280, startW + (startX - e.clientX)));
+      rp.style.width = `${w}px`;
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      $("#pane-resizer").classList.remove("dragging");
+      localStorage.setItem("familiar.paneW", String(Math.round(rp.getBoundingClientRect().width)));
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  });
   $("#close-pane").addEventListener("click", closePane);
   $(".pane-tabs").addEventListener("click", (ev) => {
     const tab = ev.target.closest("[data-tab]");

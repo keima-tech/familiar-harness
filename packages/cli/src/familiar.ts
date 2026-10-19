@@ -1193,10 +1193,16 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
         continue;
       }
       if (code === 3) {
-        quitting = true;
-        cleanup();
-        process.stdout.write("\nbye\n");
-        process.exit(0);
+        // route through the TUI: two ctrl+c within 2s quit (first shows a hint)
+        const r = tui.key({ ctrl: true, name: "c" });
+        if (r !== null) {
+          quitting = true;
+          cleanup();
+          process.stdout.write("\nbye\n");
+          process.exit(0);
+        }
+        i += consumed;
+        continue;
       }
       if (code === 21) {
         tui.clearInput(); // Ctrl+U: clear the editor

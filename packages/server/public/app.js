@@ -2637,7 +2637,7 @@ async function filesRowFor(entry, depth, parentBox) {
       }
       childBox = document.createElement("div");
       childBox.className = "files-children";
-      parentBox.appendChild(childBox);
+      row.after(childBox); // expand right below the clicked folder
       row.querySelector(".f-chev").textContent = "▾";
       await filesExpand(entry.path, childBox, depth + 1);
     });

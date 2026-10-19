@@ -460,6 +460,9 @@ export class FullScreenTui {
   onSessionPick?: (id: string) => void | Promise<void>;
   /** caller hook: Esc pressed while streaming (≈ "stop the turn") */
   onAbortTurn?: () => void | Promise<void>;
+  /** double ctrl+c to quit: armed after the first press (toast hint) */
+  private ctrlCArmed = false;
+  private ctrlCTimer: NodeJS.Timeout | null = null;
   /** pending tool approval (y/N prompt rendered into the prompt panel) */
   private approvalReq: { tool: string; summary: string } | null = null;
   private approvalResolve: ((ok: boolean) => void) | null = null;
@@ -499,6 +502,11 @@ export class FullScreenTui {
     if (!this.running) return;
     this.running = false;
     if (this.spinnerTimer) clearInterval(this.spinnerTimer);
+    if (this.ctrlCTimer) {
+      clearTimeout(this.ctrlCTimer);
+      this.ctrlCTimer = null;
+    }
+    this.ctrlCArmed = false;
     this.clearFrameTimer();
     process.stdout.write("\x1b[?2004l\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[0 q\x1b[?1049l");
   }
@@ -1405,7 +1413,27 @@ export class FullScreenTui {
 
   /** Handle a keypress; returns the submitted line, "quit" or null. */
   key(key: { name?: string; ctrl?: boolean; meta?: boolean; sequence?: string }): string | null {
-    if (key.ctrl && key.name === "c") return "\x03";
+    if (key.ctrl && key.name === "c") {
+      // two ctrl+c within 2s quit the TUI (one press only shows a hint)
+      if (this.ctrlCArmed) {
+        this.ctrlCArmed = false;
+        if (this.ctrlCTimer) {
+          clearTimeout(this.ctrlCTimer);
+          this.ctrlCTimer = null;
+        }
+        this.clearToast();
+        return "\x03";
+      }
+      this.ctrlCArmed = true;
+      this.toast("press ctrl+c again to exit", 2000);
+      if (this.ctrlCTimer) clearTimeout(this.ctrlCTimer);
+      this.ctrlCTimer = setTimeout(() => {
+        this.ctrlCArmed = false;
+        this.ctrlCTimer = null;
+        this.frame();
+      }, 2000);
+      return null;
+    }
     // a pending approval swallows every key except y / n (= deny / esc-like)
     if (this.approvalResolve !== null) {
       const seq = (key.sequence ?? "").toLowerCase();

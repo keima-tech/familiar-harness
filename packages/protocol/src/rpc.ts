@@ -97,6 +97,7 @@ export const RPC_METHODS = [
   "curator.status",
   "fs.list",
   "fs.read",
+  "fs.preview",
   "curator.run",
   "mcp.status",
   "cron.status",

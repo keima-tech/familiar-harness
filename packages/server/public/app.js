@@ -93,6 +93,11 @@ const STR = {
     "files.empty": "(空のフォルダー)",
     "files.back": "一覧に戻る",
     "files.truncated": "先頭 256KB のみ表示",
+    "files.preview": "プレビュー",
+    "files.source": "ソース",
+    "files.openExternal": "外部アプリで開く",
+    "files.binary": "バイナリファイルです({0})— プレビューできません",
+    "files.tooLarge": "ファイルが大きすぎるためプレビューできません({0})— 外部アプリで開いてください",
     "notify.approvalTitle": "Familiar Harness — 承認が必要",
     "notify.turnDone": "Familiar Harness — ターン完了",
     "notify.turnFailed": "Familiar Harness — ターン失敗",
@@ -388,6 +393,11 @@ const STR = {
     "files.empty": "(empty folder)",
     "files.back": "back to the list",
     "files.truncated": "first 256 KB shown",
+    "files.preview": "preview",
+    "files.source": "source",
+    "files.openExternal": "open with the OS default app",
+    "files.binary": "binary file ({0}) — cannot preview",
+    "files.tooLarge": "too large to preview ({0}) — open it externally",
     "notify.approvalTitle": "Familiar Harness — approval needed",
     "notify.turnDone": "Familiar Harness — turn completed",
     "notify.turnFailed": "Familiar Harness — turn failed",
@@ -2650,7 +2660,9 @@ async function filesRowFor(entry, depth, parentBox) {
   return row;
 }
 
-/** In-app text file viewer (capped; binary files are rejected by the RPC). */
+/** In-app file preview: images / audio / video / pdf inline, markdown
+ * rendered with the safe renderer, everything else as text or an info stub
+ * with an "open externally" escape hatch on the desktop. */
 async function openFileViewer(filePath) {
   const tree = $("#files-tree");
   const view = $("#files-view");
@@ -2659,27 +2671,128 @@ async function openFileViewer(filePath) {
   view.hidden = false;
   let res;
   try {
-    res = await rpc("fs.read", { path: filePath });
+    res = await rpc("fs.preview", { path: filePath });
   } catch (err) {
     view.innerHTML = `<div class="files-note">${esc(t("files.loadFailed", err.message))}</div>`;
     return;
   }
   view.innerHTML = "";
+
   const head = document.createElement("div");
   head.className = "files-head";
+  const kindIcon = { image: "🖼", audio: "🎧", video: "🎬", pdf: "📄", markdown: "📝", text: "📄", binary: "📦" }[res.kind] ?? "📄";
   head.innerHTML =
     `<button type="button" class="ghost" id="files-back" title="${esc(t("files.back"))}">⬅</button>` +
-    `<span class="files-root" title="${esc(res.path)}">📄 ${esc(baseName(res.path))}</span>` +
-    (res.truncated ? `<span class="files-truncated">${esc(t("files.truncated"))}</span>` : "");
+    `<span class="files-root" title="${esc(res.path)}">${kindIcon} ${esc(baseName(res.path))}</span>`;
   head.querySelector("#files-back").addEventListener("click", () => {
     view.hidden = true;
     tree.hidden = false;
   });
+
+  // desktop: open with the OS default application
+  if (window.familiarDesktop?.openPath) {
+    const extBtn = document.createElement("button");
+    extBtn.type = "button";
+    extBtn.className = "ghost";
+    extBtn.textContent = "↗";
+    extBtn.title = t("files.openExternal");
+    extBtn.addEventListener("click", () => void window.familiarDesktop.openPath(res.path));
+    head.appendChild(extBtn);
+  }
   view.appendChild(head);
-  const pre = document.createElement("pre");
-  pre.className = "files-pre";
-  pre.textContent = res.content;
-  view.appendChild(pre);
+
+  const sizeRow = document.createElement("div");
+  sizeRow.className = "files-note";
+  sizeRow.textContent = formatBytes(res.size ?? 0) + (res.truncated ? ` · ${t("files.truncated")}` : "");
+  view.appendChild(sizeRow);
+
+  if (res.tooLarge) {
+    const note = document.createElement("div");
+    note.className = "files-note files-info";
+    note.textContent = t("files.tooLarge", formatBytes(res.size ?? 0));
+    view.appendChild(note);
+    return;
+  }
+
+  if (res.kind === "image") {
+    const img = document.createElement("img");
+    img.className = "files-img";
+    img.alt = baseName(res.path);
+    img.src = `data:${res.mime};base64,${res.dataBase64}`;
+    view.appendChild(img);
+    return;
+  }
+  if (res.kind === "audio") {
+    const audio = document.createElement("audio");
+    audio.controls = true;
+    audio.src = `data:${res.mime};base64,${res.dataBase64}`;
+    view.appendChild(audio);
+    return;
+  }
+  if (res.kind === "video") {
+    const video = document.createElement("video");
+    video.controls = true;
+    video.className = "files-video";
+    video.src = `data:${res.mime};base64,${res.dataBase64}`;
+    view.appendChild(video);
+    return;
+  }
+  if (res.kind === "pdf") {
+    const frame = document.createElement("iframe");
+    frame.className = "files-pdf";
+    frame.src = `data:application/pdf;base64,${res.dataBase64}`;
+    view.appendChild(frame);
+    return;
+  }
+  if (res.kind === "markdown") {
+    let mode = "preview";
+    const toolbar = document.createElement("div");
+    toolbar.className = "files-md-toolbar";
+    const previewBtn = document.createElement("button");
+    previewBtn.type = "button";
+    previewBtn.className = "ghost";
+    previewBtn.textContent = t("files.preview");
+    const rawBtn = document.createElement("button");
+    rawBtn.type = "button";
+    rawBtn.className = "ghost";
+    rawBtn.textContent = t("files.source");
+    toolbar.append(previewBtn, rawBtn);
+    view.appendChild(toolbar);
+    const body = document.createElement("div");
+    view.appendChild(body);
+    const render = () => {
+      previewBtn.classList.toggle("active", mode === "preview");
+      rawBtn.classList.toggle("active", mode === "raw");
+      if (mode === "preview") {
+        body.className = "md files-md";
+        body.innerHTML = mdRender(res.content);
+      } else {
+        body.className = "";
+        body.innerHTML = "";
+        const pre = document.createElement("pre");
+        pre.className = "files-pre";
+        pre.textContent = res.content;
+        body.appendChild(pre);
+      }
+    };
+    previewBtn.addEventListener("click", () => { mode = "preview"; render(); });
+    rawBtn.addEventListener("click", () => { mode = "raw"; render(); });
+    render();
+    return;
+  }
+
+  // text (existing path) or binary info stub
+  if (res.kind === "text") {
+    const pre = document.createElement("pre");
+    pre.className = "files-pre";
+    pre.textContent = res.content;
+    view.appendChild(pre);
+    return;
+  }
+  const info = document.createElement("div");
+  info.className = "files-note files-info";
+  info.textContent = t("files.binary", formatBytes(res.size ?? 0));
+  view.appendChild(info);
 }
 
 

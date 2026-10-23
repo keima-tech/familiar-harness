@@ -323,6 +323,8 @@ export class AgentServer {
         return this.fsList(params);
       case "fs.read":
         return this.fsRead(params);
+      case "fs.preview":
+        return this.fsPreview(params);
       case "fs.dirs":
         return this.fsDirs(params);
       case "fs.suggest":
@@ -529,6 +531,78 @@ export class AgentServer {
       return path.resolve(cwd, raw);
     }
     return path.resolve(raw);
+  }
+
+  /** MIME guesses for the GUI file preview (by extension). */
+  private static readonly PREVIEW_MIME: Record<string, string> = {
+    png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
+    webp: "image/webp", bmp: "image/bmp", ico: "image/x-icon", svg: "image/svg+xml",
+    mp3: "audio/mpeg", wav: "audio/wav", ogg: "audio/ogg", m4a: "audio/mp4", flac: "audio/flac",
+    mp4: "video/mp4", webm: "video/webm",
+    pdf: "application/pdf",
+  };
+
+  /**
+   * Rich preview payload for the GUI file viewer: images / audio / video /
+   * pdf come back base64-encoded (capped), markdown and text as content,
+   * unknown binaries as an info stub. Read-only.
+   */
+  private fsPreview(params: Record<string, unknown>): {
+    path: string;
+    kind: "image" | "audio" | "video" | "pdf" | "markdown" | "text" | "binary";
+    mime?: string;
+    dataBase64?: string;
+    content?: string;
+    truncated?: boolean;
+    size: number;
+    tooLarge?: boolean;
+  } {
+    const raw = (str(params, "path") ?? "").trim();
+    const target = this.resolveFsPath(raw);
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(target);
+    } catch {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, `cannot stat: ${target}`);
+    }
+    if (!stat.isFile()) throw new RpcError(RPC_ERROR_INVALID_PARAMS, `not a file: ${target}`);
+    const size = stat.size;
+    const ext = path.extname(target).replace(".", "").toLowerCase();
+
+    if (ext === "md" || ext === "markdown") {
+      const CAP = 256 * 1024;
+      const buf = fs.readFileSync(target);
+      if (buf.subarray(0, 8192).includes(0)) return { path: target, kind: "binary", size };
+      return {
+        path: target, kind: "markdown",
+        content: buf.subarray(0, CAP).toString("utf8"),
+        truncated: buf.length > CAP, size,
+      };
+    }
+
+    const mime = AgentServer.PREVIEW_MIME[ext];
+    if (mime) {
+      const kind = mime.startsWith("image/") ? "image"
+        : mime.startsWith("audio/") ? "audio"
+        : mime.startsWith("video/") ? "video"
+        : "pdf";
+      const cap = kind === "audio" || kind === "video" ? 64 * 1024 * 1024 : 20 * 1024 * 1024;
+      if (size > cap) return { path: target, kind, mime, size, tooLarge: true };
+      const buf = fs.readFileSync(target);
+      return { path: target, kind, mime, dataBase64: buf.toString("base64"), size };
+    }
+
+    // everything else: text unless it sniffs binary
+    const TEXT_CAP = 256 * 1024;
+    const buf = fs.readFileSync(target);
+    if (buf.subarray(0, Math.min(buf.length, 8192)).includes(0)) {
+      return { path: target, kind: "binary", size };
+    }
+    return {
+      path: target, kind: "text",
+      content: buf.subarray(0, TEXT_CAP).toString("utf8"),
+      truncated: buf.length > TEXT_CAP, size,
+    };
   }
 
   /** Directory listing with files, for the GUI file tree (read-only). */

@@ -194,6 +194,12 @@ ipcMain.handle("update:restart", () => {
   app.exit(0);
 });
 
+// open a file with the OS default application (GUI file viewer: 外部アプリで開く)
+ipcMain.handle("shell:openPath", async (_ev, target) => {
+  if (typeof target !== "string" || target === "") return "invalid path";
+  return shell.openPath(target);
+});
+
 // Desktop notifications requested by the web UI (turn finished, approval
 // needed). Falls back to a taskbar flash when no notification daemon is
 // available (common on bare X11 sessions).
@@ -324,6 +330,7 @@ function createWindow(url) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      plugins: true, // built-in PDF viewer for the file preview
       preload: path.join(__dirname, "preload.js"),
     },
   });

@@ -23,4 +23,6 @@ contextBridge.exposeInMainWorld("familiarDesktop", {
   },
   /** Native desktop notification (turn finished / approval needed). */
   notify: (payload) => ipcRenderer.send("app:notify", payload),
+  /** Open a file with the OS default application (file preview fallback). */
+  openPath: (target) => ipcRenderer.invoke("shell:openPath", target),
 });

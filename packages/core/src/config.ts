@@ -169,6 +169,8 @@ export interface ResolvedConfig {
   lsp: LspConfig;
   context: { token_soft_limit: number; keep_last: number; compaction: CompactionConfig };
   server: { port: number; bind: string; auth_token_file?: string };
+  /** GUI-configured integrations (Jira / Confluence / Redmine connectors). */
+  connectors?: Record<string, Record<string, unknown>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -276,6 +278,7 @@ const KNOWN_TOP_LEVEL = new Set([
   "lsp",
   "context",
   "server",
+  "connectors",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -402,6 +405,28 @@ export function writeServerAuthConfig(
   fs.writeFileSync(tmp, stringifyYaml(doc), { mode: 0o600 });
   fs.renameSync(tmp, file);
   log.info(`server.auth_token_file ${authTokenFile ? "set" : "cleared"} in ${file}`);
+}
+
+/** Persist the GUI-configured connectors into config.yaml (server section of
+ * the file is preserved; YAML round-trip keeps every other key). */
+export function writeConnectorsToDisk(
+  connectors: Record<string, Record<string, unknown>>,
+  options: LoadConfigOptions = {},
+): void {
+  const file = configFilePath(options.configFile);
+  let doc: Record<string, unknown> = {};
+  if (fs.existsSync(file)) {
+    const parsed = parseYaml(fs.readFileSync(file, "utf8"));
+    if (parsed !== null && parsed !== undefined) {
+      if (!isPlainObject(parsed)) throw new Error(`config file must be a YAML mapping: ${file}`);
+      doc = parsed;
+    }
+  }
+  doc["connectors"] = connectors;
+  const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(tmp, stringifyYaml(doc), { mode: 0o600 });
+  fs.renameSync(tmp, file);
+  log.info(`connectors updated in ${file}`);
 }
 
 export interface LoadConfigOptions {
@@ -600,12 +625,27 @@ export function loadConfig(options: LoadConfigOptions = {}): ResolvedConfig {
  * Copy of the config safe to expose via `config.get` RPC: secret values are
  * replaced by their origin + resolution status.
  */
+const CONNECTOR_SECRET_KEYS = new Set(["token", "api_key", "password", "secret"]);
+
 export function sanitizeConfigForApi(cfg: ResolvedConfig): Record<string, unknown> {
   const clone = structuredClone(cfg) as unknown as Record<string, unknown>;
   const providers = clone["providers"] as Record<string, Record<string, unknown>>;
   for (const pc of Object.values(providers)) {
     const auth = pc["auth"] as ProviderAuth | undefined;
     pc["auth"] = describeAuthSource(auth);
+  }
+  // connector secrets are masked, but their presence is signalled so the GUI
+  // can show "configured" without ever round-tripping the value
+  const connectors = clone["connectors"] as Record<string, Record<string, unknown>> | undefined;
+  if (connectors && typeof connectors === "object") {
+    for (const kind of Object.keys(connectors)) {
+      const c = connectors[kind] ?? {};
+      for (const key of Object.keys(c)) {
+        if (CONNECTOR_SECRET_KEYS.has(key) && typeof c[key] === "string" && c[key] !== "") {
+          c[key] = "***";
+        }
+      }
+    }
   }
   delete clone["homeDir"];
   return clone;}

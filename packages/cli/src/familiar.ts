@@ -1309,6 +1309,7 @@ async function cmdServe(flags: Record<string, string | boolean>): Promise<void> 
   const transport = await startHttpTransport(server, {
     port,
     bind,
+    version: readVersion(),
     authToken,
     authTokenFile: authTokenFile ? path.resolve(authTokenFile.replace(/^~(?=$|[\\/])/, os.homedir())) : undefined,
   });

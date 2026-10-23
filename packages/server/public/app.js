@@ -99,6 +99,36 @@ const STR = {
     "pane.inbox": "承認",
     "pane.todo": "タスク",
     "pane.ctx": "コンテキスト",
+    "set.colorTheme": "カラーテーマ",
+    "set.colorThemeDesc": "アクセントの配色プリセット",
+    "set.fontFamily": "フォント",
+    "set.fontFamilyDesc": "UI 全体のフォント(等幅エリアを除く)",
+    "font.system": "システム既定",
+    "font.gothic": "ゴシック体",
+    "font.serif": "明朝体",
+    "font.mono": "等幅",
+    "set.about": "このアプリについて",
+    "set.systemStats": "システム状態",
+    "set.version": "バージョン",
+    "set.developer": "開発者",
+    "conn.title": "コネクタ",
+    "conn.desc": "外部サービスとの接続設定(ツール連携は今後追加)",
+    "conn.baseUrl": "ベース URL (例: https://example.atlassian.net)",
+    "conn.email": "メールアドレス",
+    "conn.token": "API トークン",
+    "conn.apiKey": "API キー",
+    "conn.project": "プロジェクト (キー / ID)",
+    "conn.save": "保存",
+    "conn.test": "接続テスト",
+    "conn.saved": "保存しました",
+    "conn.ok": "接続OK",
+    "skills.newName": "スキル名 (例: deploy-check)",
+    "skills.create": "新規作成",
+    "skills.save": "保存",
+    "skills.saved": "スキルを保存しました: {0}",
+    "skills.loading": "読み込み中…",
+    "skills.pendingToast": "AI がスキル作成を提案しています({0}件)— 拡張機能タブで確認",
+    "notify.skillSuggest": "Familiar Harness — スキル作成の提案",
     "pane.files": "ファイル",
     "files.loading": "読み込み中…",
     "files.loadFailed": "読み込めませんでした: {0}",
@@ -399,6 +429,36 @@ const STR = {
     "pane.inbox": "approvals",
     "pane.todo": "tasks",
     "pane.ctx": "context",
+    "set.colorTheme": "color theme",
+    "set.colorThemeDesc": "accent palette preset",
+    "set.fontFamily": "font",
+    "set.fontFamilyDesc": "UI-wide font (mono areas excluded)",
+    "font.system": "System default",
+    "font.gothic": "Sans (Gothic)",
+    "font.serif": "Serif (Mincho)",
+    "font.mono": "Monospace",
+    "set.about": "About this app",
+    "set.systemStats": "system status",
+    "set.version": "version",
+    "set.developer": "developer",
+    "conn.title": "connectors",
+    "conn.desc": "integration settings for external services (agent tools to follow)",
+    "conn.baseUrl": "base URL (e.g. https://example.atlassian.net)",
+    "conn.email": "email",
+    "conn.token": "API token",
+    "conn.apiKey": "API key",
+    "conn.project": "project (key / id)",
+    "conn.save": "save",
+    "conn.test": "test connection",
+    "conn.saved": "saved",
+    "conn.ok": "connected",
+    "skills.newName": "skill name (e.g. deploy-check)",
+    "skills.create": "create",
+    "skills.save": "save",
+    "skills.saved": "skill saved: {0}",
+    "skills.loading": "loading…",
+    "skills.pendingToast": "the AI staged {0} skill proposal(s) — see the extensions tab",
+    "notify.skillSuggest": "Familiar Harness — skill proposal",
     "pane.files": "files",
     "files.loading": "loading…",
     "files.loadFailed": "cannot load: {0}",
@@ -999,6 +1059,16 @@ const ns = {
 /** Built-in provider catalog for the settings screen (connected vs. candidates).
  * The GUI never lists a key-less placeholder as connected — a provider moves to
  * the "Connected" section once its key resolves (or it needs no key). */
+/** Colored tile with the provider's mark — used in the settings provider list. */
+function providerTile(name, color) {
+  const known = {
+    openai: "⌬", anthropic: "A", google: "G", nvidia: "◉",
+    openrouter: "⟁", ollama: "🦙", halogen: "Λ",
+  };
+  const mark = known[name] ?? (name[0] ?? "?").toUpperCase();
+  return `<span class="plogo" style="background:${esc(color)}">${esc(mark)}</span>`;
+}
+
 const KNOWN_PROVIDERS = [
   { id: "openai", label: "OpenAI", kind: "openai_compatible", base_url: "https://api.openai.com/v1", color: "#10a37f", env: "OPENAI_API_KEY" },
   { id: "anthropic", label: "Anthropic", kind: "anthropic", base_url: "https://api.anthropic.com/v1", color: "#d97757", env: "ANTHROPIC_API_KEY" },
@@ -2311,6 +2381,7 @@ function onEvent(sessionId, e) {
       void refreshTodo();
       updateContextGauge();
       maybeNotify();
+      void maybeSuggestSkills();
       state.pendingEvents.delete(sessionId);
       refreshSessions();
       loadInbox();
@@ -2558,6 +2629,19 @@ async function refreshTodo() {
   } catch {
     /* session dropped */
   }
+}
+
+/** After a turn, nudge the user when the AI staged skill proposals. */
+async function maybeSuggestSkills() {
+  try {
+    const res = await rpc("skills.pending");
+    const items = res.items ?? [];
+    if (items.length === 0 || items.length === (maybeSuggestSkills.lastCount ?? 0)) return;
+    maybeSuggestSkills.lastCount = items.length;
+    const names = items.map((x) => x.name ?? x.id ?? "?").slice(0, 3).join(", ");
+    void notifyDesktop(t("notify.skillSuggest"), names, { urgent: false });
+    toast(t("skills.pendingToast", items.length), "ok");
+  } catch { /* non-fatal */ }
 }
 
 // ---------------------------------------------------------------------------
@@ -2822,9 +2906,16 @@ const DEFAULT_PREFS = {
   notifyOnlyUnfocused: true,
   fontSize: "m",            // s | m | l | xl
   width: "normal",          // normal | wide | full
+  fontFamily: "system",     // system | gothic | serif | mono
 };
 
 const FONT_SIZES = { s: "13px", m: "14px", l: "15.5px", xl: "17px" };
+const FONT_FAMILIES = {
+  system: 'var(--font-base)',
+  gothic: '"Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", Meiryo, sans-serif',
+  serif: '"Hiragino Mincho ProN", "Noto Serif JP", "Yu Mincho", "MS PMincho", serif',
+  mono: 'ui-monospace, "Cascadia Code", "Source Han Code JP", Consolas, "Courier New", monospace',
+};
 const WIDTHS = { normal: "52rem", wide: "68rem", full: "92rem" };
 
 function loadPrefs() {
@@ -2850,6 +2941,7 @@ function applyUiPrefs() {
   document.documentElement.style.setProperty("--content-w", WIDTHS[prefs.width] ?? "52rem");
   document.documentElement.dataset.uiFontSize = prefs.fontSize;
   document.documentElement.dataset.uiWidth = prefs.width;
+  document.body.style.fontFamily = FONT_FAMILIES[prefs.fontFamily] ?? FONT_FAMILIES.system;
 }
 
 /** Desktop notification plumbing. The Electron shell routes through the main
@@ -2931,7 +3023,8 @@ const SETTINGS_SECTIONS = [
   { id: "shortcuts", label: "ショートカット", icon: "⌘" },
   { id: "providers", label: "プロバイダー", icon: "▣" },
   { id: "extensions", label: "拡張機能", icon: "↯" },
-  { id: "system", label: "システム", icon: "🖥" },
+  { id: "system", label: "このアプリについて", icon: "◍" },
+  { id: "connectors", label: "コネクタ", icon: "🔗" },
 ];
 let settingsSection = "general";
 
@@ -2975,6 +3068,7 @@ function renderSettingsSection(id) {
   else if (id === "shortcuts") renderShortcutsSection(content);
   else if (id === "providers") void renderProvidersSection(content);
   else if (id === "extensions") void renderExtensionsSection(content);
+  else if (id === "connectors") void renderConnectorsSection(content);
   else if (id === "system") void renderSystemSection(content);
 }
 
@@ -3042,45 +3136,61 @@ function renderGeneralSection(content) {
 function renderAppearanceSection(content) {
   const pref = currentModePref();
   const c = card(t("set.colors"), t("set.appearanceDesc"));
+
+  // mode: three explicit buttons (light / dark / system)
   const modeRow = document.createElement("div");
-  modeRow.className = "select-row";
-  modeRow.appendChild(
+  modeRow.className = "segment-row";
+  for (const [label, value] of [
+    [t("set.light"), "light"],
+    [t("set.dark"), "dark"],
+    [t("set.system"), "system"],
+  ]) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = `segment-btn${pref === value ? " active" : ""}`;
+    b.textContent = label;
+    b.addEventListener("click", () => {
+      setModePref(value);
+      renderSettingsSection("appearance");
+    });
+    modeRow.appendChild(b);
+  }
+  c.appendChild(modeRow);
+
+  // color theme: pulldown (no toast — the change is immediately visible)
+  c.appendChild(settingRow(
+    t("set.colorTheme"),
+    t("set.colorThemeDesc"),
     selectControl(
-      [[t("set.light"), "light"], [t("set.dark"), "dark"], [t("set.system"), "system"]],
-      pref,
+      Object.keys(THEMES).map((name) => [name, name]),
+      currentThemeName(),
       (value) => {
-        setModePref(value);
+        setThemeName(value);
         renderSettingsSection("appearance");
       },
     ),
-  );
-  c.appendChild(modeRow);
-
-  const grid = document.createElement("div");
-  grid.className = "theme-grid";
-  const cur = currentThemeName();
-  const eff = pref === "light" ? "light" : pref === "dark" ? "dark"
-    : (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-  for (const [name, pal] of Object.entries(THEMES)) {
-    const preview = pal[eff] ?? pal.dark;
-    const sel = document.createElement("button");
-    sel.type = "button";
-    sel.className = `theme-card${name === cur ? " selected" : ""}`;
-    sel.innerHTML = `
-      <span class="sw" style="background:${preview.bg};border-color:${preview.border}">
-        <i style="background:${preview.accent}"></i><i style="background:${preview.ok}"></i><i style="background:${preview.err}"></i>
-      </span><span class="tname">${esc(name)}</span>`;
-    sel.addEventListener("click", () => {
-      setThemeName(name);
-      renderSettingsSection("appearance");
-      toast(t("toast.theme", name), "ok");
-    });
-    grid.appendChild(sel);
-  }
-  c.appendChild(grid);
+  ));
   content.appendChild(c);
 
   const c2 = card(t("set.display"));
+  // font family
+  c2.appendChild(settingRow(
+    t("set.fontFamily"),
+    t("set.fontFamilyDesc"),
+    selectControl(
+      [
+        [t("font.system"), "system"],
+        [t("font.gothic"), "gothic"],
+        [t("font.serif"), "serif"],
+        [t("font.mono"), "mono"],
+      ],
+      prefs.fontFamily,
+      (value) => {
+        savePrefs({ fontFamily: value });
+        renderSettingsSection("appearance");
+      },
+    ),
+  ));
   c2.appendChild(settingRow(
     t("set.fontSize"),
     t("set.fontSizeDesc"),
@@ -3112,7 +3222,7 @@ function renderAppearanceSection(content) {
     localStorage.removeItem("familiar.theme");
     localStorage.removeItem("familiar.mode");
     applyTheme();
-    savePrefs({ fontSize: "m", width: "normal" });
+    savePrefs({ fontSize: "m", width: "normal", fontFamily: "system" });
     renderSettingsSection("appearance");
     toast(t("toast.appearanceReset"), "ok");
   });
@@ -3414,7 +3524,7 @@ async function renderProvidersSection(content) {
     const hint = pc.base_url ?? k?.base_url ?? "";
     const envRef = k?.env ? ` · ${k.env}` : "";
     row.innerHTML =
-      `<span class="pdot" style="background:${esc(color)}"></span>` +
+      providerTile(name, color) +
       `<span class="pr-name">${esc(label)}<small class="pr-hint">${esc(hint ? hint + envRef : envRef.slice(3))}</small></span>` +
       `<button type="button" class="pconn">${esc(t("prov.connect"))}</button>`;
     row.querySelector(".pconn").addEventListener("click", () => {
@@ -3457,7 +3567,7 @@ function providerCard(name, pc) {
   wrap.className = `provcard${providerOpen === name ? " open" : ""}`;
   wrap.innerHTML = `
     <button class="provhead" type="button">
-      <span class="pdot" style="background:${esc(KNOWN_PROVIDERS.find((k) => k.id === name)?.color ?? "#8a8a94")}"></span>
+      ${providerTile(name, KNOWN_PROVIDERS.find((k) => k.id === name)?.color ?? "#8a8a94")}
       <span class="pname">${esc(name)}${name === ns.defaultProvider ? `<small class="pdefault">${esc(t("prov.default"))}</small>` : ""}</span>
     </button>
     <div class="provbody" hidden></div>`;
@@ -3477,13 +3587,96 @@ async function renderExtensionsSection(content) {
   // Skills (M3 self-improvement catalog)
   const skillCard = card(t("ext.skills"), t("ext.skillsDesc"));
   content.appendChild(skillCard);
+
+  // create-new row
+  const createRow = document.createElement("div");
+  createRow.className = "skill-create";
+  const nameInput = document.createElement("input");
+  nameInput.type = "text";
+  nameInput.className = "setting-input";
+  nameInput.placeholder = t("skills.newName");
+  const createBtn = document.createElement("button");
+  createBtn.type = "button";
+  createBtn.className = "ghost";
+  createBtn.textContent = t("skills.create");
+  createRow.append(nameInput, createBtn);
+  skillCard.appendChild(createRow);
+
+  // editor (hidden until a skill is opened)
+  const editor = document.createElement("div");
+  editor.className = "skill-editor";
+  editor.hidden = true;
+  const editorName = document.createElement("div");
+  editorName.className = "skill-editor-name";
+  const editorBody = document.createElement("textarea");
+  editorBody.className = "skill-editor-body";
+  editorBody.rows = 14;
+  editorBody.spellcheck = false;
+  const editorActions = document.createElement("div");
+  editorActions.className = "skill-editor-actions";
+  const saveBtn = document.createElement("button");
+  saveBtn.type = "button";
+  saveBtn.textContent = t("skills.save");
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "ghost";
+  closeBtn.textContent = t("cwd.cancel");
+  editorActions.append(saveBtn, closeBtn);
+  editor.append(editorName, editorBody, editorActions);
+  skillCard.appendChild(editor);
+
+  let editingName = null;
+  const openEditor = async (name) => {
+    editingName = name;
+    editorName.textContent = `SKILL.md — ${name}`;
+    editorBody.value = t("skills.loading");
+    editor.hidden = false;
+    try {
+      const res = await rpc("skills.view", { name });
+      editorBody.value = res.body ?? "";
+    } catch (err) {
+      editorBody.value = "";
+      editorName.textContent = `${name}: ${err.message}`;
+    }
+  };
+  saveBtn.addEventListener("click", async () => {
+    if (!editingName) return;
+    saveBtn.disabled = true;
+    try {
+      await rpc("skills.save", { name: editingName, body: editorBody.value });
+      toast(t("skills.saved", editingName), "ok");
+      renderSettingsSection("extensions");
+    } catch (err) {
+      toast(err.message, "err");
+    } finally {
+      saveBtn.disabled = false;
+    }
+  });
+  closeBtn.addEventListener("click", () => { editor.hidden = true; editingName = null; });
+  createBtn.addEventListener("click", async () => {
+    const name = nameInput.value.trim();
+    if (!name) return;
+    editingName = name;
+    editorName.textContent = `SKILL.md — ${name}`;
+    editorBody.value = `# ${name}\n\nWhen: \nProcedure: \n`;
+    editor.hidden = false;
+  });
+
   try {
     const res = await rpc("skills.list");
     const skills = res.skills ?? [];
     if (skills.length === 0) skillCard.appendChild(pairRow("—", t("ext.noSkills")));
     for (const sk of skills) {
       const meta = t("ext.skillUses", sk.useCount ?? 0, sk.bodyChars ?? 0);
-      skillCard.appendChild(pairRow(sk.name, `${sk.description ?? ""}${sk.description ? " · " : ""}${meta}`));
+      const row = document.createElement("div");
+      row.className = "skill-row";
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "skill-open";
+      btn.innerHTML = `<b>${esc(sk.name)}</b><small>${esc(`${sk.description ?? ""}${sk.description ? " · " : ""}${meta}`)}</small>`;
+      btn.addEventListener("click", () => void openEditor(sk.name));
+      row.appendChild(btn);
+      skillCard.appendChild(row);
     }
   } catch (err) {
     const row = document.createElement("div");
@@ -3541,8 +3734,103 @@ function pairRow(k, v) {
   return row;
 }
 
+async function renderConnectorsSection(content) {
+  if (!(await ensureNsConfig())) return;
+  let stored = {};
+  try {
+    stored = (await rpc("connectors.get")).connectors ?? {};
+  } catch (err) {
+    content.appendChild(sectionError(t("conn.title"), err));
+    return;
+  }
+  const KINDS = [
+    { id: "jira", label: "Jira", fields: [["base_url", t("conn.baseUrl")], ["email", t("conn.email")], ["token", t("conn.token"), true], ["project", t("conn.project")]] },
+    { id: "confluence", label: "Confluence", fields: [["base_url", t("conn.baseUrl")], ["email", t("conn.email")], ["token", t("conn.token"), true]] },
+    { id: "redmine", label: "Redmine", fields: [["base_url", t("conn.baseUrl")], ["api_key", t("conn.apiKey"), true], ["project", t("conn.project")]] },
+  ];
+  for (const k of KINDS) {
+    const saved = stored[k.id] ?? {};
+    const cardEl = card(`${k.label}`, t("conn.desc"));
+    const inputs = {};
+    for (const [key, label, secret] of k.fields) {
+      const input = document.createElement("input");
+      input.type = secret ? "password" : "text";
+      input.className = "setting-input";
+      input.value = typeof saved[key] === "string" ? saved[key] : "";
+      input.placeholder = label;
+      input.dataset.key = key;
+      inputs[key] = input;
+      const row = document.createElement("div");
+      row.className = "conn-field";
+      row.appendChild(input);
+      cardEl.appendChild(row);
+    }
+    const actions = document.createElement("div");
+    actions.className = "conn-actions";
+    const save = document.createElement("button");
+    save.type = "button";
+    save.textContent = t("conn.save");
+    save.className = "ghost";
+    const test = document.createElement("button");
+    test.type = "button";
+    test.textContent = t("conn.test");
+    const result = document.createElement("span");
+    result.className = "conn-result";
+    save.addEventListener("click", async () => {
+      const settings = {};
+      for (const [key] of k.fields) settings[key] = inputs[key].value.trim();
+      try {
+        await rpc("connectors.set", { kind: k.id, settings });
+        result.textContent = "✓ " + t("conn.saved");
+        result.style.color = "var(--ok)";
+      } catch (err) {
+        result.textContent = "✗ " + err.message;
+        result.style.color = "var(--err)";
+      }
+    });
+    test.addEventListener("click", async () => {
+      // save first so the test uses the values on screen
+      const settings = {};
+      for (const [key] of k.fields) settings[key] = inputs[key].value.trim();
+      await rpc("connectors.set", { kind: k.id, settings }).catch(() => {});
+      result.textContent = "…";
+      result.style.color = "var(--dim)";
+      try {
+        const r = await rpc("connectors.test", { kind: k.id });
+        result.textContent = r.ok ? "✓ " + t("conn.ok") : "✗ " + r.message;
+        result.style.color = r.ok ? "var(--ok)" : "var(--err)";
+      } catch (err) {
+        result.textContent = "✗ " + err.message;
+        result.style.color = "var(--err)";
+      }
+    });
+    actions.append(save, test, result);
+    cardEl.appendChild(actions);
+    content.appendChild(cardEl);
+  }
+}
+
 async function renderSystemSection(content) {
-  const hint = card(t("set.system"), t("sys.desc"));
+  // ---- about card (version / developer / links) ----
+  const about = card(t("set.about"), "");
+  about.querySelector("h4")?.remove();
+  const brand = document.createElement("div");
+  brand.className = "about-brand";
+  brand.innerHTML =
+    `<img class="about-icon" src="/brand.png" alt="" />` +
+    `<div class="about-text"><b>Familiar Harness</b>` +
+    `<span id="about-version">${esc(t("set.version"))}: …</span>` +
+    `<span>${esc(t("set.developer"))}: keima_tech</span>` +
+    `<a href="https://note.com/keima_tech" target="_blank" rel="noopener">note.com/keima_tech ↗</a></div>`;
+  about.appendChild(brand);
+  try {
+    const hz = await fetch("/healthz").then((r) => r.json());
+    const vEl = about.querySelector("#about-version");
+    if (vEl && hz?.version) vEl.textContent = `${t("set.version")}: v${hz.version}`;
+  } catch { /* keep placeholder */ }
+  content.appendChild(about);
+
+  const hint = card(t("set.systemStats"), t("sys.desc"));
   content.appendChild(hint);
   try {
     const res = await rpc("curator.status");

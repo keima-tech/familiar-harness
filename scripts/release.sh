@@ -59,7 +59,7 @@ for pkg in cli core protocol server; do
   cp -r "packages/$pkg/dist" "$STAGING/packages/$pkg/dist"
 done
 cp -r packages/server/public "$STAGING/packages/server/public"
-cp README.md LICENSE install.sh "$STAGING/" 2>/dev/null || true
+cp README.md README.ja.md LICENSE install.sh "$STAGING/" 2>/dev/null || true
 
 echo "== npm ci --omit=dev (staging) =="
 ( cd "$STAGING" && npm ci --omit=dev >/dev/null 2>&1 )

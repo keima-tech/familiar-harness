@@ -19,6 +19,7 @@ import {
   AgentRunner,
   loadConfig,
   configFilePath,
+  writeConnectorsToDisk,
   writeProviderToDisk,
   describeAuthSource,
   normalizeEffort,
@@ -319,6 +320,14 @@ export class AgentServer {
         return this.modelsList(params);
       case "models.probe":
         return this.modelsProbe(params);
+      case "connectors.get":
+        return this.connectorsGet();
+      case "connectors.set":
+        return this.connectorsSet(params);
+      case "connectors.test":
+        return this.connectorsTest(params);
+      case "skills.save":
+        return this.skillsSave(params);
       case "fs.list":
         return this.fsList(params);
       case "fs.read":
@@ -665,6 +674,80 @@ export class AgentServer {
       truncated: buf.length > CAP,
       size: buf.length,
     };
+  }
+
+  private connectorKinds = new Set(["jira", "confluence", "redmine"]);
+
+  private connectorsGet(): Record<string, unknown> {
+    return { connectors: this.cfg.connectors ?? {} };
+  }
+
+  private connectorsSet(params: Record<string, unknown>): Record<string, unknown> {
+    const kind = String(params.kind ?? "");
+    if (!this.connectorKinds.has(kind)) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, `unknown connector kind: ${kind}`);
+    }
+    const settings = params.settings;
+    if (settings !== null && typeof settings !== "object") {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, "settings must be an object");
+    }
+    const connectors = { ...(this.cfg.connectors ?? {}) };
+    const incoming = { ...(settings as Record<string, unknown>) };
+    // keep stored secrets when the GUI round-trips the masked "***"
+    for (const [k, v] of Object.entries(incoming)) {
+      if (v === "***" && typeof connectors[kind]?.[k] === "string") incoming[k] = connectors[kind][k];
+    }
+    connectors[kind] = incoming;
+    this.cfg.connectors = connectors;
+    writeConnectorsToDisk(connectors);
+    return { ok: true, connectors };
+  }
+
+  private async connectorsTest(params: Record<string, unknown>): Promise<{
+    ok: boolean;
+    status?: number;
+    message: string;
+  }> {
+    const kind = String(params.kind ?? "");
+    const c = (this.cfg.connectors ?? {})[kind] as Record<string, string> | undefined;
+    if (!c?.base_url) throw new RpcError(RPC_ERROR_INVALID_PARAMS, `${kind} is not configured`);
+    const base = c.base_url.replace(/\/+$/, "");
+    let url = "";
+    const headers: Record<string, string> = {};
+    if (kind === "redmine") {
+      url = `${base}/users/current.json`;
+      headers["X-Redmine-API-Key"] = c.api_key ?? "";
+    } else if (kind === "jira") {
+      url = `${base}/rest/api/3/myself`;
+      headers["Authorization"] = `Basic ${Buffer.from(`${c.email ?? ""}:${c.token ?? ""}`).toString("base64")}`;
+    } else if (kind === "confluence") {
+      url = `${base}/rest/api/currentUser`;
+      headers["Authorization"] = `Basic ${Buffer.from(`${c.email ?? ""}:${c.token ?? ""}`).toString("base64")}`;
+    } else {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, `unknown connector kind: ${kind}`);
+    }
+    try {
+      const res = await fetch(url, { headers, signal: AbortSignal.timeout(10_000) });
+      if (res.ok) return { ok: true, status: res.status, message: "connected" };
+      const text = (await res.text()).slice(0, 160);
+      return { ok: false, status: res.status, message: `HTTP ${res.status}: ${text}` };
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  private skillsSave(params: Record<string, unknown>): Record<string, unknown> {
+    const name = String(params.name ?? "").trim();
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, `invalid skill name: ${name}`);
+    }
+    const body = String(params.body ?? "");
+    const dir = path.join(this.cfg.homeDir, "skills", name);
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, "SKILL.md");
+    const existed = fs.existsSync(file);
+    fs.writeFileSync(file, body.endsWith("\n") ? body : `${body}\n`, { mode: 0o644 });
+    return { ok: true, path: file, created: !existed };
   }
 
   private fsDirs(params: Record<string, unknown>): { dirs: string[]; home: string } {

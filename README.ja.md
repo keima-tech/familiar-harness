@@ -1,0 +1,195 @@
+<div align="center">
+
+# Familiar Harness
+
+クライアント/サーバ型のオープンなエージェントハーネス。フルスクリーンのターミナル UI・Web UI・デスクトップアプリが**同一のコアエンジン**を共有します。
+**MIT ライセンス**、Node.js 24+(Linux / Windows / macOS)で動作します。
+
+[English](README.md) · **日本語**
+
+</div>
+
+---
+
+<a id="日本語"></a>
+
+## 日本語
+
+[English](#english) · **日本語**
+
+### Familiar Harness とは?
+
+`familiar serve` がエージェントコアをデーモン化し(JSON-RPC over HTTP+WebSocket)、フルスクリーン TUI の CLI・Web UI・Electron デスクトップアプリが**同一のコアエンジン**を共有します。`serve` が生きていれば CLI は自動で RPC 接続に切り替わり、セッションはサーバ側の SQLite に永続化されます。
+
+### 特徴
+
+- **client/server 分離** — 1 つのコア、3 つのフロントエンド。
+- **プロバイダ抽象** — OpenAI 互換 API(OpenAI / OpenRouter / NVIDIA / vLLM / llama.cpp 等)・Anthropic・キーレスのローカルエンドポイント(Ollama、LAN 内 LLM サーバ)。既定プロバイダに認証情報が無い場合、呼び出し可能なプロバイダへ自動フォールバックするため、ローカルモデルで `familiar chat` がそのまま動きます。
+- **フルスクリーン TUI** — スプラッシュ+外枠なしレイアウト、`/models`・`/sessions` ピッカー、bracketed paste、CJK IME 対応カーソル、TUI 内ツール承認(`y/N`)、Esc でターン中断、tok/s 表示、モデル別コンテキスト長表示。
+- **Web UI** — `familiar serve` が配信(既定 `http://127.0.0.1:46210`):セッション一覧、provider/model ピッカー、コンテキストゲージ、tok/s、diff カード、設定。
+- **ツール群** — read/write/edit、glob/grep、bash、webfetch/websearch、todo、サブエージェント `task`(並列)、git worktree、MCP サーバ(stdio・ホットロード)。
+- **自己改善ループ** — 永続 memory、`SKILL.md` 手続き+curator(使用統計・staleness・archival)、バックグラウンド自己レビュー、staging された書き込みの人間承認。
+- **安全性** — 危険なツール呼び出しは必ず承認アダプタ経由。`plan` モードは読み取り専用ツールに制限。秘密情報は環境変数か `~/.familiar/secrets/*.key` に保存し、設定ファイルに直書きしない。
+- **Windows + Linux 両対応**(パス・シェル解決・PowerShell 対応)。デスクトップは electron-builder でインストーラ配布(deb / AppImage / NSIS)。
+
+### インストール
+
+要件:**Node.js ≥ 24**(`node --version` で確認)。
+
+**Linux / macOS — ワンライナー**(最新リリースの tarball を取得。npm 不要):
+
+```bash
+curl -fsSL https://example.invalid:3000/owner/familiar-harness/raw/branch/main/install.sh | sh
+```
+
+- `~/.local/lib/familiar` へ展開し、`~/.local/bin/familiar` にシンボリックリンクを作成(`FAMILIAR_INSTALL_DIR` / `FAMILIAR_BIN_DIR` で変更可)。
+- 接続先 Forgejo は `FAMILIAR_FORGEJO`(既定 `https://example.invalid:3000`)・リポジトリは `FAMILIAR_REPO`(既定 `owner/familiar-harness`)で変更できます。
+- バージョン指定:`curl ... | sh -s -- 0.1.0` のように引数で渡します。
+
+**ソースから(全プラットフォーム):**
+
+```bash
+git clone https://example.invalid:3000/owner/familiar-harness.git
+cd familiar-harness
+npm install
+npm run build
+cd packages/cli && npm link   # `familiar` コマンドを PATH に登録
+```
+
+**デスクトップアプリ(Electron):**
+
+- 各 [Release](https://example.invalid:3000/owner/familiar-harness/releases) にバイナリを同梱:
+  `familiar-<version>-linux-amd64.deb` / `familiar-<version>-linux-x86_64.AppImage`、
+  Windows は NSIS インストーラ `familiar-<version>-win-x64.exe`、または
+  `familiar-<version>-win-x64-portable.exe`(ダウンロードしてそのまま実行、インストール不要)。
+- 自前でビルドする場合:
+
+```bash
+npm run -w packages/desktop pack:linux   # deb + AppImage
+npm run -w packages/desktop pack:win     # NSIS(Linux でクロスビルドする場合は wine が必要)
+```
+
+### アップデート
+
+- **リリース版(ワンライナーで導入)**: `familiar update` — Forgejo の最新 Release を確認し、`familiar-*.tar.gz` をダウンロードしてインストール先を入れ替えます(`--check` でドライラン、`--forgejo` / `--repo` で接続先変更)。自己署名証明書のインスタンスでは検証をスキップする再試行が行われます(警告表示。`FAMILIAR_TLS_STRICT=1` で中止)。
+- **ソースから**: `git pull && npm run build`。
+
+### アンインストール
+
+**curl インストーラの場合:**
+
+```bash
+rm -rf ~/.local/lib/familiar      # アプリ本体
+rm -f ~/.local/bin/familiar       # シンボリックリンク
+rm -rf ~/.familiar                # 任意 — 設定・セッション履歴・memory/skills・
+                               # 保存済み API キー(~/.familiar/secrets)も削除される
+```
+
+**ソースから(npm link)の場合:**
+
+```bash
+cd familiar-harness/packages/cli
+npm unlink                     # グローバルの `familiar` シンボリックリンクを削除
+# リポジトリ自体も不要なら checkout を削除
+```
+
+**デスクトップアプリ:** AppImage はファイルを削除。deb は `sudo apt remove familiar-harness`。Windows の portable 版は exe を削除、NSIS 版は「アプリ設定」からアンインストールしてください。
+
+### クイックスタート
+
+```bash
+# フルスクリーン TUI — `familiar chat` と同じ
+familiar
+
+# ワンショット実行(ヘッドレス)
+familiar run -p "このリポジトリの TODO を列挙して"
+
+# 計画モード(読み取り専用ツール)
+familiar run -p "新機能の実装計画を出して" --plan
+
+# プロバイダ/モデルを明示
+familiar run -p "hi" --provider ollama --model qwen2.5-coder:3b
+
+# Web UI + API デーモン(http://127.0.0.1:46210)
+familiar serve
+```
+
+TUI 操作:`Ctrl+P` コマンドパレット / `/models` モデル選択 / `Tab` Build⇔Plan / `Esc` ターン中断 / `/help` 一覧。
+
+API キー未設定でも、Familiar は実際に呼び出せる最初のプロバイダ(キーレスのローカルエンドポイント — Ollama や LAN 内 LLM サーバ)を自動既定にします。固定したい場合は config の `default_provider` を指定してください。
+
+### 設定
+
+`~/.familiar/config.yaml`:
+
+```yaml
+version: 1
+
+# 省略可。省略時は「実際に呼び出せる」最初のプロバイダ
+# (キーがある / キーレスのローカルエンドポイント)が既定になります。
+default_provider: openai
+default_model: gpt-6.1-sol
+
+providers:
+  openai:
+    kind: openai_compatible
+    base_url: https://api.openai.com/v1
+    auth: { env: OPENAI_API_KEY }      # トークンはこのファイルに直書きしない
+    default_model: gpt-6.1-sol
+  ollama:
+    kind: openai_compatible
+    base_url: http://127.0.0.1:11434/v1
+    auth: { env: none }
+    default_model: qwen2.5-coder:3b
+```
+
+- 秘密情報は `api_key` → `api_key_file` → `env` の順で解決。GUI から設定した API キーは `~/.familiar/secrets/<provider>.key`(0600)に保存され、設定ファイルにはファイル参照のみ書かれます。
+- `stream_options: false` で usage 取得要求(`include_usage`)を無効化(拒否する互換サーバ向け。Familiar は 400/422 時に自動で外して再試行します)。
+- モデル名は移り変わりが速いため、プロバイダのモデル一覧(TUI の `/models`、または `curl $BASE_URL/models`)で最新を確認してください。
+- 詳細は [docs/spec/05-config.md](docs/spec/05-config.md)。
+
+### リモートアクセス
+
+`familiar serve` は既定で `127.0.0.1` のみにバインドするため、ルータのポート開放は不要です。別 PC からは SSH トンネルを使います:
+
+```bash
+ssh -L 46210:127.0.0.1:46210 ユーザー名@サーバーIP
+# 手元のブラウザで http://localhost:46210
+```
+
+LAN に直接公開する場合のみ `familiar serve --bind 0.0.0.0` を使い、**必ずトークン認証(`familiar token --write`)を設定**。公網にさらす場合は TLS リバースプロキシを挟んでください。
+
+### 構成
+
+```
+packages/
+  protocol/   RPC・イベント・データ型の共通定義
+  core/       エージェントループ・ツール・プロバイダ・セッションストア(UI 非依存)
+  server/     JSON-RPC over HTTP+WebSocket デーモン + 静的 Web UI
+  cli/        familiar コマンド(TUI / REPL / headless run / serve)
+  desktop/    同一コアを使う Electron シェル
+docs/spec/    詳細仕様(アーキテクチャ・プロトコル・ツール・設定・ロードマップ)
+```
+
+### 開発
+
+```bash
+npm install
+npm run build       # tsc -b(project references)
+npm run typecheck
+npm run smoke       # mock プロバイダで headless E2E(ネットワーク不要)
+npm run mdtest      # markdown レンダラのフィクスチャテスト
+```
+
+`familiar serve` はビルド済み `packages/*/dist` を常駐実行するため、**コード変更(git pull 含む)は再起動まで反映されません**。Web UI の静的ファイルのみ再読み込みで反映されます。デスクトップは起動時に生存中のサーバ(46210〜46212)を再利用するため、`unknown method: ...` エラーの多くは古い serve が残っているのが原因です(アプリ完全終了 → `pkill -f "familiar.js serve"` → 再起動)。
+
+### リリース(メンテナ向け)
+
+```bash
+scripts/release.sh                                # ビルド + tarball 生成(ドライラン)
+FORGEJO_TOKEN=... scripts/release.sh --publish    # Forgejo Release 作成 + アップロード
+```
+
+### ライセンス
+
+[MIT](LICENSE)

@@ -70,6 +70,34 @@ mkdir -p "$INSTALL_BIN"
 ln -sf "$INSTALL_LIB/packages/cli/dist/familiar.js" "$INSTALL_BIN/familiar"
 chmod +x "$INSTALL_LIB/packages/cli/dist/familiar.js" 2>/dev/null || true
 
+# --- Web UI: start the server now + keep it running (systemd user unit) ---
+if command -v systemctl >/dev/null 2>&1 && [ -n "${XDG_RUNTIME_DIR:-}" ] && systemctl --user show-environment >/dev/null 2>&1; then
+  mkdir -p ~/.config/systemd/user
+  cat > ~/.config/systemd/user/familiar-serve.service <<UNIT
+[Unit]
+Description=Familiar Harness web UI server
+After=network.target
+
+[Service]
+ExecStart=$INSTALL_BIN serve
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+UNIT
+  systemctl --user daemon-reload
+  systemctl --user enable --now familiar-serve >/dev/null 2>&1 || true
+  log "web UI: systemd user service enabled (auto-starts on login)"
+else
+  # no systemd user session: start the server in the background if not running
+  if ! fetch "http://127.0.0.1:46210/healthz" >/dev/null 2>&1; then
+    ( setsid "$INSTALL_LIB/packages/cli/dist/familiar.js" serve > "$HOME/.familiar/serve.log" 2>&1 < /dev/null & )
+    sleep 2
+  fi
+  log "web UI started in the background: http://localhost:46210/ (log: ~/.familiar/serve.log)"
+fi
+
 # --- verify ------------------------------------------------------------------
 case ":$PATH:" in
   *":$INSTALL_BIN:"*) ;;

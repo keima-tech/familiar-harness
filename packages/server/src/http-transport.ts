@@ -27,6 +27,8 @@ export interface HttpTransportOptions {
   /** Path the token was read from — reported by /healthz so local clients
    * (the desktop shell) can pick it up. Never the value itself. */
   authTokenFile?: string;
+  /** server build version, surfaced by /healthz for the GUI about card */
+  version?: string;
 }
 
 export interface HttpTransport {
@@ -180,6 +182,7 @@ export function startHttpTransport(
             protocol: "familiar/1",
             auth: authRequired ? "required" : "off",
             ...(authRequired && opts.authTokenFile ? { tokenFile: opts.authTokenFile } : {}),
+            ...(opts.version ? { version: opts.version } : {}),
           }),
         );
         return;

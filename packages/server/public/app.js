@@ -227,7 +227,7 @@ const STR = {
     "toast.effortNext": "エフォート: {0} (次のセッションから適用)",
     "chip.effort": "推論エフォート",
     "effort.default": "既定",
-    "effort.defaultDesc": "エフォートなし (プロバイダ既定)",
+    "effort.defaultDesc": "モデル側の既定エフォートを使用",
     "effort.lowDesc": "低 (速い)",
     "effort.mediumDesc": "中 (標準)",
     "effort.highDesc": "高 (じっくり)",
@@ -558,7 +558,7 @@ const STR = {
     "toast.effortNext": "effort: {0} (applies from the next session)",
     "chip.effort": "reasoning effort",
     "effort.default": "default",
-    "effort.defaultDesc": "no effort (provider default)",
+    "effort.defaultDesc": "use the model's default effort",
     "effort.lowDesc": "low (faster)",
     "effort.mediumDesc": "medium (balanced)",
     "effort.highDesc": "high (thorough)",
@@ -3841,6 +3841,13 @@ async function renderConnectorsSection(content) {
     return;
   }
   const KINDS = [
+    { id: "github", label: "GitHub", fields: [["token", t("conn.token"), true]] },
+    { id: "gitlab", label: "GitLab", fields: [["base_url", `${t("conn.baseUrl")} (既定: https://gitlab.com)`], ["token", t("conn.token"), true]] },
+    { id: "backlog", label: "Backlog", fields: [["base_url", "スペース URL (例: https://xxx.backlog.jp)"], ["api_key", t("conn.apiKey"), true]] },
+    { id: "notion", label: "Notion", fields: [["token", "Internal Integration Token", true]] },
+    { id: "slack", label: "Slack", fields: [["token", "Bot / User Token (xox…) ", true]] },
+    { id: "teams", label: "Microsoft Teams", fields: [["token", "アクセストークン (Graph)", true]] },
+    { id: "discord", label: "Discord", fields: [["token", "Bot Token", true]] },
     { id: "jira", label: "Jira", fields: [["base_url", t("conn.baseUrl")], ["email", t("conn.email")], ["token", t("conn.token"), true], ["project", t("conn.project")]] },
     { id: "confluence", label: "Confluence", fields: [["base_url", t("conn.baseUrl")], ["email", t("conn.email")], ["token", t("conn.token"), true]] },
     { id: "redmine", label: "Redmine", fields: [["base_url", t("conn.baseUrl")], ["api_key", t("conn.apiKey"), true], ["project", t("conn.project")]] },

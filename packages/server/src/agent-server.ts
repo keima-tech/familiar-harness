@@ -676,7 +676,10 @@ export class AgentServer {
     };
   }
 
-  private connectorKinds = new Set(["jira", "confluence", "redmine"]);
+  private connectorKinds = new Set([
+    "jira", "confluence", "redmine", "github", "gitlab",
+    "backlog", "notion", "slack", "teams", "discord",
+  ]);
 
   private connectorsGet(): Record<string, unknown> {
     return { connectors: this.cfg.connectors ?? {} };
@@ -699,7 +702,7 @@ export class AgentServer {
     }
     connectors[kind] = incoming;
     this.cfg.connectors = connectors;
-    writeConnectorsToDisk(connectors);
+    writeConnectorsToDisk(connectors, { configFile: this.cfg.configFile });
     return { ok: true, connectors };
   }
 
@@ -710,8 +713,13 @@ export class AgentServer {
   }> {
     const kind = String(params.kind ?? "");
     const c = (this.cfg.connectors ?? {})[kind] as Record<string, string> | undefined;
-    if (!c?.base_url) throw new RpcError(RPC_ERROR_INVALID_PARAMS, `${kind} is not configured`);
-    const base = c.base_url.replace(/\/+$/, "");
+    if (!c) throw new RpcError(RPC_ERROR_INVALID_PARAMS, `${kind} is not configured`);
+    // github / notion / slack / teams / discord use fixed endpoints (no base_url)
+    const needsBase = !["github", "notion", "slack", "teams", "discord"].includes(kind);
+    const base = (c.base_url ?? "").replace(/\/+$/, "");
+    if (needsBase && base === "") {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, `${kind} requires base_url`);
+    }
     let url = "";
     const headers: Record<string, string> = {};
     if (kind === "redmine") {
@@ -723,6 +731,30 @@ export class AgentServer {
     } else if (kind === "confluence") {
       url = `${base}/rest/api/currentUser`;
       headers["Authorization"] = `Basic ${Buffer.from(`${c.email ?? ""}:${c.token ?? ""}`).toString("base64")}`;
+    } else if (kind === "github") {
+      url = "https://api.github.com/user";
+      headers["Authorization"] = `Bearer ${c.token ?? ""}`;
+      headers["User-Agent"] = "familiar-harness";
+    } else if (kind === "gitlab") {
+      const base = (c.base_url || "https://gitlab.com").replace(/\/+$/, "");
+      url = `${base}/api/v4/user`;
+      headers["Authorization"] = `Bearer ${c.token ?? ""}`;
+    } else if (kind === "backlog") {
+      const base = (c.base_url || "").replace(/\/+$/, "");
+      url = `${base}/api/v2/space?apiKey=${encodeURIComponent(c.api_key ?? "")}`;
+    } else if (kind === "notion") {
+      url = "https://api.notion.com/v1/users/me";
+      headers["Authorization"] = `Bearer ${c.token ?? ""}`;
+      headers["Notion-Version"] = "2022-06-28";
+    } else if (kind === "slack") {
+      url = "https://slack.com/api/auth.test";
+      headers["Authorization"] = `Bearer ${c.token ?? ""}`;
+    } else if (kind === "teams") {
+      url = "https://graph.microsoft.com/v1.0/me";
+      headers["Authorization"] = `Bearer ${c.token ?? ""}`;
+    } else if (kind === "discord") {
+      url = "https://discord.com/api/v10/users/@me";
+      headers["Authorization"] = `Bot ${c.token ?? ""}`;
     } else {
       throw new RpcError(RPC_ERROR_INVALID_PARAMS, `unknown connector kind: ${kind}`);
     }

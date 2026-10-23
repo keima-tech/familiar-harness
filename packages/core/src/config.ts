@@ -171,6 +171,8 @@ export interface ResolvedConfig {
   server: { port: number; bind: string; auth_token_file?: string };
   /** GUI-configured integrations (Jira / Confluence / Redmine connectors). */
   connectors?: Record<string, Record<string, unknown>>;
+  /** the config file this configuration was loaded from (persist writes) */
+  configFile?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -587,6 +589,7 @@ export function loadConfig(options: LoadConfigOptions = {}): ResolvedConfig {
 
   const merged = deepMerge(DEFAULT_CONFIG, doc);
   const cfg = merged as ResolvedConfig;
+  cfg.configFile = file;
 
   // Provider entries: kind defaults to openai_compatible when only base_url is given.
   for (const [id, pc] of Object.entries(cfg.providers)) {
@@ -617,6 +620,7 @@ export function loadConfig(options: LoadConfigOptions = {}): ResolvedConfig {
   }
 
   cfg.homeDir = familiarPaths.home();
+  if (options.configFile) cfg.configFile = options.configFile;
   if (options.overrides?.default_provider) cfg.default_provider = options.overrides.default_provider;
   return cfg;
 }
@@ -648,6 +652,7 @@ export function sanitizeConfigForApi(cfg: ResolvedConfig): Record<string, unknow
     }
   }
   delete clone["homeDir"];
+  delete clone["configFile"];
   return clone;}
 
 // ---------------------------------------------------------------------------

@@ -1097,9 +1097,9 @@ const KNOWN_PROVIDERS = [
 const THEMES = {
   "Tokyo Night": {
     dark: { bg: "#101014", panel: "#151519", panel2: "#1b1b21", text: "#e8e8ea", dim: "#85858e", accent: "#6c8cff", ok: "#7dc98f", warn: "#d9a35f", err: "#e46a6a", border: "#26262c", bubble: "#3948e0", hover: "#232329", codebg: "#121216" },
-    darkOnly: true,
     desc: "深い藍色の背景に青系アクセント。ターミナル定番のダーク配色",
     desc: "深い藍色の背景に青系アクセント。ターミナル定番のダーク配色",
+    light: { bg: "#e9eaf2", panel: "#f5f6fa", panel2: "#ffffff", text: "#3b4261", dim: "#8990b3", accent: "#2e7de9", ok: "#4a8a3f", warn: "#b07d1e", err: "#c6435c", border: "#d3d6e4", bubble: "#2e7de9", hover: "#dfe2ee", codebg: "#f2f3f9" },
   },
   Catppuccin: {
     dark: { bg: "#1e1e2e", panel: "#181825", panel2: "#313244", text: "#cdd6f4", dim: "#6c7086", accent: "#89b4fa", ok: "#a6e3a1", warn: "#f9e2af", err: "#f38ba8", border: "#454758", bubble: "#585b70", hover: "#37394f", codebg: "#1d1d29" },
@@ -1121,9 +1121,9 @@ const THEMES = {
   },
   Matrix: {
     dark: { bg: "#041105", panel: "#061808", panel2: "#0b2410", text: "#9de6a4", dim: "#3f7a4c", accent: "#27e879", ok: "#7dff9a", warn: "#b7e86a", err: "#ff5f5f", border: "#123f1e", bubble: "#1e7a3c", hover: "#0e2a15", codebg: "#05150a" },
-    darkOnly: true,
     desc: "緑基調のターミナル風。マトリックス風の強いダーク",
     desc: "緑基調のターミナル風。マトリックス風の強いダーク",
+    light: { bg: "#eef7ee", panel: "#f6fbf6", panel2: "#ffffff", text: "#1e3f26", dim: "#5c7c64", accent: "#128a44", ok: "#1d8a4a", warn: "#8a6d1d", err: "#b02a37", border: "#cfdecf", bubble: "#128a44", hover: "#e2f0e2", codebg: "#f2f9f2" },
   },
   Nord: {
     dark: { bg: "#2e3440", panel: "#292f3a", panel2: "#3b4252", text: "#eceff4", dim: "#77839c", accent: "#88c0d0", ok: "#a3be8c", warn: "#ebcb8b", err: "#bf616a", border: "#434c5e", bubble: "#5e81ac", hover: "#3f4a5e", codebg: "#272c36" },
@@ -1133,9 +1133,9 @@ const THEMES = {
   },
   Dracula: {
     dark: { bg: "#282a36", panel: "#21222c", panel2: "#343746", text: "#f8f8f2", dim: "#6272a4", accent: "#bd93f9", ok: "#50fa7b", warn: "#f1fa8c", err: "#ff5555", border: "#44475a", bubble: "#6272a4", hover: "#3d4059", codebg: "#242634" },
-    darkOnly: true,
     desc: "紫系の鮮やかな定番ダーク",
     desc: "紫系の鮮やかな定番ダーク",
+    light: { bg: "#f0eff6", panel: "#faf9fc", panel2: "#ffffff", text: "#3d3a50", dim: "#7a7a96", accent: "#8a56c2", ok: "#1e9a52", warn: "#a58505", err: "#d73a49", border: "#dcdbe8", bubble: "#8a56c2", hover: "#e6e4f0", codebg: "#f5f4fa" },
   },
   "Rosé Pine": {
     dark: { bg: "#191724", panel: "#1f1d2e", panel2: "#26233a", text: "#e0def4", dim: "#908caa", accent: "#c4a7e7", ok: "#9ccfd8", warn: "#f6c177", err: "#eb6f92", border: "#403d52", bubble: "#31748f", hover: "#2a2740", codebg: "#1c1a28" },
@@ -1145,9 +1145,9 @@ const THEMES = {
   },
   Kanagawa: {
     dark: { bg: "#1f1f28", panel: "#16161d", panel2: "#2a2a37", text: "#dcd7ba", dim: "#727169", accent: "#7e9cd8", ok: "#98bb6c", warn: "#ffa066", err: "#e46876", border: "#2f3139", bubble: "#2d4f67", hover: "#26262f", codebg: "#1c1c24" },
-    darkOnly: true,
     desc: "和風の深い色調。墨と藍のダーク",
     desc: "和風の深い色調。墨と藍のダーク",
+    light: { bg: "#f2ecbc", panel: "#f8f0d8", panel2: "#fdf6e3", text: "#43436a", dim: "#8b8a80", accent: "#426e9c", ok: "#5d714a", warn: "#c4754c", err: "#c14b4a", border: "#ddd6ac", bubble: "#426e9c", hover: "#e9e2b4", codebg: "#f4eed0" },
   },
   Everforest: {
     dark: { bg: "#2d352b", panel: "#262a25", panel2: "#343934", text: "#d3c6aa", dim: "#859289", accent: "#a7c080", ok: "#83b09a", warn: "#dbbc7f", err: "#e67e80", border: "#3d453c", bubble: "#5a7a6a", hover: "#31372f", codebg: "#292e28" },
@@ -1169,9 +1169,9 @@ const THEMES = {
   },
   "One Dark": {
     dark: { bg: "#282c34", panel: "#21252b", panel2: "#2f343e", text: "#d7dae0", dim: "#636d83", accent: "#61afef", ok: "#98c379", warn: "#d19a66", err: "#e06c75", border: "#3e4451", bubble: "#4c78cc", hover: "#373c46", codebg: "#232730" },
-    darkOnly: true,
     desc: "Atom/VSCode 由来の定番ダーク",
     desc: "Atom/VSCode 由来の定番ダーク",
+    light: { bg: "#f2f3f5", panel: "#fafbfc", panel2: "#ffffff", text: "#383a42", dim: "#82899a", accent: "#4078f2", ok: "#50a14f", warn: "#c18401", err: "#e45649", border: "#dcdfe4", bubble: "#4078f2", hover: "#e8eaed", codebg: "#f4f5f7" },
   },
   Oxocarbon: {
     dark: { bg: "#161616", panel: "#1c1c1e", panel2: "#26262b", text: "#f2f4f8", dim: "#8d8d93", accent: "#78a9ff", ok: "#42be65", warn: "#f1c21b", err: "#fa4d56", border: "#343439", bubble: "#5a66d6", hover: "#26262a", codebg: "#131316" },
@@ -3195,23 +3195,69 @@ function renderAppearanceSection(content) {
   c.appendChild(modeRow);
 
   // color theme: pulldown (no toast — the change is immediately visible)
-  const themeSel = selectControl(
-    Object.keys(THEMES).map((name) => [
-      `${name}${THEMES[name].darkOnly ? " 🌙" : ""}`,
-      name,
-    ]),
-    currentThemeName(),
-    (value) => {
+  // color theme: custom dropdown with per-theme color swatches (mode-aware)
+  c.appendChild(settingRow(
+    t("set.colorTheme"),
+    t("set.colorThemeDesc"),
+    themeDropdown(currentThemeName(), (value) => {
       setThemeName(value);
       renderSettingsSection("appearance");
-    },
-  );
-  for (const opt of themeSel.options) {
-    const name = opt.value.replace(/ 🌙$/, "");
-    opt.title = THEMES[name]?.desc ?? "";
-  }
-  c.appendChild(settingRow(t("set.colorTheme"), t("set.colorThemeDesc"), themeSel));
+    }),
+  ));
   content.appendChild(c);
+
+function themeDropdown(current, onChange) {
+  const wrap = document.createElement("div");
+  wrap.className = "theme-dd";
+  const palOf = (name) => {
+    const pref = currentModePref();
+    const eff = pref === "light" || pref === "dark" ? pref
+      : window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    return THEMES[name][eff] ?? THEMES[name].dark;
+  };
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "theme-dd-btn";
+  const paint = (name) => {
+    const pal = palOf(name);
+    btn.innerHTML =
+      `<span class="theme-dd-sw" style="background:${pal.bg}">` +
+      `<i style="background:${pal.accent}"></i><i style="background:${pal.ok}"></i><i style="background:${pal.err}"></i>` +
+      `</span><span class="theme-dd-name">${esc(name)}</span><span class="dd-arrow">▾</span>`;
+    btn.title = THEMES[name]?.desc ?? "";
+  };
+  paint(current);
+  const list = document.createElement("div");
+  list.className = "theme-dd-list";
+  list.hidden = true;
+  for (const name of Object.keys(THEMES)) {
+    const pal = palOf(name);
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = `theme-dd-row${name === current ? " selected" : ""}`;
+    row.title = THEMES[name]?.desc ?? "";
+    row.innerHTML =
+      `<span class="theme-dd-sw" style="background:${pal.bg}">` +
+      `<i style="background:${pal.accent}"></i><i style="background:${pal.ok}"></i><i style="background:${pal.err}"></i>` +
+      `</span><span class="theme-dd-name">${esc(name)}</span>` +
+      (name === current ? `<span class="theme-dd-check">✓</span>` : "");
+    row.addEventListener("click", () => {
+      list.hidden = true;
+      paint(name);
+      onChange(name);
+    });
+    list.appendChild(row);
+  }
+  wrap.append(btn, list);
+  btn.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    list.hidden = !list.hidden;
+  });
+  document.addEventListener("click", (e) => {
+    if (!wrap.contains(e.target)) list.hidden = true;
+  });
+  return wrap;
+}
 
   const c2 = card(t("set.display"));
   // font family

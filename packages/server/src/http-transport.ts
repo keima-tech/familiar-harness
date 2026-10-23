@@ -71,33 +71,91 @@ export function startHttpTransport(
   const authRequired = typeof opts.authToken === "string" && opts.authToken !== "";
 
   /** Constant-time comparison against the configured bearer token. */
-  const authorized = (req: { headers: Record<string, unknown>; url?: string }): boolean => {
-    if (!authRequired) return true;
-    const header = req.headers["authorization"];
-    if (typeof header === "string" && header.startsWith("Bearer ")) {
-      if (safeEqual(header.slice("Bearer ".length).trim(), opts.authToken ?? "")) return true;
+    const COOKIE_NAME = "familiar_token";
+
+  /** Read the familiar_token cookie (set once after a successful ?token= load). */
+  const cookieToken = (req: { headers: Record<string, unknown> }): string | null => {
+    const raw = req.headers["cookie"];
+    if (typeof raw !== "string") return null;
+    for (const part of raw.split(";")) {
+      const eq = part.indexOf("=");
+      if (eq === -1) continue;
+      if (part.slice(0, eq).trim() === COOKIE_NAME) {
+        try {
+          return decodeURIComponent(part.slice(eq + 1).trim());
+        } catch {
+          return null;
+        }
+      }
     }
-    const queryToken = new URL(req.url ?? "/", "http://localhost").searchParams.get("token");
-    if (queryToken !== null && safeEqual(queryToken, opts.authToken ?? "")) return true;
-    return false;
+    return null;
   };
 
-  const sendUnauthorized = (
-    req: { method?: string; headers: Record<string, unknown> },
+  type AuthKind = "none" | "cookie" | "explicit";
+  /** none = unauthorized; cookie = valid familiar_token cookie; explicit = valid
+   * Bearer header or ?token= query (a fresh sign-in → worth a Set-Cookie). */
+  const authKind = (req: { headers: Record<string, unknown>; url?: string }): AuthKind => {
+    if (!authRequired) return "cookie";
+    const header = req.headers["authorization"];
+    if (typeof header === "string" && header.startsWith("Bearer ")) {
+      if (safeEqual(header.slice("Bearer ".length).trim(), opts.authToken ?? "")) return "explicit";
+    }
+    const queryToken = new URL(req.url ?? "/", "http://localhost").searchParams.get("token");
+    if (queryToken !== null && safeEqual(queryToken, opts.authToken ?? "")) return "explicit";
+    const cookie = cookieToken(req);
+    if (cookie !== null && safeEqual(cookie, opts.authToken ?? "")) return "cookie";
+    return "none";
+  };
+
+  const authorized = (req: { headers: Record<string, unknown>; url?: string }): boolean =>
+    authKind(req) !== "none";
+  /** Token entry page: paste the token once; the server responds to the
+   * resulting /?token=… with a cookie so CSS/JS/WS carry it afterwards. */
+  const sendTokenPage = (
+    req: { headers: Record<string, unknown>; url?: string },
+    res: import("node:http").ServerResponse,
+    badAttempt: boolean,
+  ): void => {
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+    res.end(
+      `<!doctype html><html lang="ja"><meta charset="utf-8">` +
+        `<meta name="viewport" content="width=device-width, initial-scale=1">` +
+        `<title>Familiar Harness — token</title><style>` +
+        `body{font-family:system-ui,sans-serif;background:#0f1117;color:#e6e6ea;display:grid;place-items:center;height:100vh;margin:0}` +
+        `.card{background:#161923;border:1px solid #2a2e3a;border-radius:14px;padding:32px 36px;width:min(420px,90vw)}` +
+        `h2{margin:0 0 4px;font-size:16px;display:flex;align-items:center;gap:8px}` +
+        `.hint{color:#8b8b96;font-size:12.5px;line-height:1.7;margin:0 0 16px}` +
+        `code{background:#0f1117;padding:1px 6px;border-radius:5px}` +
+        `input{width:100%;box-sizing:border-box;padding:10px 12px;border-radius:8px;border:1px solid #2a2e3a;background:#0f1117;color:#e6e6ea;font-size:14px}` +
+        `input:focus{outline:none;border-color:#4a9eff}` +
+        `button{margin-top:12px;width:100%;padding:10px;border-radius:8px;border:none;background:#2f6feb;color:#fff;font-size:14px;cursor:pointer}` +
+        `button:hover{background:#4a9eff}` +
+        `.err{color:#ff6b6b;font-size:12px;margin-top:10px;display:none}` +
+        `</style><div class="card">` +
+        `<h2>◍ Familiar Harness</h2>` +
+        `<p class="hint">このサーバーへの接続にはアクセストークンが必要です。<br>` +
+        `サーバー上で <code>cat ~/.familiar/server.token</code> を実行して確認できます。<br>` +
+        `A bearer token is required — check <code>~/.familiar/server.token</code> on the server.</p>` +
+        `<input id="t" type="password" placeholder="access token" autocomplete="off" autofocus>` +
+        `<button onclick="go()">接続 / connect</button>` +
+        `<div class="err" id="e">トークンが違います / invalid token</div></div>` +
+        `<script>` +
+        `function go(){var v=document.getElementById("t").value.trim();if(v)location.href="/?token="+encodeURIComponent(v);}` +
+        `document.getElementById("t").addEventListener("keydown",function(e){if(e.key==="Enter")go();});` +
+        (badAttempt ? `document.getElementById("e").style.display="block";` : "") +
+        `</script>`,
+    );
+  };
+
+    const sendUnauthorized = (
+    req: { method?: string; headers: Record<string, unknown>; url?: string },
     res: import("node:http").ServerResponse,
     url: string,
   ): void => {
     if (url === "/" || url === "/index.html") {
-      // human-friendly page for someone who opened the URL without a token
-      res.writeHead(401, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(
-        "<!doctype html><title>familiar — authentication required</title>" +
-          "<meta charset=\"utf-8\"><body style=\"font-family:system-ui;padding:40px\">" +
-          "<h2>familiar server is running — token required</h2>" +
-          "<p>This server requires a bearer token. Open it as:<br>" +
-          "<code>http://" + (req.headers["host"] ?? "127.0.0.1") + "/?token=&lt;your-token&gt;</code></p>" +
-          "<p>Generate one with <code>familiar token --write</code> and set <code>server.auth_token_file</code> in config.yaml.</p></body>",
-      );
+      // friendly token entry page: paste the token once, get a cookie back
+      const hadAttempt = new URL(req.url ?? "/", "http://localhost").searchParams.has("token");
+      sendTokenPage(req, res, hadAttempt);
       return;
     }
     res.writeHead(401, { "Content-Type": "application/json" });
@@ -126,10 +184,19 @@ export function startHttpTransport(
         );
         return;
       }
-      if (!authorized(req)) {
+      const kind = authKind(req);
+      if (kind === "none") {
         sendUnauthorized(req, res, url);
         return;
       }
+      // a fresh ?token=/Bearer sign-in hands out a cookie so the browser also
+      // carries it on sub-resource requests (CSS/JS) and the /ws handshake
+      const setCookie =
+        kind === "explicit"
+          ? {
+              "Set-Cookie": `${COOKIE_NAME}=${encodeURIComponent(opts.authToken ?? "")}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000`,
+            }
+          : {};
       const asset = STATIC_FILES[url];
       if (asset) {
         const file = path.join(publicDir(), asset.file);
@@ -139,7 +206,7 @@ export function startHttpTransport(
           const stat = fs.statSync(file);
           const etag = `W/"${stat.size}-${Math.floor(stat.mtimeMs)}"`;
           if (req.headers["if-none-match"] === etag) {
-            res.writeHead(304, { ETag: etag, "Cache-Control": "no-cache" });
+            res.writeHead(304, { ETag: etag, "Cache-Control": "no-cache", ...setCookie });
             res.end();
             return;
           }
@@ -148,6 +215,7 @@ export function startHttpTransport(
             "Cache-Control": "no-cache",
             ETag: etag,
             "Last-Modified": stat.mtime.toUTCString(),
+            ...setCookie,
           });
           res.end(req.method === "HEAD" ? undefined : fs.readFileSync(file));
           return;

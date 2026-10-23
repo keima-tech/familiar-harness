@@ -75,6 +75,11 @@ npm run -w packages/desktop pack:win     # NSIS (needs wine when cross-built on 
 **curl installer:**
 
 ```bash
+# stop the auto-started web UI service (installed with systemd user units)
+systemctl --user disable --now familiar-serve 2>/dev/null
+rm -f ~/.config/systemd/user/familiar-serve.service
+systemctl --user daemon-reload 2>/dev/null
+
 rm -rf ~/.local/lib/familiar      # the application
 rm -f ~/.local/bin/familiar       # the symlink
 rm -rf ~/.familiar                # optional — also deletes config, session history,

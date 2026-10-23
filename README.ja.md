@@ -79,6 +79,11 @@ npm run -w packages/desktop pack:win     # NSIS(Linux でクロスビルドす�
 **curl インストーラの場合:**
 
 ```bash
+# 自動起動した WebUI サービスを停止(systemd ユーザーユニット)
+systemctl --user disable --now familiar-serve 2>/dev/null
+rm -f ~/.config/systemd/user/familiar-serve.service
+systemctl --user daemon-reload 2>/dev/null
+
 rm -rf ~/.local/lib/familiar      # アプリ本体
 rm -f ~/.local/bin/familiar       # シンボリックリンク
 rm -rf ~/.familiar                # 任意 — 設定・セッション履歴・memory/skills・

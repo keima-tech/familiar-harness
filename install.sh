@@ -79,7 +79,7 @@ Description=Familiar Harness web UI server
 After=network.target
 
 [Service]
-ExecStart=$INSTALL_BIN serve
+ExecStart=$INSTALL_BIN/familiar serve
 Restart=on-failure
 RestartSec=3
 

@@ -966,9 +966,20 @@ server:
   assert((await rpc({ authorization: `Bearer wrong-token` })).status === 401, "POST /rpc with wrong token -> 401");
   assert((await rpc({ authorization: `Bearer ${token}` })).status === 200, "POST /rpc with bearer token -> 200");
   assert((await rpc({ "x-familiar-token": token })).status === 401, "non-bearer header is not accepted");
-  assert((await fetch(`http://127.0.0.1:${PORT}/`)).status === 401, "GET / without token -> 401");
+  // browser navigation without a token serves the token ENTRY PAGE (200):
+  // the UI itself stays protected — only the entry form is public
+  const entryPage = await fetch(`http://127.0.0.1:${PORT}/`);
+  assert(entryPage.status === 200, "GET / without token -> token entry page (200)");
+  const entryHtml = await entryPage.text();
+  assert(entryHtml.includes("access token") && !entryHtml.includes("composer"), "token entry page rendered (no UI leak)");
   assert((await fetch(`http://127.0.0.1:${PORT}/?token=${token}`)).status === 200, "GET /?token=... -> 200");
-  assert((await fetch(`http://127.0.0.1:${PORT}/?token=nope`)).status === 401, "GET /?token=nope -> 401");
+  const nope = await fetch(`http://127.0.0.1:${PORT}/?token=nope`);
+  assert(nope.status === 200 && (await nope.text()).includes("invalid token"), "GET /?token=nope -> entry page with error");
+  // the cookie issued on a valid ?token= load authenticates sub-resources
+  const setCookie = (await fetch(`http://127.0.0.1:${PORT}/?token=${token}`)).headers.get("set-cookie") ?? "";
+  const cookie = setCookie.split(";")[0];
+  assert(cookie.startsWith("familiar_token="), "valid ?token= sets the familiar_token cookie");
+  assert((await fetch(`http://127.0.0.1:${PORT}/app.js`, { headers: { cookie } })).status === 200, "GET /app.js with cookie -> 200");
   const secretLeak = await fetch(`http://127.0.0.1:${PORT}/?token=${token}`).then((r) => r.text());
   assert(!secretLeak.includes(token), "served UI never contains the token value");
   serveP.kill("SIGTERM");

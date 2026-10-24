@@ -137,6 +137,9 @@ const STR = {
     "skills.rejectShort": "却下",
     "skills.createdMsg": "スキルを作成しました — 設定 → 拡張機能 で編集できます",
     "skills.rejectedMsg": "提案を却下しました",
+    "skills.dismiss": "閉じる",
+    "skills.dismissTitle": "このカードを閉じます(提案は設定 → 拡張機能 に残ります)",
+    "skills.partialResult": "{0} 件成功 / {1} 件失敗: {2}",
     "notify.skillSuggest": "Familiar Harness — スキル作成の提案",
     "pane.files": "ファイル",
     "skills.edit": "スキルの編集",
@@ -477,6 +480,9 @@ const STR = {
     "skills.rejectShort": "dismiss",
     "skills.createdMsg": "skill created — edit it in 設定 → 拡張機能",
     "skills.rejectedMsg": "proposal dismissed",
+    "skills.dismiss": "Dismiss",
+    "skills.dismissTitle": "close this card (proposals stay in Settings → Extensions)",
+    "skills.partialResult": "{0} succeeded / {1} failed: {2}",
     "notify.skillSuggest": "Familiar Harness — skill proposal",
     "pane.files": "files",
     "skills.edit": "edit skills",
@@ -2538,7 +2544,12 @@ async function loadInbox() {
     for (const item of mem.items ?? []) {
       count += 1;
       body.appendChild(proposalNode("memory", item, async (approved) => {
-        await rpc(approved ? "memory.approve" : "memory.reject", { id: item.id });
+        try {
+          await rpc(approved ? "memory.approve" : "memory.reject", { id: item.id });
+        } catch (err) {
+          toast(`✗ ${err.message}`, "err");
+          return;
+        }
         await loadInbox();
       }));
     }
@@ -2546,10 +2557,15 @@ async function loadInbox() {
     for (const item of skills.items ?? []) {
       count += 1;
       body.appendChild(proposalNode("skill", item, async (approved) => {
-        if (approved) {
-          await rpc("skills.approve", { prefix: item.id });
-        } else {
-          await rpc("skills.reject", { prefix: item.id });
+        try {
+          if (approved) {
+            await rpc("skills.approve", { prefix: item.id });
+          } else {
+            await rpc("skills.reject", { prefix: item.id });
+          }
+        } catch (err) {
+          toast(`✗ ${err.message}`, "err");
+          return;
         }
         await loadInbox();
       }));
@@ -2710,15 +2726,37 @@ async function refreshTodo() {
 
 /** After a turn, nudge the user when the AI staged skill proposals:
  * an inline card in the transcript with one-click approve/reject. */
+const SKILL_SUGGEST_SEEN_KEY = "familiar.skillSuggestSeen";
+
+/** Ids already surfaced to this browser (dismissed or handled) — persisted so
+ * a leftover proposal (e.g. a stale patch) does not nag on every turn. */
+function skillSuggestSeen() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(SKILL_SUGGEST_SEEN_KEY) ?? "[]"));
+  } catch {
+    return new Set();
+  }
+}
+
+function rememberSkillSuggest(ids) {
+  const seen = skillSuggestSeen();
+  for (const id of ids) seen.add(id);
+  try {
+    localStorage.setItem(SKILL_SUGGEST_SEEN_KEY, JSON.stringify([...seen].slice(-200)));
+  } catch {
+    /* ignore */
+  }
+}
+
 async function maybeSuggestSkills() {
   try {
     const res = await rpc("skills.pending");
     const items = res.items ?? [];
     if (items.length === 0) return;
-    const fresh = items.filter((x) => !maybeSuggestSkills.seen?.has(x.id));
+    const seen = skillSuggestSeen();
+    const fresh = items.filter((x) => !seen.has(x.id));
     if (fresh.length === 0) return;
-    maybeSuggestSkills.seen = maybeSuggestSkills.seen ?? new Set();
-    for (const x of fresh) maybeSuggestSkills.seen.add(x.id);
+    rememberSkillSuggest(fresh.map((x) => x.id));
     const names = fresh.map((x) => x.name ?? x.id ?? "?").join(", ");
     void notifyDesktop(t("notify.skillSuggest"), names, { urgent: false });
 
@@ -2729,8 +2767,15 @@ async function maybeSuggestSkills() {
     const body = document.createElement("div");
     body.className = "skill-suggest-body";
     body.innerHTML =
-      `<div class="ss-title">💡 ${esc(t("skills.suggestTitle"))}</div>` +
+      `<div class="ss-head"><div class="ss-title">💡 ${esc(t("skills.suggestTitle"))}</div></div>` +
       fresh.map((x) => `<div class="ss-item"><b>${esc(x.name ?? x.id ?? "?")}</b><span>${esc(x.description ?? "")}</span></div>`).join("");
+    const head = body.querySelector(".ss-head");
+    const dismiss = document.createElement("button");
+    dismiss.type = "button";
+    dismiss.className = "ss-close";
+    dismiss.textContent = "✕";
+    dismiss.title = t("skills.dismissTitle");
+    head.appendChild(dismiss);
     const actions = document.createElement("div");
     actions.className = "ss-actions";
     const approve = document.createElement("button");
@@ -2746,31 +2791,42 @@ async function maybeSuggestSkills() {
     card.append(body, actions);
     tr.appendChild(card);
     scrollBottom();
-    approve.addEventListener("click", async () => {
+    // ✕ closes the card only — the proposals stay in Settings → Extensions
+    dismiss.addEventListener("click", () => card.remove());
+    // approve/reject each proposal independently so one stale item
+    // (e.g. a CAS-refused patch) cannot block the rest
+    let remaining = [...fresh];
+    const settle = async (verb, okMsg) => {
       approve.disabled = true;
-      try {
-        for (const x of fresh) await rpc("skills.approve", { prefix: x.id });
-        status.textContent = "✓ " + t("skills.createdMsg");
+      reject.disabled = true;
+      const succeeded = [];
+      const failures = [];
+      for (const x of remaining) {
+        try {
+          await rpc(`skills.${verb}`, { prefix: x.id });
+          succeeded.push(x.name ?? x.id);
+        } catch (err) {
+          failures.push({ item: x, message: `${x.name ?? x.id}: ${err.message}` });
+        }
+      }
+      remaining = failures.map((f) => f.item);
+      if (failures.length === 0) {
+        status.textContent = "✓ " + okMsg;
         status.style.color = "var(--ok)";
         approve.remove();
         reject.remove();
-      } catch (err) {
-        status.textContent = "✗ " + err.message;
+        dismiss.remove();
+      } else {
+        status.textContent =
+          (succeeded.length > 0 ? "✓ " : "✗ ") +
+          t("skills.partialResult", String(succeeded.length), String(failures.length), failures.map((f) => f.message).join(" / "));
         status.style.color = "var(--err)";
         approve.disabled = false;
-      }
-    });
-    reject.addEventListener("click", async () => {
-      reject.disabled = true;
-      try {
-        for (const x of fresh) await rpc("skills.reject", { prefix: x.id });
-        status.textContent = t("skills.rejectedMsg");
-        approve.remove();
-      } catch (err) {
-        status.textContent = "✗ " + err.message;
         reject.disabled = false;
       }
-    });
+    };
+    approve.addEventListener("click", () => settle("approve", t("skills.createdMsg")));
+    reject.addEventListener("click", () => settle("reject", t("skills.rejectedMsg")));
   } catch { /* non-fatal */ }
 }
 

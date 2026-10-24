@@ -3080,6 +3080,7 @@ const SETTINGS_SECTIONS = [
   { id: "system", label: "このアプリについて", icon: "◍" },
 ];
 let settingsSection = "general";
+let settingsRenderGen = 0; // guards the async section renderers against stacking
 
 function openSettingsModal(section) {
   if (section) settingsSection = section;
@@ -3112,17 +3113,19 @@ function renderSettingsNav() {
 }
 
 function renderSettingsSection(id) {
+  const gen = ++settingsRenderGen;
   const content = $("#settings-content");
   content.innerHTML = "";
   content.scrollTop = 0;
+  const stale = () => gen !== settingsRenderGen;
   if (id === "general") renderGeneralSection(content);
   else if (id === "appearance") renderAppearanceSection(content);
   else if (id === "transcript") renderTranscriptSection(content);
   else if (id === "shortcuts") renderShortcutsSection(content);
-  else if (id === "providers") void renderProvidersSection(content);
-  else if (id === "extensions") void renderExtensionsSection(content);
-  else if (id === "connectors") void renderConnectorsSection(content);
-  else if (id === "system") void renderSystemSection(content);
+  else if (id === "providers") void renderProvidersSection(content, stale);
+  else if (id === "extensions") void renderExtensionsSection(content, stale);
+  else if (id === "connectors") void renderConnectorsSection(content, stale);
+  else if (id === "system") void renderSystemSection(content, stale);
 }
 
 function renderGeneralSection(content) {
@@ -3565,8 +3568,9 @@ function providerForm(name, pc, isNew) {
 /** Provider settings: "Connected" providers as collapsible cards, then the
  * built-in catalog + unconfigured entries as "Candidates", each with a
  * ＋接続 button that opens the form prefilled. */
-async function renderProvidersSection(content) {
+async function renderProvidersSection(content, stale = () => false) {
   if (!(await ensureNsConfig())) return;
+    if (stale()) return;
   const names = Object.keys(ns.providers).sort((a, b) =>
     a === ns.defaultProvider ? -1 : b === ns.defaultProvider ? 1 : a.localeCompare(b));
   const connected = [];
@@ -3686,7 +3690,7 @@ function providerCard(name, pc) {
   return wrap;
 }
 
-async function renderExtensionsSection(content) {
+async function renderExtensionsSection(content, stale = () => false) {
   // Skills (M3 self-improvement catalog)
   const skillCard = card(t("ext.skills"), t("ext.skillsDesc"));
   content.appendChild(skillCard);
@@ -3775,6 +3779,7 @@ async function renderExtensionsSection(content) {
   });
 
   try {
+    if (stale()) return;
     const res = await rpc("skills.list");
     const skills = res.skills ?? [];
     summary.textContent = `${t("skills.edit")} (${skills.length})`;
@@ -3847,8 +3852,9 @@ function pairRow(k, v) {
   return row;
 }
 
-async function renderConnectorsSection(content) {
+async function renderConnectorsSection(content, stale = () => false) {
   if (!(await ensureNsConfig())) return;
+    if (stale()) return;
   let stored = {};
   try {
     stored = (await rpc("connectors.get")).connectors ?? {};
@@ -4065,7 +4071,7 @@ async function renderConnectorsSection(content) {
   }
 }
 
-async function renderSystemSection(content) {
+async function renderSystemSection(content, stale = () => false) {
   // ---- about card (version / developer / links) ----
   const about = card(t("set.about"), "");
   about.querySelector("h4")?.remove();
@@ -4079,6 +4085,7 @@ async function renderSystemSection(content) {
     `<a href="https://note.com/keima_tech" target="_blank" rel="noopener">note.com/keima_tech ↗</a></div>`;
   about.appendChild(brand);
   try {
+    if (stale()) return;
     const hz = await fetch("/healthz").then((r) => r.json());
     const vEl = about.querySelector("#about-version");
     if (vEl && hz?.version) vEl.textContent = `${t("set.version")}: v${hz.version}`;

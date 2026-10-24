@@ -44,8 +44,9 @@ export interface DomainPermissionConfig {
 }
 
 export interface WebSearchConfig {
-  provider: "searxng";
-  /** e.g. http://127.0.0.1:8080 — unset means the tool errors with a hint */
+  /** "duckduckgo" needs no configuration; "searxng" uses base_url */
+  provider: "duckduckgo" | "searxng";
+  /** e.g. http://127.0.0.1:8080 — used by the searxng provider */
   base_url: string;
 }
 
@@ -240,7 +241,7 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
       allow_domains: [],
       deny_domains: ["localhost", "127.*", "::1", "10.*", "192.168.*", "172.16.*", "172.17.*", "172.18.*", "172.19.*", "172.20.*", "172.21.*", "172.22.*", "172.23.*", "172.24.*", "172.25.*", "172.26.*", "172.27.*", "172.28.*", "172.29.*", "172.30.*", "172.31.*", "169.254.*", "0.0.0.0", "*.local"],
     },
-    websearch: { provider: "searxng", base_url: "" },
+    websearch: { provider: "duckduckgo", base_url: "" },
   },
   memory: { write_approval: true, max_prompt_chars: 4000 },
   skills: { write_approval: true },

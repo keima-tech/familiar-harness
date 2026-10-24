@@ -2,6 +2,7 @@ import { createBashTool } from "./bash.js";
 import { createEditTool, createGlobTool, createGrepTool, createReadTool, createWriteTool } from "./fs-tools.js";
 import { createWebFetchTool } from "./webfetch.js";
 import { createWebSearchTool } from "./websearch.js";
+import { createConnectorTools } from "./connectors.js";
 import { createTodoTool } from "./todo.js";
 import { createTaskTool } from "./task.js";
 import { createLspTool } from "./lsp.js";
@@ -15,6 +16,7 @@ export { createBashTool, resolveShellCommand } from "./bash.js";
 export * from "./fs-tools.js";
 export * from "./webfetch.js";
 export * from "./websearch.js";
+export * from "./connectors.js";
 export * from "./todo.js";
 export * from "./task.js";
 export * from "./lsp.js";
@@ -33,6 +35,7 @@ export function defaultToolRegistry(): ToolRegistry {
     createBashTool(),
     createWebFetchTool(),
     createWebSearchTool(),
+    ...createConnectorTools(),
     createTodoTool(),
     createTaskTool(),
     createLspTool(),

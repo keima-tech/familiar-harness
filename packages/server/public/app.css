@@ -1120,11 +1120,9 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
   background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
   padding: 8px 10px; color: var(--text); font: inherit; cursor: pointer;
 }
-.skill-del {
-  flex: none; width: 38px; border-radius: 8px; font-size: 14px; line-height: 1;
-  background: var(--panel2); border: 1px solid var(--border); color: var(--dim); cursor: pointer;
-}
-.skill-del:hover { color: var(--err); border-color: var(--err); }
+.skill-editor { border-left: 2px solid var(--accent); padding-left: 10px; }
+.skill-editor-actions .danger { background: var(--panel2); color: var(--err); border-color: var(--err); }
+.skill-editor-actions .danger:hover { background: var(--err); color: #fff; }
 .skill-open:hover { border-color: var(--accent); }
 .skill-open b { font-size: 12.5px; }
 .skill-open small { color: var(--dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

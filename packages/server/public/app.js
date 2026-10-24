@@ -141,6 +141,7 @@ const STR = {
     "skills.dismissTitle": "このカードを閉じます(提案は設定 → 拡張機能 に残ります)",
     "skills.partialResult": "{0} 件成功 / {1} 件失敗: {2}",
     "skills.delete": "削除",
+    "skills.cancel": "キャンセル",
     "skills.deleteConfirm": "スキル「{0}」を削除しますか?\n(アーカイブへ移動されるので元に戻せます)",
     "skills.deleted": "スキルを削除しました: {0}",
     "notify.skillSuggest": "Familiar Harness — スキル作成の提案",
@@ -487,6 +488,7 @@ const STR = {
     "skills.dismissTitle": "close this card (proposals stay in Settings → Extensions)",
     "skills.partialResult": "{0} succeeded / {1} failed: {2}",
     "skills.delete": "Delete",
+    "skills.cancel": "Cancel",
     "skills.deleteConfirm": "Delete the skill \"{0}\"?\n(It is moved to the archive and can be restored.)",
     "skills.deleted": "skill deleted: {0}",
     "notify.skillSuggest": "Familiar Harness — skill proposal",
@@ -3834,16 +3836,17 @@ async function renderExtensionsSection(content, stale = () => false) {
   const skillCard = card(t("ext.skills"), t("ext.skillsDesc"));
   content.appendChild(skillCard);
 
-  // collapsible: the list + editor collapse into a details block
+  // collapsible list (open by default so inline editors are usable)
   const details = document.createElement("details");
   details.className = "skill-details";
+  details.open = true;
   const summary = document.createElement("summary");
   details.appendChild(summary);
   skillCard.appendChild(details);
   const mount = document.createElement("div");
   details.appendChild(mount);
 
-  // create-new row
+  // create-new row (its editor opens right below)
   const createRow = document.createElement("div");
   createRow.className = "skill-create";
   const nameInput = document.createElement("input");
@@ -3857,64 +3860,83 @@ async function renderExtensionsSection(content, stale = () => false) {
   createRow.append(nameInput, createBtn);
   skillCard.appendChild(createRow);
 
-  // editor (hidden until a skill is opened)
-  const editor = document.createElement("div");
-  editor.className = "skill-editor";
-  editor.hidden = true;
-  const editorName = document.createElement("div");
-  editorName.className = "skill-editor-name";
-  const editorBody = document.createElement("textarea");
-  editorBody.className = "skill-editor-body";
-  editorBody.rows = 14;
-  editorBody.spellcheck = false;
-  const editorActions = document.createElement("div");
-  editorActions.className = "skill-editor-actions";
-  const saveBtn = document.createElement("button");
-  saveBtn.type = "button";
-  saveBtn.textContent = t("skills.save");
-  const closeBtn = document.createElement("button");
-  closeBtn.type = "button";
-  closeBtn.className = "ghost";
-  closeBtn.textContent = t("cwd.cancel");
-  editorActions.append(saveBtn, closeBtn);
-  editor.append(editorName, editorBody, editorActions);
-  mount.appendChild(editor);
-
-  let editingName = null;
-  const openEditor = async (name) => {
-    editingName = name;
-    editorName.textContent = `SKILL.md — ${name}`;
-    editorBody.value = t("skills.loading");
-    editor.hidden = false;
-    try {
-      const res = await rpc("skills.view", { name });
-      editorBody.value = res.body ?? "";
-    } catch (err) {
-      editorBody.value = "";
-      editorName.textContent = `${name}: ${err.message}`;
-    }
+  // inline editor: appears directly below the clicked row, one at a time.
+  const closeEditors = () => {
+    for (const el of skillCard.querySelectorAll(".skill-editor")) el.remove();
   };
-  saveBtn.addEventListener("click", async () => {
-    if (!editingName) return;
-    saveBtn.disabled = true;
-    try {
-      await rpc("skills.save", { name: editingName, body: editorBody.value });
-      toast(t("skills.saved", editingName), "ok");
-      renderSettingsSection("extensions");
-    } catch (err) {
-      toast(err.message, "err");
-    } finally {
-      saveBtn.disabled = false;
+  const openEditor = async (name, anchor, isNew = false) => {
+    const next = anchor.nextElementSibling;
+    const wasOpen = next instanceof HTMLElement && next.classList.contains("skill-editor");
+    closeEditors();
+    if (wasOpen) return; // clicking the same row again closes the editor
+    const editor = document.createElement("div");
+    editor.className = "skill-editor";
+    const editorName = document.createElement("div");
+    editorName.className = "skill-editor-name";
+    editorName.textContent = `SKILL.md — ${name}`;
+    const editorBody = document.createElement("textarea");
+    editorBody.className = "skill-editor-body";
+    editorBody.rows = 14;
+    editorBody.spellcheck = false;
+    const actions = document.createElement("div");
+    actions.className = "skill-editor-actions";
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.textContent = t("skills.save");
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "ghost";
+    cancelBtn.textContent = t("skills.cancel");
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "ghost danger";
+    delBtn.textContent = t("skills.delete");
+    delBtn.hidden = isNew; // nothing to delete until it is saved
+    actions.append(saveBtn, cancelBtn, delBtn);
+    editor.append(editorName, editorBody, actions);
+    anchor.insertAdjacentElement("afterend", editor);
+    if (isNew) {
+      editorBody.value = `# ${name}\n\nWhen: \nProcedure: \n`;
+      editorBody.focus();
+    } else {
+      editorBody.value = t("skills.loading");
+      try {
+        const res = await rpc("skills.view", { name });
+        editorBody.value = res.body ?? "";
+      } catch (err) {
+        editorBody.value = "";
+        editorName.textContent = `${name}: ${err.message}`;
+      }
     }
-  });
-  closeBtn.addEventListener("click", () => { editor.hidden = true; editingName = null; });
-  createBtn.addEventListener("click", async () => {
+    saveBtn.addEventListener("click", async () => {
+      saveBtn.disabled = true;
+      try {
+        await rpc("skills.save", { name, body: editorBody.value });
+        toast(t("skills.saved", name), "ok");
+        renderSettingsSection("extensions");
+      } catch (err) {
+        toast(err.message, "err");
+        saveBtn.disabled = false;
+      }
+    });
+    cancelBtn.addEventListener("click", () => editor.remove());
+    delBtn.addEventListener("click", async () => {
+      if (!window.confirm(t("skills.deleteConfirm", name))) return;
+      delBtn.disabled = true;
+      try {
+        await rpc("skills.delete", { name });
+        toast(t("skills.deleted", name), "ok");
+        renderSettingsSection("extensions");
+      } catch (err) {
+        toast(err.message, "err");
+        delBtn.disabled = false;
+      }
+    });
+  };
+  createBtn.addEventListener("click", () => {
     const name = nameInput.value.trim();
     if (!name) return;
-    editingName = name;
-    editorName.textContent = `SKILL.md — ${name}`;
-    editorBody.value = `# ${name}\n\nWhen: \nProcedure: \n`;
-    editor.hidden = false;
+    void openEditor(name, createRow, true);
   });
 
   try {
@@ -3931,26 +3953,8 @@ async function renderExtensionsSection(content, stale = () => false) {
       btn.type = "button";
       btn.className = "skill-open";
       btn.innerHTML = `<b>${esc(sk.name)}</b><small>${esc(`${sk.description ?? ""}${sk.description ? " · " : ""}${meta}`)}</small>`;
-      btn.addEventListener("click", () => void openEditor(sk.name));
+      btn.addEventListener("click", () => void openEditor(sk.name, row, false));
       row.appendChild(btn);
-      const delBtn = document.createElement("button");
-      delBtn.type = "button";
-      delBtn.className = "skill-del ghost";
-      delBtn.textContent = "🗑";
-      delBtn.title = t("skills.delete");
-      delBtn.addEventListener("click", async () => {
-        if (!window.confirm(t("skills.deleteConfirm", sk.name))) return;
-        delBtn.disabled = true;
-        try {
-          await rpc("skills.delete", { name: sk.name });
-          toast(t("skills.deleted", sk.name), "ok");
-          renderSettingsSection("extensions");
-        } catch (err) {
-          toast(err.message, "err");
-          delBtn.disabled = false;
-        }
-      });
-      row.appendChild(delBtn);
       mount.appendChild(row);
     }
   } catch (err) {

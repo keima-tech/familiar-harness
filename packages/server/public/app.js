@@ -182,6 +182,7 @@ const STR = {
     "ns.errNoFolder": "作業フォルダーを選択するか入力してください",
     "top.search": "トランスクリプト内検索 (Ctrl+F)",
     "top.sessionActions": "セッション操作",
+    "top.sessions": "セッション一覧",
     "menu.rename": "名前を変更…",
     "menu.export": "Markdown で出力",
     "menu.delete": "セッションを削除…",
@@ -215,6 +216,22 @@ const STR = {
     "drawer.status": "システム状態",
     "drawer.info": "セッション情報",
     "settings.title": "設定",
+    "settings.close": "閉じる (Esc)",
+    "nav.general": "一般",
+    "nav.appearance": "外観",
+    "nav.transcript": "トランスクリプト",
+    "nav.shortcuts": "ショートカット",
+    "nav.providers": "プロバイダー",
+    "nav.extensions": "拡張機能",
+    "nav.connectors": "コネクタ",
+    "nav.system": "このアプリについて",
+    "conn.googleTitle": "Google (Gmail / カレンダー)",
+    "conn.googleClientId": "OAuth クライアント ID",
+    "conn.googleClientSecret": "OAuth クライアント シークレット",
+    "conn.calendar": "カレンダー",
+    "conn.gitlabBase": "ベース URL (既定: https://gitlab.com)",
+    "conn.backlogBase": "スペース URL (例: https://xxx.backlog.jp)",
+    "conn.teamsToken": "アクセストークン (Graph)",
     "tool.args": "引数",
     "tool.result": "結果",
     "tool.running": "実行中…",
@@ -486,7 +503,7 @@ const STR = {
     "skills.suggestTitle": "The AI suggests creating a skill",
     "skills.approveCreate": "approve & create",
     "skills.rejectShort": "dismiss",
-    "skills.createdMsg": "skill created — edit it in 設定 → 拡張機能",
+    "skills.createdMsg": "skill created — edit it in Settings → Extensions",
     "skills.rejectedMsg": "proposal dismissed",
     "skills.dismiss": "Dismiss",
     "skills.dismissTitle": "close this card (proposals stay in Settings → Extensions)",
@@ -533,6 +550,7 @@ const STR = {
     "ns.errNoFolder": "Pick or type a working folder first",
     "top.search": "search in transcript (Ctrl+F)",
     "top.sessionActions": "session actions",
+    "top.sessions": "sessions",
     "menu.rename": "Rename…",
     "menu.export": "Export as Markdown",
     "menu.delete": "Delete session…",
@@ -566,6 +584,22 @@ const STR = {
     "drawer.status": "system status",
     "drawer.info": "session info",
     "settings.title": "Settings",
+    "settings.close": "close (Esc)",
+    "nav.general": "General",
+    "nav.appearance": "Appearance",
+    "nav.transcript": "Transcript",
+    "nav.shortcuts": "Shortcuts",
+    "nav.providers": "Providers",
+    "nav.extensions": "Extensions",
+    "nav.connectors": "Connectors",
+    "nav.system": "About",
+    "conn.googleTitle": "Google (Gmail / Calendar)",
+    "conn.googleClientId": "OAuth client ID",
+    "conn.googleClientSecret": "OAuth client secret",
+    "conn.calendar": "Calendar",
+    "conn.gitlabBase": "base URL (default: https://gitlab.com)",
+    "conn.backlogBase": "space URL (e.g. https://xxx.backlog.jp)",
+    "conn.teamsToken": "access token (Graph)",
     "tool.args": "arguments",
     "tool.result": "result",
     "tool.running": "running…",
@@ -1139,89 +1173,79 @@ const KNOWN_PROVIDERS = [
 const THEMES = {
   "Tokyo Night": {
     dark: { bg: "#101014", panel: "#151519", panel2: "#1b1b21", text: "#e8e8ea", dim: "#85858e", accent: "#6c8cff", ok: "#7dc98f", warn: "#d9a35f", err: "#e46a6a", border: "#26262c", bubble: "#3948e0", hover: "#232329", codebg: "#121216" },
-    desc: "深い藍色の背景に青系アクセント。ターミナル定番のダーク配色",
-    desc: "深い藍色の背景に青系アクセント。ターミナル定番のダーク配色",
     light: { bg: "#e9eaf2", panel: "#f5f6fa", panel2: "#ffffff", text: "#3b4261", dim: "#8990b3", accent: "#2e7de9", ok: "#4a8a3f", warn: "#b07d1e", err: "#c6435c", border: "#d3d6e4", bubble: "#2e7de9", hover: "#dfe2ee", codebg: "#f2f3f9" },
   },
   Catppuccin: {
     dark: { bg: "#1e1e2e", panel: "#181825", panel2: "#313244", text: "#cdd6f4", dim: "#6c7086", accent: "#89b4fa", ok: "#a6e3a1", warn: "#f9e2af", err: "#f38ba8", border: "#454758", bubble: "#585b70", hover: "#37394f", codebg: "#1d1d29" },
     light: { bg: "#eef1f6", panel: "#fbfcfe", panel2: "#ffffff", text: "#4c4f69", dim: "#8c8fa1", accent: "#1e66f5", ok: "#40a02b", warn: "#df8e1d", err: "#d20f39", border: "#ccd0da", bubble: "#1e66f5", hover: "#e4e7ef", codebg: "#f5f6fa" },
-    desc: "柔らかいパステル調。ダーク/ライト両方",
-    desc: "柔らかいパステル調。ダーク/ライト両方",
   },
   "Catppuccin Macchiato": {
     dark: { bg: "#24273a", panel: "#1e2030", panel2: "#363a4f", text: "#cad3f5", dim: "#6e738d", accent: "#8aadf4", ok: "#a6da95", warn: "#eed49f", err: "#ee99a0", border: "#494d64", bubble: "#5b6078", hover: "#3f4258", codebg: "#20212f" },
     light: { bg: "#eff1f5", panel: "#fbfcfe", panel2: "#ffffff", text: "#4c4f69", dim: "#8c8fa1", accent: "#1e66f5", ok: "#40a02b", warn: "#df8e1d", err: "#d20f39", border: "#ccd0da", bubble: "#1e66f5", hover: "#e4e7ef", codebg: "#f5f6fa" },
-    desc: "グレーがかった落ち着いたパステル調",
-    desc: "グレーがかった落ち着いたパステル調",
   },
   Ayu: {
     dark: { bg: "#0b0e14", panel: "#11151c", panel2: "#1c212c", text: "#e6e1cf", dim: "#8a9199", accent: "#ff995e", ok: "#aad94c", warn: "#ffc94c", err: "#f07178", border: "#232a3c", bubble: "#5a6b7e", hover: "#1e2430", codebg: "#0e1219" },
     light: { bg: "#fafafa", panel: "#f1f3f5", panel2: "#ffffff", text: "#57566b", dim: "#8a9199", accent: "#ff995e", ok: "#86b300", warn: "#f2ae49", err: "#e6504f", border: "#e2e5e9", bubble: "#ff995e", hover: "#eaedef", codebg: "#f5f7f8" },
-    desc: "暖かいオレンジのアクセント",
-    desc: "暖かいオレンジのアクセント",
   },
   Matrix: {
     dark: { bg: "#041105", panel: "#061808", panel2: "#0b2410", text: "#9de6a4", dim: "#3f7a4c", accent: "#27e879", ok: "#7dff9a", warn: "#b7e86a", err: "#ff5f5f", border: "#123f1e", bubble: "#1e7a3c", hover: "#0e2a15", codebg: "#05150a" },
-    desc: "緑基調のターミナル風。マトリックス風の強いダーク",
-    desc: "緑基調のターミナル風。マトリックス風の強いダーク",
     light: { bg: "#eef7ee", panel: "#f6fbf6", panel2: "#ffffff", text: "#1e3f26", dim: "#5c7c64", accent: "#128a44", ok: "#1d8a4a", warn: "#8a6d1d", err: "#b02a37", border: "#cfdecf", bubble: "#128a44", hover: "#e2f0e2", codebg: "#f2f9f2" },
   },
   Nord: {
     dark: { bg: "#2e3440", panel: "#292f3a", panel2: "#3b4252", text: "#eceff4", dim: "#77839c", accent: "#88c0d0", ok: "#a3be8c", warn: "#ebcb8b", err: "#bf616a", border: "#434c5e", bubble: "#5e81ac", hover: "#3f4a5e", codebg: "#272c36" },
     light: { bg: "#eceff4", panel: "#f6f8fa", panel2: "#ffffff", text: "#2e3440", dim: "#6b7590", accent: "#5e81ac", ok: "#56831d", warn: "#9a6f16", err: "#8c4351", border: "#d8dee9", bubble: "#5e81ac", hover: "#e2e7ef", codebg: "#f2f4f7" },
-    desc: "寒色系の落ち着いたブルーグレー",
-    desc: "寒色系の落ち着いたブルーグレー",
   },
   Dracula: {
     dark: { bg: "#282a36", panel: "#21222c", panel2: "#343746", text: "#f8f8f2", dim: "#6272a4", accent: "#bd93f9", ok: "#50fa7b", warn: "#f1fa8c", err: "#ff5555", border: "#44475a", bubble: "#6272a4", hover: "#3d4059", codebg: "#242634" },
-    desc: "紫系の鮮やかな定番ダーク",
-    desc: "紫系の鮮やかな定番ダーク",
     light: { bg: "#f0eff6", panel: "#faf9fc", panel2: "#ffffff", text: "#3d3a50", dim: "#7a7a96", accent: "#8a56c2", ok: "#1e9a52", warn: "#a58505", err: "#d73a49", border: "#dcdbe8", bubble: "#8a56c2", hover: "#e6e4f0", codebg: "#f5f4fa" },
   },
   "Rosé Pine": {
     dark: { bg: "#191724", panel: "#1f1d2e", panel2: "#26233a", text: "#e0def4", dim: "#908caa", accent: "#c4a7e7", ok: "#9ccfd8", warn: "#f6c177", err: "#eb6f92", border: "#403d52", bubble: "#31748f", hover: "#2a2740", codebg: "#1c1a28" },
     light: { bg: "#faf4ed", panel: "#fffaf3", panel2: "#ffffff", text: "#575279", dim: "#9893a5", accent: "#907aa9", ok: "#56949f", warn: "#ea9d34", err: "#b4637a", border: "#e0dad6", bubble: "#907aa9", hover: "#f2e9e4", codebg: "#fdf9f3" },
-    desc: "ローズ/パープル系の上品な配色",
-    desc: "ローズ/パープル系の上品な配色",
   },
   Kanagawa: {
     dark: { bg: "#1f1f28", panel: "#16161d", panel2: "#2a2a37", text: "#dcd7ba", dim: "#727169", accent: "#7e9cd8", ok: "#98bb6c", warn: "#ffa066", err: "#e46876", border: "#2f3139", bubble: "#2d4f67", hover: "#26262f", codebg: "#1c1c24" },
-    desc: "和風の深い色調。墨と藍のダーク",
-    desc: "和風の深い色調。墨と藍のダーク",
     light: { bg: "#f2ecbc", panel: "#f8f0d8", panel2: "#fdf6e3", text: "#43436a", dim: "#8b8a80", accent: "#426e9c", ok: "#5d714a", warn: "#c4754c", err: "#c14b4a", border: "#ddd6ac", bubble: "#426e9c", hover: "#e9e2b4", codebg: "#f4eed0" },
   },
   Everforest: {
     dark: { bg: "#2d352b", panel: "#262a25", panel2: "#343934", text: "#d3c6aa", dim: "#859289", accent: "#a7c080", ok: "#83b09a", warn: "#dbbc7f", err: "#e67e80", border: "#3d453c", bubble: "#5a7a6a", hover: "#31372f", codebg: "#292e28" },
     light: { bg: "#fdf6e3", panel: "#f6f1dc", panel2: "#ffffff", text: "#5c6a72", dim: "#98a49b", accent: "#8da101", ok: "#35a77c", warn: "#dfa000", err: "#f85552", border: "#e5dfc5", bubble: "#8da101", hover: "#efe9d2", codebg: "#faf5e4" },
-    desc: "落ち着いた森の緑系",
-    desc: "落ち着いた森の緑系",
   },
   Gruvbox: {
     dark: { bg: "#282828", panel: "#1d2021", panel2: "#3c3836", text: "#ebdbb2", dim: "#928374", accent: "#83a598", ok: "#b8bb26", warn: "#fabd2f", err: "#fb4934", border: "#504945", bubble: "#83a598", hover: "#3a3532", codebg: "#242220" },
     light: { bg: "#fbf1c7", panel: "#f6ecc6", panel2: "#ffffff", text: "#3c3836", dim: "#7c6f64", accent: "#076678", ok: "#79740e", warn: "#b57614", err: "#9d0006", border: "#d5c4a1", bubble: "#076678", hover: "#ece4b8", codebg: "#f7edc6" },
-    desc: "暖かいレトロ調のコントラスト",
-    desc: "暖かいレトロ調のコントラスト",
   },
   Solarized: {
     dark: { bg: "#002b36", panel: "#073642", panel2: "#0e4653", text: "#eee8d5", dim: "#657b83", accent: "#268bd2", ok: "#859900", warn: "#b58900", err: "#dc322f", border: "#0a444f", bubble: "#268bd2", hover: "#0a3e4a", codebg: "#06333f" },
     light: { bg: "#fdf6e3", panel: "#eee8d5", panel2: "#fbf4de", text: "#657b83", dim: "#93a1a1", accent: "#268bd2", ok: "#859900", warn: "#b58900", err: "#dc322f", border: "#dcd6c1", bubble: "#268bd2", hover: "#e9e1cc", codebg: "#f6efdd" },
-    desc: "古典的なターミナル配色(青緑基調)",
-    desc: "古典的なターミナル配色(青緑基調)",
   },
   "One Dark": {
     dark: { bg: "#282c34", panel: "#21252b", panel2: "#2f343e", text: "#d7dae0", dim: "#636d83", accent: "#61afef", ok: "#98c379", warn: "#d19a66", err: "#e06c75", border: "#3e4451", bubble: "#4c78cc", hover: "#373c46", codebg: "#232730" },
-    desc: "Atom/VSCode 由来の定番ダーク",
-    desc: "Atom/VSCode 由来の定番ダーク",
     light: { bg: "#f2f3f5", panel: "#fafbfc", panel2: "#ffffff", text: "#383a42", dim: "#82899a", accent: "#4078f2", ok: "#50a14f", warn: "#c18401", err: "#e45649", border: "#dcdfe4", bubble: "#4078f2", hover: "#e8eaed", codebg: "#f4f5f7" },
   },
   Oxocarbon: {
     dark: { bg: "#161616", panel: "#1c1c1e", panel2: "#26262b", text: "#f2f4f8", dim: "#8d8d93", accent: "#78a9ff", ok: "#42be65", warn: "#f1c21b", err: "#fa4d56", border: "#343439", bubble: "#5a66d6", hover: "#26262a", codebg: "#131316" },
     light: { bg: "#f4f4f4", panel: "#fafafa", panel2: "#ffffff", text: "#161616", dim: "#525252", accent: "#0f62fe", ok: "#24a148", warn: "#bf8b00", err: "#da1e28", border: "#d0d0d3", bubble: "#0f62fe", hover: "#e8e8ea", codebg: "#f0f0f2" },
-    desc: "IBM Carbon 風のモノトーン+青アクセント",
-    desc: "IBM Carbon 風のモノトーン+青アクセント",
   },
 };
+/** Theme tooltips — translated (the THEMES table stays locale-free). */
+const THEME_DESC = {
+  "Tokyo Night": { ja: "深い藍色の背景に青系アクセント。ターミナル定番のダーク配色", en: "dark navy with blue accents — the classic terminal dark" },
+  Catppuccin: { ja: "柔らかいパステル調。ダーク/ライト両方", en: "soft pastels — both dark and light" },
+  "Catppuccin Macchiato": { ja: "グレーがかった落ち着いたパステル調", en: "muted, grey-tinted pastels" },
+  Ayu: { ja: "暖かいオレンジのアクセント", en: "warm orange accents" },
+  Matrix: { ja: "緑基調のターミナル風。マトリックス風の強いダーク", en: "green terminal look — a strong Matrix-style dark" },
+  Nord: { ja: "寒色系の落ち着いたブルーグレー", en: "cool, calm blue-grey" },
+  Dracula: { ja: "紫系の鮮やかな定番ダーク", en: "vivid purple — the well-known dark theme" },
+  "Rosé Pine": { ja: "ローズ/パープル系の上品な配色", en: "refined rose and purple palette" },
+  Kanagawa: { ja: "和風の深い色調。墨と藍のダーク", en: "deep Japanese tones — ink and indigo dark" },
+  Everforest: { ja: "落ち着いた森の緑系", en: "calm forest greens" },
+  Gruvbox: { ja: "暖かいレトロ調のコントラスト", en: "warm retro contrast" },
+  Solarized: { ja: "古典的なターミナル配色(青緑基調)", en: "classic terminal palette (teal-based)" },
+  "One Dark": { ja: "Atom/VSCode 由来の定番ダーク", en: "the familiar Atom/VSCode dark" },
+  Oxocarbon: { ja: "IBM Carbon 風のモノトーン+青アクセント", en: "IBM Carbon-style monochrome with blue accents" },
+};
+
 
 const DEFAULT_THEME = "Tokyo Night";
 
@@ -3310,14 +3334,14 @@ function card(title, note) {
 
 // --- modal shell -------------------------------------------------------------
 const SETTINGS_SECTIONS = [
-  { id: "general", label: "一般", icon: "⚙" },
-  { id: "appearance", label: "外観", icon: "◧" },
-  { id: "transcript", label: "トランスクリプト", icon: "▤" },
-  { id: "shortcuts", label: "ショートカット", icon: "⌘" },
-  { id: "providers", label: "プロバイダー", icon: "▣" },
-  { id: "extensions", label: "拡張機能", icon: "↯" },
-  { id: "connectors", label: "コネクタ", icon: "🔗" },
-  { id: "system", label: "このアプリについて", icon: "◍" },
+  { id: "general", labelKey: "nav.general", icon: "⚙" },
+  { id: "appearance", labelKey: "nav.appearance", icon: "◧" },
+  { id: "transcript", labelKey: "nav.transcript", icon: "▤" },
+  { id: "shortcuts", labelKey: "nav.shortcuts", icon: "⌘" },
+  { id: "providers", labelKey: "nav.providers", icon: "▣" },
+  { id: "extensions", labelKey: "nav.extensions", icon: "↯" },
+  { id: "connectors", labelKey: "nav.connectors", icon: "🔗" },
+  { id: "system", labelKey: "nav.system", icon: "◍" },
 ];
 let settingsSection = "general";
 let settingsRenderGen = 0; // guards the async section renderers against stacking
@@ -3342,7 +3366,7 @@ function renderSettingsNav() {
     const item = document.createElement("button");
     item.type = "button";
     item.className = `nav-item${s.id === settingsSection ? " active" : ""}`;
-    item.innerHTML = `<span class="ni">${esc(s.icon)}</span>${esc(s.label)}`;
+    item.innerHTML = `<span class="ni">${esc(s.icon)}</span>${esc(t(s.labelKey))}`;
     item.addEventListener("click", () => {
       settingsSection = s.id;
       renderSettingsNav();
@@ -3483,7 +3507,7 @@ function themeDropdown(current, onChange) {
       `<span class="theme-dd-sw" style="background:${pal.bg}">` +
       `<i style="background:${pal.accent}"></i><i style="background:${pal.ok}"></i><i style="background:${pal.err}"></i>` +
       `</span><span class="theme-dd-name">${esc(name)}</span><span class="dd-arrow">▾</span>`;
-    btn.title = THEMES[name]?.desc ?? "";
+    btn.title = THEME_DESC[name]?.[lang] ?? "";
   };
   paint(current);
   const list = document.createElement("div");
@@ -4123,12 +4147,12 @@ async function renderConnectorsSection(content, stale = () => false) {
     return;
   }
   // ---- Google (OAuth: Gmail / カレンダー) ----
-  const googleCard = card("Google (Gmail / カレンダー)", t("conn.googleDesc"));
+  const googleCard = card(t("conn.googleTitle"), t("conn.googleDesc"));
   const g = stored.google ?? {};
   const gInputs = {};
   for (const [key, label, secret] of [
-    ["client_id", "OAuth クライアント ID", false],
-    ["client_secret", "OAuth クライアント シークレット", true],
+    ["client_id", t("conn.googleClientId"), false],
+    ["client_secret", t("conn.googleClientSecret"), true],
   ]) {
     const input = document.createElement("input");
     input.type = secret ? "password" : "text";
@@ -4159,7 +4183,7 @@ async function renderConnectorsSection(content, stale = () => false) {
   gMail.hidden = true;
   const gCal = document.createElement("button");
   gCal.type = "button";
-  gCal.textContent = "カレンダー";
+  gCal.textContent = t("conn.calendar");
   gCal.hidden = true;
   const gResult = document.createElement("span");
   gResult.className = "conn-result";
@@ -4251,11 +4275,11 @@ async function renderConnectorsSection(content, stale = () => false) {
 
   const KINDS = [
     { id: "github", label: "GitHub", fields: [["token", t("conn.token"), true]] },
-    { id: "gitlab", label: "GitLab", fields: [["base_url", `${t("conn.baseUrl")} (既定: https://gitlab.com)`], ["token", t("conn.token"), true]] },
-    { id: "backlog", label: "Backlog", fields: [["base_url", "スペース URL (例: https://xxx.backlog.jp)"], ["api_key", t("conn.apiKey"), true]] },
+    { id: "gitlab", label: "GitLab", fields: [["base_url", t("conn.gitlabBase")], ["token", t("conn.token"), true]] },
+    { id: "backlog", label: "Backlog", fields: [["base_url", t("conn.backlogBase")], ["api_key", t("conn.apiKey"), true]] },
     { id: "notion", label: "Notion", fields: [["token", "Internal Integration Token", true]] },
     { id: "slack", label: "Slack", fields: [["token", "Bot / User Token (xox…) ", true]] },
-    { id: "teams", label: "Microsoft Teams", fields: [["token", "アクセストークン (Graph)", true]] },
+    { id: "teams", label: "Microsoft Teams", fields: [["token", t("conn.teamsToken"), true]] },
     { id: "discord", label: "Discord", fields: [["token", "Bot Token", true]] },
     { id: "jira", label: "Jira", fields: [["base_url", t("conn.baseUrl")], ["email", t("conn.email")], ["token", t("conn.token"), true], ["project", t("conn.project")]] },
     { id: "confluence", label: "Confluence", fields: [["base_url", t("conn.baseUrl")], ["email", t("conn.email")], ["token", t("conn.token"), true]] },

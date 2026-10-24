@@ -189,6 +189,12 @@ export class OpenAiCompatibleProvider implements Provider {
           const ctx = await this.ollamaContext(m.id).catch(() => undefined);
           if (ctx) m.contextTokens = ctx;
         }
+        // llama.cpp-style servers expose the loaded context via /props
+        const stillMissing = out.filter((m) => m.contextTokens === undefined);
+        if (stillMissing.length > 0) {
+          const ctx = await this.llamaCppContext().catch(() => undefined);
+          if (ctx) for (const m of stillMissing) m.contextTokens = ctx;
+        }
       }
       return out;
     } catch (err) {
@@ -214,6 +220,19 @@ export class OpenAiCompatibleProvider implements Provider {
       if (key.endsWith("context_length") && typeof value === "number" && value > 0) return value;
     }
     return undefined;
+  }
+
+  /** llama.cpp exposes the loaded context window on its /props endpoint. */
+  private async llamaCppContext(): Promise<number | undefined> {
+    const origin = this.baseUrl().replace(/\/v1\/?$/, "");
+    const res = await fetch(`${origin}/props`, { signal: AbortSignal.timeout(4_000) });
+    if (!res.ok) return undefined;
+    const data = (await res.json()) as {
+      default_generation_settings?: { n_ctx?: unknown };
+      n_ctx?: unknown;
+    };
+    const raw = data.default_generation_settings?.n_ctx ?? data.n_ctx;
+    return typeof raw === "number" && raw > 0 ? raw : undefined;
   }
 }
 

@@ -260,6 +260,9 @@ export class AgentRunner {
           meta: {
             stopReason: stepStopReason ?? result.stopReason,
             ...(reasoningParts.length > 0 ? { reasoning: reasoningParts.join("") } : {}),
+            // per-step usage — lets the web UI show the real context size after
+            // a reload instead of guessing from the transcript
+            ...(result.usage && (result.usage.promptTokens ?? 0) > 0 ? { usage: result.usage } : {}),
           },
         };
         this.store.appendMessage(session.id, assistantMsg);

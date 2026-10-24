@@ -168,6 +168,8 @@ const STR = {
     "ctx.noteNoTurn": "最初のターン送信後に表示されます(毎ターン全文を再送するため、直前のプロンプト=現在のコンテキスト)",
     "ctx.noteNoWindow": "このモデルの上限コンテキストは未取得です(モデル一覧から取得できませんでした)",
     "ctx.noteHint": "{0} / {1} tok を使用",
+    "ctx.noteEstimated": "履歴から推定した値(≈)です。ターン実行後に実測値へ更新されます。",
+    "ctx.assumed": "(既定)",
     "ns.title": "新規セッション",
     "ns.search": "フォルダーを検索・入力… (例: ~/work)",
     "ns.pickFolder": "作業フォルダーを選択",
@@ -514,6 +516,8 @@ const STR = {
     "ctx.free": "free",
     "ctx.noteNoTurn": "Shown after the first turn is sent (each turn re-sends the full context, so the last prompt = the current context)",
     "ctx.noteNoWindow": "This model's context window is unknown (not exposed by the model list)",
+    "ctx.noteEstimated": "Estimated from the stored history (≈); updated with the real value after a turn runs.",
+    "ctx.assumed": "(default)",
     "ctx.noteHint": "{0} / {1} tok used",
     "ns.title": "New session",
     "ns.search": "search or type a folder… (e.g. ~/work)",
@@ -1073,6 +1077,8 @@ const state = {
   usageBySession: {},
   /** last turn's prompt tokens per session ≈ current context size. */
   lastPromptTokensBySession: {},
+  ctxEstimated: {},          // sessionId -> true while the gauge shows a history estimate
+  modelCtxIsDefault: {},     // "provider/model" -> true when the window is the fallback
   /** cached context window sizes (provider/model → tokens|null). */
   modelCtxCache: {},
   toolCounter: 0,
@@ -1433,7 +1439,7 @@ function formatTokens(n) {
  * context window from models.list. Unknown values show an em-dash. */
 function updateContextGauge() {
   const { used, win } = ctxNumbers();
-  if (used !== undefined && win === undefined && state.currentSession) {
+  if (win === undefined && state.currentSession) {
     void contextWindowFor(state.currentSession.provider, state.currentSession.model).then(() => {
       renderTopbarGauge();
       renderCtxPane();
@@ -1447,8 +1453,47 @@ function updateContextGauge() {
 
 function ctxNumbers() {
   const used = state.lastPromptTokensBySession[state.sessionId];
-  const win = state.modelCtxCache[`${state.currentSession?.provider}/${state.currentSession?.model}`];
-  return { used, win };
+  const key = `${state.currentSession?.provider}/${state.currentSession?.model}`;
+  const win = state.modelCtxCache[key];
+  return {
+    used,
+    win,
+    estimated: state.ctxEstimated[state.sessionId] === true,
+    assumed: state.modelCtxIsDefault[key] === true,
+  };
+}
+
+/** Seed the gauge from the stored history right after a reload: the last
+ * per-step usage (meta.usage.promptTokens) plus an estimate of everything
+ * appended after it. Marked with ≈ until a live turn reports real usage. */
+function seedContextFromHistory(sessionId, messages) {
+  if (state.lastPromptTokensBySession[sessionId] !== undefined) return; // live value already known
+  const visible = messages.filter((m) => m.meta?.ephemeral !== true);
+  if (visible.length === 0) return;
+  let base = 0;
+  let idx = -1;
+  for (let i = visible.length - 1; i >= 0; i--) {
+    const p = visible[i]?.meta?.usage?.promptTokens;
+    if (typeof p === "number" && p > 0) {
+      base = p;
+      idx = i;
+      break;
+    }
+  }
+  let extra = 0;
+  for (let i = idx + 1; i < visible.length; i++) {
+    const m = visible[i];
+    extra += estimateTokens(String(m.content ?? ""));
+    if (typeof m.meta?.reasoning === "string") extra += estimateTokens(m.meta.reasoning);
+    if (Array.isArray(m.toolCalls)) {
+      for (const c of m.toolCalls) extra += estimateTokens(String(c?.arguments ?? ""));
+    }
+  }
+  const total = base + extra;
+  if (total > 0) {
+    state.lastPromptTokensBySession[sessionId] = total;
+    state.ctxEstimated[sessionId] = true;
+  }
 }
 
 function setGaugeSvg(svg, used, win) {
@@ -1474,7 +1519,7 @@ function setGaugeSvg(svg, used, win) {
 
 function renderTopbarGauge() {
   const btn = $("#ctx-gauge");
-  const { used, win } = ctxNumbers();
+  const { used, win, estimated, assumed } = ctxNumbers();
   setGaugeSvg(btn.querySelector("svg"), used, win);
   const pctEl = $("#gauge-pct");
   if (used === undefined) {
@@ -1482,27 +1527,32 @@ function renderTopbarGauge() {
     btn.title = t("top.gaugeNoTurn");
     return;
   }
+  const approx = estimated ? "≈" : "";
+  const winNote = assumed ? ` ${t("ctx.assumed")}` : "";
   if (win) {
     const pct = Math.round((used / win) * 100);
     pctEl.textContent = `${pct}%`;
-    btn.title = `${t("chip.ctx")}: ${formatTokens(used)} / ${formatTokens(win)} tok (${pct}%)`;
+    btn.title = `${t("chip.ctx")}: ${approx}${formatTokens(used)} / ${formatTokens(win)} tok${winNote} (${pct}%)`;
   } else {
     pctEl.textContent = formatTokens(used);
-    btn.title = `${t("chip.ctx")}: ${formatTokens(used)} tok`;
+    btn.title = `${t("chip.ctx")}: ${approx}${formatTokens(used)} tok`;
   }
 }
 
 /** The composer gauge + its pane (context usage details). */
 function renderCtxPane() {
-  const { used, win } = ctxNumbers();
+  const { used, win, estimated, assumed } = ctxNumbers();
   const btnSvg = $("#ctx-btn").querySelector("svg");
   const popSvg = $("#ctx-pop").querySelector("svg");
   setGaugeSvg(btnSvg, used, win);
   setGaugeSvg(popSvg, used, win);
-  $("#ctx-used").textContent = used === undefined ? "—" : `${formatTokens(used)} tok`;
-  $("#ctx-window").textContent = win ? `${formatTokens(win)} tok` : t("info.unknown");
+  const approx = estimated ? "≈" : "";
+  $("#ctx-used").textContent = used === undefined ? "—" : `${approx}${formatTokens(used)} tok`;
+  $("#ctx-window").textContent = win
+    ? `${formatTokens(win)} tok${assumed ? ` ${t("ctx.assumed")}` : ""}`
+    : t("info.unknown");
   $("#ctx-free").textContent =
-    used === undefined ? "—" : win ? `${formatTokens(Math.max(0, win - used))} tok` : "—";
+    used === undefined ? "—" : win ? `${approx}${formatTokens(Math.max(0, win - used))} tok` : "—";
   $("#ctx-head-pct").textContent =
     used === undefined ? "—" : win ? `${Math.round((used / win) * 100)}%` : `${formatTokens(used)} tok`;
   const s = state.currentSession;
@@ -1510,6 +1560,8 @@ function renderCtxPane() {
   const note = $("#ctx-note");
   if (used === undefined) {
     note.textContent = t("ctx.noteNoTurn");
+  } else if (estimated) {
+    note.textContent = t("ctx.noteEstimated");
   } else if (!win) {
     note.textContent = t("ctx.noteNoWindow");
   } else {
@@ -1521,8 +1573,9 @@ function renderCtxPane() {
 function renderCtxPaneBody() {
   const body = $("#ctx-pane-body");
   if (!body) return;
-  const { used, win } = ctxNumbers();
+  const { used, win, estimated, assumed } = ctxNumbers();
   const s = state.currentSession;
+  const approx = estimated ? "≈" : "";
   body.innerHTML = "";
   const pct = used === undefined ? null : win ? Math.round((used / win) * 100) : null;
   const ring = document.createElement("div");
@@ -1539,33 +1592,45 @@ function renderCtxPaneBody() {
     `<text x="36" y="41" text-anchor="middle">${ringLabel}</text>` +
     `</svg>` +
     `<div class="ctx-big-text"><b>${esc(s ? `${s.provider}/${s.model}` : "—")}</b>` +
-    `<span>${used === undefined ? t("ctx.noteNoTurn") : `${formatTokens(used)} / ${win ? formatTokens(win) : "?"} tok`}</span></div>`;
+    `<span>${used === undefined ? t("ctx.noteNoTurn") : `${approx}${formatTokens(used)} / ${win ? formatTokens(win) : "?"} tok`}</span></div>`;
   body.appendChild(ring);
   body.appendChild(sectionCard(t("chip.ctx"), [
-    [t("ctx.used"), used === undefined ? t("info.unknown") : `${formatTokens(used)} tok`],
-    [t("ctx.window"), win ? `${formatTokens(win)} tok` : t("info.unknown")],
-    [t("ctx.free"), used === undefined || !win ? "—" : `${formatTokens(Math.max(0, win - used))} tok`],
+    [t("ctx.used"), used === undefined ? t("info.unknown") : `${approx}${formatTokens(used)} tok`],
+    [t("ctx.window"), win ? `${formatTokens(win)} tok${assumed ? ` ${t("ctx.assumed")}` : ""}` : t("info.unknown")],
+    [t("ctx.free"), used === undefined || !win ? "—" : `${approx}${formatTokens(Math.max(0, win - used))} tok`],
     ["%", pct === null ? "—" : `${pct}%`],
     ["model", s ? `${s.provider}/${s.model}` : "—"],
   ], pct === null ? undefined : `${pct}%`));
   const note = document.createElement("div");
   note.className = "ctx-note";
   if (used === undefined) note.textContent = t("ctx.noteNoTurn");
+  else if (estimated) note.textContent = t("ctx.noteEstimated");
   else if (!win) note.textContent = t("ctx.noteNoWindow");
   else note.textContent = t("ctx.noteHint", formatTokens(used), formatTokens(win));
   body.appendChild(note);
 }
 
+const DEFAULT_CTX_TOKENS = 128_000;
+
 async function contextWindowFor(provider, model) {
   const key = `${provider}/${model}`;
   if (!(key in state.modelCtxCache)) {
+    let ctx;
     try {
       const res = await rpc("models.list", { provider });
       const list = res.models ?? [];
       const info = list.find((m) => m.id === model) ?? list.find((m) => Boolean(m.contextTokens));
-      state.modelCtxCache[key] = info?.contextTokens ?? null;
+      ctx = info?.contextTokens;
     } catch {
-      state.modelCtxCache[key] = null;
+      ctx = undefined;
+    }
+    if (typeof ctx === "number" && ctx > 0) {
+      state.modelCtxCache[key] = ctx;
+      state.modelCtxIsDefault[key] = false;
+    } else {
+      // never leave the gauge at "unknown" — show a labeled default instead
+      state.modelCtxCache[key] = DEFAULT_CTX_TOKENS;
+      state.modelCtxIsDefault[key] = true;
     }
   }
   return state.modelCtxCache[key];
@@ -1590,6 +1655,7 @@ async function openSession(id) {
   renderModelChip();
   renderEffortChip();
   void refreshTodo();
+  seedContextFromHistory(id, data.messages ?? []);
   updateContextGauge();
   closeAllPops();
   renderTranscript(data.messages ?? []);
@@ -2428,6 +2494,7 @@ function onEvent(sessionId, e) {
       state.usageBySession[sessionId] = rec;
       if (u.promptTokens !== undefined) {
         state.lastPromptTokensBySession[sessionId] = u.promptTokens;
+        delete state.ctxEstimated[sessionId]; // real value — drop the ≈ marker
       }
       setBusy(false);
       const secs = parseFloat(state.lastElapsed ?? "") || 0;

@@ -324,10 +324,22 @@ export class AgentServer {
         return this.connectorsGet();
       case "connectors.set":
         return this.connectorsSet(params);
+      case "connectors.delete":
+        return this.connectorsDelete(params);
       case "connectors.test":
         return this.connectorsTest(params);
       case "skills.save":
         return this.skillsSave(params);
+      case "google.authUrl":
+        return this.googleAuthUrl(params);
+      case "google.exchange":
+        return this.googleExchange(params);
+      case "google.test":
+        return this.googleTest();
+      case "google.gmailList":
+        return this.googleGmailList(params);
+      case "google.calendarList":
+        return this.googleCalendarList(params);
       case "fs.list":
         return this.fsList(params);
       case "fs.read":
@@ -678,8 +690,21 @@ export class AgentServer {
 
   private connectorKinds = new Set([
     "jira", "confluence", "redmine", "github", "gitlab",
-    "backlog", "notion", "slack", "teams", "discord",
+    "backlog", "notion", "slack", "teams", "discord", "google",
   ]);
+
+  private connectorsDelete(params: Record<string, unknown>): Record<string, unknown> {
+    const kind = String(params.kind ?? "");
+    if (!this.connectorKinds.has(kind)) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, `unknown connector kind: ${kind}`);
+    }
+    const connectors = { ...(this.cfg.connectors ?? {}) };
+    delete connectors[kind];
+    this.cfg.connectors = connectors;
+    writeConnectorsToDisk(connectors, { configFile: this.cfg.configFile });
+    return { ok: true, connectors };
+  }
+
 
   private connectorsGet(): Record<string, unknown> {
     return { connectors: this.cfg.connectors ?? {} };
@@ -766,6 +791,157 @@ export class AgentServer {
     } catch (err) {
       return { ok: false, message: err instanceof Error ? err.message : String(err) };
     }
+  }
+
+  private googleState: string | null = null;
+
+  private googleCfg(): Record<string, string> {
+    return ((this.cfg.connectors ?? {}).google ?? {}) as Record<string, string>;
+  }
+
+  private googleAuthUrl(params: Record<string, unknown>): Record<string, unknown> {
+    const c = this.googleCfg();
+    if (!c.client_id || !c.client_secret) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, "client_id / client_secret are not configured");
+    }
+    const origin = String(params.origin ?? "").replace(/\/+$/, "");
+    if (!/^https?:\/\//.test(origin)) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, "invalid origin");
+    }
+    const redirect_uri = `${origin}/oauth/callback`;
+    const state = crypto.randomBytes(12).toString("hex");
+    this.googleState = state;
+    const scopes = [
+      "https://www.googleapis.com/auth/gmail.readonly",
+      "https://www.googleapis.com/auth/calendar.readonly",
+      "openid",
+      "email",
+    ];
+    const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+    url.searchParams.set("client_id", c.client_id);
+    url.searchParams.set("redirect_uri", redirect_uri);
+    url.searchParams.set("response_type", "code");
+    url.searchParams.set("scope", scopes.join(" "));
+    url.searchParams.set("access_type", "offline");
+    url.searchParams.set("prompt", "consent");
+    url.searchParams.set("state", state);
+    return { url: url.toString(), redirect_uri };
+  }
+
+  private async googleExchange(params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const c = this.googleCfg();
+    if (!c.client_id || !c.client_secret) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, "client_id / client_secret are not configured");
+    }
+    const code = String(params.code ?? "");
+    const state = String(params.state ?? "");
+    if (!code) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "missing code");
+    if (!this.googleState || state !== this.googleState) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, "state mismatch");
+    }
+    this.googleState = null;
+    const redirect_uri = String(params.redirect_uri ?? "");
+    const res = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code,
+        client_id: c.client_id,
+        client_secret: c.client_secret,
+        redirect_uri,
+        grant_type: "authorization_code",
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    const tok = (await res.json()) as { access_token?: string; refresh_token?: string; expires_in?: number; error?: string };
+    if (!res.ok || !tok.access_token) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, `token exchange failed: ${tok.error ?? res.status}`);
+    }
+    const connectors = { ...(this.cfg.connectors ?? {}) };
+    const google = { ...c, ...(tok.refresh_token ? { refresh_token: tok.refresh_token } : {}), access_token: tok.access_token, expiry: Date.now() + (tok.expires_in ?? 3600) * 1000 };
+    connectors["google"] = google;
+    this.cfg.connectors = connectors;
+    writeConnectorsToDisk(connectors, { configFile: this.cfg.configFile });
+    return { ok: true };
+  }
+
+  private async googleAccessToken(): Promise<string> {
+    const c = this.googleCfg();
+    if (!c.refresh_token || !c.client_id || !c.client_secret) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, "google is not linked yet — run the OAuth flow");
+    }
+    if (c.access_token && Number(c.expiry ?? 0) > Date.now() + 30_000) {
+      return c.access_token;
+    }
+    const res = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        refresh_token: c.refresh_token,
+        client_id: c.client_id,
+        client_secret: c.client_secret,
+        grant_type: "refresh_token",
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    const tok = (await res.json()) as { access_token?: string; expires_in?: number };
+    if (!tok.access_token) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "token refresh failed");
+    const connectors = { ...(this.cfg.connectors ?? {}) };
+    connectors["google"] = { ...c, access_token: tok.access_token, expiry: Date.now() + (tok.expires_in ?? 3600) * 1000 };
+    this.cfg.connectors = connectors;
+    writeConnectorsToDisk(connectors, { configFile: this.cfg.configFile });
+    return tok.access_token;
+  }
+
+  private async googleTest(): Promise<Record<string, unknown>> {
+    const token = await this.googleAccessToken();
+    const res = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    const body = (await res.json()) as { email?: string };
+    if (!res.ok) return { ok: false, message: `HTTP ${res.status}` };
+    return { ok: true, email: body.email ?? "", message: body.email ?? "connected" };
+  }
+
+  private async googleGmailList(params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const token = await this.googleAccessToken();
+    const max = Math.min(25, Math.max(1, Number(params.max ?? 10)));
+    const listRes = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${max}`,
+      { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15_000) },
+    );
+    const list = (await listRes.json()) as { messages?: Array<{ id: string }> };
+    const out: Array<Record<string, string>> = [];
+    for (const m of list.messages ?? []) {
+      const meta = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
+        { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15_000) },
+      );
+      const data = (await meta.json()) as {
+        snippet?: string;
+        payload?: { headers?: Array<{ name: string; value: string }> };
+      };
+      const header = (n: string) => data.payload?.headers?.find((h) => h.name === n)?.value ?? "";
+      out.push({ from: header("From"), subject: header("Subject"), date: header("Date"), snippet: data.snippet ?? "" });
+    }
+    return { items: out };
+  }
+
+  private async googleCalendarList(params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const token = await this.googleAccessToken();
+    const max = Math.min(25, Math.max(1, Number(params.max ?? 10)));
+    const timeMin = new Date().toISOString();
+    const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${encodeURIComponent(timeMin)}&maxResults=${max}&singleEvents=true&orderBy=startTime`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15_000) });
+    const data = (await res.json()) as { items?: Array<{ summary?: string; start?: { dateTime?: string; date?: string }; end?: { dateTime?: string; date?: string }; location?: string }> };
+    const items = (data.items ?? []).map((e) => ({
+      summary: e.summary ?? "(no title)",
+      start: e.start?.dateTime ?? e.start?.date ?? "",
+      end: e.end?.dateTime ?? e.end?.date ?? "",
+      location: e.location ?? "",
+    }));
+    return { items };
   }
 
   private skillsSave(params: Record<string, unknown>): Record<string, unknown> {

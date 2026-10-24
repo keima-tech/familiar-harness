@@ -121,6 +121,10 @@ const STR = {
     "conn.save": "保存",
     "conn.test": "接続テスト",
     "conn.saved": "保存しました",
+    "conn.googleDesc": "OAuth 同意後に Gmail とカレンダーを読み取れます。redirect URI として http://<このサーバ>:46210/oauth/callback を Google Cloud のクライアントに登録してください",
+    "conn.googleAuth": "Google と連携",
+    "conn.googleAuthHint": "Google の同意画面で許可すると自動で戻ります",
+    "conn.delete": "削除",
     "conn.ok": "接続OK",
     "skills.newName": "スキル名 (例: deploy-check)",
     "skills.create": "新規作成",
@@ -452,6 +456,10 @@ const STR = {
     "conn.save": "save",
     "conn.test": "test connection",
     "conn.saved": "saved",
+    "conn.googleDesc": "after the OAuth consent, Gmail and Calendar can be read. Register http://<server>:46210/oauth/callback as the redirect URI of your Google Cloud client",
+    "conn.googleAuth": "link Google",
+    "conn.googleAuthHint": "approve in the Google window — it returns automatically",
+    "conn.delete": "delete",
     "conn.ok": "connected",
     "skills.newName": "skill name (e.g. deploy-check)",
     "skills.create": "create",
@@ -2336,15 +2344,18 @@ function onEvent(sessionId, e) {
       if (live) {
         if (!live.reasoningEl) {
           const det = document.createElement("details");
-          det.className = "thinking";
-          det.open = true;
+          det.className = "thinking"; // collapsed by default — the user opens it
           det.innerHTML = `<summary>◌ ${esc(t("msg.thinking"))}</summary><pre class="th-text"></pre>`;
           live.bubble.insertBefore(det, live.contentEl);
           live.reasoningEl = det.querySelector(".th-text");
+          live.thinkingSummary = det.querySelector("summary");
           live.thinkingEl = det;
         }
         live.reasoning += e.text;
         live.reasoningEl.textContent = live.reasoning;
+        if (live.thinkingSummary) {
+          live.thinkingSummary.textContent = `◌ ${esc(t("msg.thinking"))} (${live.reasoning.length})`;
+        }
         scrollBottom();
       }
       break;
@@ -2400,7 +2411,12 @@ function onEvent(sessionId, e) {
       setTurnEndLabel(t("turn.done", `${state.lastElapsed ?? ""}${toks}`));
       // collapse thinking blocks, stop carets; footer on the last bubble
       for (const b of state.turnBubbles) {
-        if (b.thinkingEl) b.thinkingEl.open = false;
+        if (b.thinkingEl) {
+          b.thinkingEl.open = false;
+          const sum = b.thinkingEl.querySelector("summary");
+          const len = (b.reasoning ?? "").length;
+          if (sum && len > 0) sum.textContent = `✓ ${esc(t("msg.thinking"))} (${len})`;
+        }
         if (b.caret) b.caret.remove();
       }
       const lastBubble = state.turnBubbles[state.turnBubbles.length - 1];
@@ -3840,6 +3856,133 @@ async function renderConnectorsSection(content) {
     content.appendChild(sectionError(t("conn.title"), err));
     return;
   }
+  // ---- Google (OAuth: Gmail / カレンダー) ----
+  const googleCard = card("Google (Gmail / カレンダー)", t("conn.googleDesc"));
+  const g = stored.google ?? {};
+  const gInputs = {};
+  for (const [key, label, secret] of [
+    ["client_id", "OAuth クライアント ID", false],
+    ["client_secret", "OAuth クライアント シークレット", true],
+  ]) {
+    const input = document.createElement("input");
+    input.type = secret ? "password" : "text";
+    input.className = "setting-input";
+    input.value = typeof g[key] === "string" && g[key] !== "" ? (secret ? "***" : g[key]) : "";
+    input.placeholder = label;
+    gInputs[key] = input;
+    const row = document.createElement("div");
+    row.className = "conn-field";
+    row.appendChild(input);
+    googleCard.appendChild(row);
+  }
+  const gActions = document.createElement("div");
+  gActions.className = "conn-actions";
+  const gSave = document.createElement("button");
+  gSave.type = "button";
+  gSave.textContent = t("conn.save");
+  gSave.className = "ghost";
+  const gAuth = document.createElement("button");
+  gAuth.type = "button";
+  gAuth.textContent = t("conn.googleAuth");
+  const gTest = document.createElement("button");
+  gTest.type = "button";
+  gTest.textContent = t("conn.test");
+  const gMail = document.createElement("button");
+  gMail.type = "button";
+  gMail.textContent = "Gmail";
+  gMail.hidden = true;
+  const gCal = document.createElement("button");
+  gCal.type = "button";
+  gCal.textContent = "カレンダー";
+  gCal.hidden = true;
+  const gResult = document.createElement("span");
+  gResult.className = "conn-result";
+  const gDel = document.createElement("button");
+  gDel.type = "button";
+  gDel.className = "ghost";
+  gDel.textContent = t("conn.delete");
+  const gList = document.createElement("div");
+  gList.className = "conn-list";
+
+  const gSaveSettings = async () => {
+    const settings = {};
+    for (const key of Object.keys(gInputs)) {
+      settings[key] = gInputs[key].value.trim() === "***" && g[key] ? g[key] : gInputs[key].value.trim();
+    }
+    await rpc("connectors.set", { kind: "google", settings });
+  };
+  gSave.addEventListener("click", async () => {
+    try {
+      await gSaveSettings();
+      gResult.textContent = "✓ " + t("conn.saved");
+      gResult.style.color = "var(--ok)";
+    } catch (err) {
+      gResult.textContent = "✗ " + err.message;
+      gResult.style.color = "var(--err)";
+    }
+  });
+  gAuth.addEventListener("click", async () => {
+    try {
+      await gSaveSettings();
+      const r = await rpc("google.authUrl", { origin: location.origin });
+      window.open(r.url, "_blank");
+      gResult.textContent = t("conn.googleAuthHint");
+      gResult.style.color = "var(--dim)";
+    } catch (err) {
+      gResult.textContent = "✗ " + err.message;
+      gResult.style.color = "var(--err)";
+    }
+  });
+  gTest.addEventListener("click", async () => {
+    gResult.textContent = "…";
+    try {
+      const r = await rpc("google.test");
+      gResult.textContent = r.ok ? `✓ ${r.email}` : "✗ " + r.message;
+      gResult.style.color = r.ok ? "var(--ok)" : "var(--err)";
+      gMail.hidden = false;
+      gCal.hidden = false;
+    } catch (err) {
+      gResult.textContent = "✗ " + err.message;
+      gResult.style.color = "var(--err)";
+    }
+  });
+  const loadList = async (kind) => {
+    gList.innerHTML = `<div class="files-note">${esc(t("files.loading"))}</div>`;
+    try {
+      const r = kind === "gmail"
+        ? await rpc("google.gmailList", { max: 10 })
+        : await rpc("google.calendarList", { max: 10 });
+      gList.innerHTML = "";
+      for (const item of r.items ?? []) {
+        const row = document.createElement("div");
+        row.className = "conn-list-row";
+        if (kind === "gmail") {
+          row.innerHTML = `<b>${esc(item.subject || "(no subject)")}</b><small>${esc(item.from)} · ${esc(item.date)}</small>`;
+        } else {
+          row.innerHTML = `<b>${esc(item.summary)}</b><small>${esc(item.start)}${item.location ? " · " + esc(item.location) : ""}</small>`;
+        }
+        gList.appendChild(row);
+      }
+      if ((r.items ?? []).length === 0) gList.innerHTML = `<div class="files-note">—</div>`;
+    } catch (err) {
+      gList.innerHTML = `<div class="files-note">${esc(t("files.loadFailed", err.message))}</div>`;
+    }
+  };
+  gMail.addEventListener("click", () => void loadList("gmail"));
+  gCal.addEventListener("click", () => void loadList("calendar"));
+  gDel.addEventListener("click", async () => {
+    await rpc("connectors.delete", { kind: "google" });
+    renderConnectorsSection(content);
+  });
+  gActions.append(gSave, gAuth, gTest, gMail, gCal, gResult, gDel);
+  googleCard.appendChild(gActions);
+  if (g.refresh_token) {
+    gMail.hidden = false;
+    gCal.hidden = false;
+  }
+  googleCard.appendChild(gList);
+  content.appendChild(googleCard);
+
   const KINDS = [
     { id: "github", label: "GitHub", fields: [["token", t("conn.token"), true]] },
     { id: "gitlab", label: "GitLab", fields: [["base_url", `${t("conn.baseUrl")} (既定: https://gitlab.com)`], ["token", t("conn.token"), true]] },
@@ -3908,7 +4051,15 @@ async function renderConnectorsSection(content) {
         result.style.color = "var(--err)";
       }
     });
-    actions.append(save, test, result);
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "ghost";
+    del.textContent = t("conn.delete");
+    del.addEventListener("click", async () => {
+      await rpc("connectors.delete", { kind: k.id });
+      renderConnectorsSection(content);
+    });
+    actions.append(save, test, del, result);
     cardEl.appendChild(actions);
     content.appendChild(cardEl);
   }

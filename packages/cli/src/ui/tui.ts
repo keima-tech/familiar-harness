@@ -260,7 +260,7 @@ function markRows(withHarness: boolean): string[] {
 type Block =
   | { kind: "user"; text: string; mode?: string }
   | { kind: "assistant"; src: string; lines: string[] | null; done: boolean; lastRender: number }
-  | { kind: "reasoning"; text: string; done?: boolean }
+  | { kind: "reasoning"; text: string; done?: boolean; expanded?: boolean }
   | { kind: "tool"; name: string; detail: string; status: "run" | "ok" | "err"; ms?: number; extra?: string[] }
   | { kind: "info"; text: string };
 
@@ -276,7 +276,11 @@ function blockLines(b: Block, width: number): string[] {
     case "reasoning": {
       // ◌ = still streaming; · = closed (message/turn ended)
       const mark = b.done ? cc.gray("·") : cc.gray("◌");
-      const out = [`${mark} ${cc.gray("thinking…")}`];
+      if (!b.expanded) {
+        // collapsed: header only — click the row to reveal the text
+        return [`${mark} ${cc.gray("thinking…")} ${cc.dim(`(+${b.text.length} chars — click to view)`)}`];
+      }
+      const out = [`${mark} ${cc.gray("thinking…")} ${cc.dim("(click to collapse)")}`];
       for (const piece of b.text.split("\n")) {
         if (piece !== "") out.push(...wrapAnsi(cc.dim(piece), width));
       }
@@ -419,6 +423,8 @@ function metadataRow(info: TuiInfo, width: number): string {
 export class FullScreenTui {
   private blocks: Block[] = [];
   private flowCache: string[] | null = null;
+  /** flow line index → the block that rendered it (for click-to-toggle) */
+  private flowBlockAt = new Map<number, Block>();
   private width = 80;
   private height = 24;
   private prevRows: (string | null)[] = [];
@@ -870,9 +876,18 @@ export class FullScreenTui {
       if (b.kind === "assistant") this.reRenderAssistant(b);
     }
     const all: string[] = [];
+    this.flowBlockAt = new Map();
+    let flowIdx = 0;
     for (const b of this.blocks) {
-      if (all.length > 0) all.push("");
-      for (const l of blockLines(b, inner)) all.push(l);
+      if (all.length > 0) {
+        all.push("");
+        flowIdx++;
+      }
+      for (const l of blockLines(b, inner)) {
+        all.push(l);
+        this.flowBlockAt.set(flowIdx, b);
+        flowIdx++;
+      }
     }
     if (this.lastFlowLen !== null && this.scrollOffset > 0) {
       // keep the viewport anchored when new output lands while scrolled up
@@ -1390,11 +1405,27 @@ export class FullScreenTui {
       if (this.popupKind) {
         this.closePopup();
         this.frame();
+        return null;
+      }
+      // transcript rows: click a reasoning block to toggle its text
+      const block = this.flowBlockAt.get(this.flowRowOf(row));
+      if (block && block.kind === "reasoning" && block.text.length > 0) {
+        block.expanded = !block.expanded;
+        this.flowCache = null;
+        this.frame();
       }
       return null;
     }
     this.popupSel = abs;
     return this.acceptPopup(abs);
+  }
+
+  /** map a 1-based screen row to the flow line index (scroll-aware) */
+  private flowRowOf(row: number): number {
+    const view = Math.max(1, this.height - this.bottomHeight());
+    const flow = this.flow();
+    const start = Math.max(0, flow.length - view - this.scrollOffset);
+    return start + (row - 1);
   }
 
   /** Mouse wheel (SGR 1006): "<64 b ; c ; r M" up / "<65 … M" down. */

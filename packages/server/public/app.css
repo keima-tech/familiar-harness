@@ -1133,3 +1133,19 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
 .theme-dd-row.selected { background: var(--panel2); }
 .theme-dd-row .theme-dd-name { flex: 1; }
 .theme-dd-row .theme-dd-check { color: var(--accent); font-weight: 700; }
+
+
+/* ---- connectors: google card / list / delete ---- */
+.conn-list { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.conn-list-row {
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 10px; min-width: 0;
+}
+.conn-list-row b { font-size: 12px; }
+.conn-list-row small { color: var(--dim); font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conn-actions .ghost {
+  padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--panel2); color: var(--text); cursor: pointer; font: inherit; font-size: 12px;
+}
+.conn-actions .ghost:hover { border-color: var(--accent); }

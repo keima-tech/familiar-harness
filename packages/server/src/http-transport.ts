@@ -174,6 +174,32 @@ export function startHttpTransport(
   const httpServer: Server = createServer(async (req, res) => {
     const url = ((req.url ?? "").split("?")[0]) ?? "";
     if (req.method === "GET" || req.method === "HEAD") {
+      if (url === "/oauth/callback") {
+        // Google consent redirect: the state ties the callback to a legit
+        // initiation, so this endpoint can stay unauthenticated
+        const q = new URL(req.url ?? "/", "http://localhost").searchParams;
+        const origin = `http://${req.headers.host ?? "127.0.0.1"}`;
+        let ok = false;
+        let msg = "";
+        try {
+          const r = (await agent.dispatch("google.exchange", {
+            code: q.get("code") ?? "",
+            state: q.get("state") ?? "",
+            redirect_uri: `${origin}/oauth/callback`,
+          })) as { ok?: boolean };
+          ok = r.ok === true;
+        } catch (err) {
+          msg = err instanceof Error ? err.message : String(err);
+        }
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+        res.end(
+          `<!doctype html><html lang="ja"><meta charset="utf-8"><body style="font-family:system-ui;background:#0f1117;color:#e6e6ea;display:grid;place-items:center;height:100vh">` +
+            `<div style="text-align:center"><h2>${ok ? "✓ Google 連携が完了しました" : "✗ 連携に失敗しました"}</h2>` +
+            (ok ? `<p style="color:#8b8b96">このタブを閉じて Familiar Harness に戻ってください。</p>` : `<p style="color:#ff6b6b">${msg.replace(/</g, "<")}</p>`) +
+            `</div></body>`,
+        );
+        return;
+      }
       if (url === "/healthz") {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(

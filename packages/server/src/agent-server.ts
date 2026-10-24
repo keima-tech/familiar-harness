@@ -334,6 +334,8 @@ export class AgentServer {
         return this.connectorsTest(params);
       case "skills.save":
         return this.skillsSave(params);
+      case "skills.delete":
+        return this.skillsDelete(params);
       case 'update.check':
         return this.updateCheck();
       case "google.authUrl":
@@ -1010,6 +1012,16 @@ export class AgentServer {
       location: e.location ?? "",
     }));
     return { items };
+  }
+
+  private skillsDelete(params: Record<string, unknown>): Record<string, unknown> {
+    const name = str(params, "name");
+    if (!name) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "name is required");
+    // archive rather than hard-delete: the skill stays recoverable in ~/.familiar/skills/.archive/
+    if (!this.selfImprove.skills.archive(name)) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, `skill not found: ${name}`);
+    }
+    return { deleted: 1, message: `archived skill ${name}` };
   }
 
   private skillsSave(params: Record<string, unknown>): Record<string, unknown> {

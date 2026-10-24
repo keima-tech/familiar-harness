@@ -140,6 +140,9 @@ const STR = {
     "skills.dismiss": "閉じる",
     "skills.dismissTitle": "このカードを閉じます(提案は設定 → 拡張機能 に残ります)",
     "skills.partialResult": "{0} 件成功 / {1} 件失敗: {2}",
+    "skills.delete": "削除",
+    "skills.deleteConfirm": "スキル「{0}」を削除しますか?\n(アーカイブへ移動されるので元に戻せます)",
+    "skills.deleted": "スキルを削除しました: {0}",
     "notify.skillSuggest": "Familiar Harness — スキル作成の提案",
     "pane.files": "ファイル",
     "skills.edit": "スキルの編集",
@@ -483,6 +486,9 @@ const STR = {
     "skills.dismiss": "Dismiss",
     "skills.dismissTitle": "close this card (proposals stay in Settings → Extensions)",
     "skills.partialResult": "{0} succeeded / {1} failed: {2}",
+    "skills.delete": "Delete",
+    "skills.deleteConfirm": "Delete the skill \"{0}\"?\n(It is moved to the archive and can be restored.)",
+    "skills.deleted": "skill deleted: {0}",
     "notify.skillSuggest": "Familiar Harness — skill proposal",
     "pane.files": "files",
     "skills.edit": "edit skills",
@@ -3927,6 +3933,24 @@ async function renderExtensionsSection(content, stale = () => false) {
       btn.innerHTML = `<b>${esc(sk.name)}</b><small>${esc(`${sk.description ?? ""}${sk.description ? " · " : ""}${meta}`)}</small>`;
       btn.addEventListener("click", () => void openEditor(sk.name));
       row.appendChild(btn);
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "skill-del ghost";
+      delBtn.textContent = "🗑";
+      delBtn.title = t("skills.delete");
+      delBtn.addEventListener("click", async () => {
+        if (!window.confirm(t("skills.deleteConfirm", sk.name))) return;
+        delBtn.disabled = true;
+        try {
+          await rpc("skills.delete", { name: sk.name });
+          toast(t("skills.deleted", sk.name), "ok");
+          renderSettingsSection("extensions");
+        } catch (err) {
+          toast(err.message, "err");
+          delBtn.disabled = false;
+        }
+      });
+      row.appendChild(delBtn);
       mount.appendChild(row);
     }
   } catch (err) {

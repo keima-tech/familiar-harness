@@ -99,6 +99,7 @@ export const RPC_METHODS = [
   "connectors.set",
   "connectors.test",
   "skills.save",
+  "skills.delete",
   "fs.list",
   "fs.read",
   "fs.preview",

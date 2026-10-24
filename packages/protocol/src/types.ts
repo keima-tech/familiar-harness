@@ -121,6 +121,14 @@ export interface PendingWrite {
   reason?: string;
   warnings?: string[];
   createdAt: number;
+  /** skills: the proposed skill name */
+  name?: string;
+  /** skills: the proposed description */
+  description?: string;
+  /** skills (patch/remove): target body hash captured at staging time (CAS) */
+  snapshotBodyHash?: string;
+  /** skills (patch/remove): the target changed since staging — apply would be refused */
+  stale?: boolean;
 }
 
 export interface SkillCatalogEntry {

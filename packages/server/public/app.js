@@ -140,6 +140,8 @@ const STR = {
     "skills.dismiss": "閉じる",
     "skills.dismissTitle": "このカードを閉じます(提案は設定 → 拡張機能 に残ります)",
     "skills.partialResult": "{0} 件成功 / {1} 件失敗: {2}",
+    "skills.stale": "適用不可 — 対象のスキルが提案後に変更されています",
+    "skills.staleShort": "適用不可(対象が変更済み)",
     "skills.delete": "削除",
     "skills.cancel": "キャンセル",
     "skills.deleteConfirm": "スキル「{0}」を削除しますか?\n(アーカイブへ移動されるので元に戻せます)",
@@ -489,6 +491,8 @@ const STR = {
     "skills.dismiss": "Dismiss",
     "skills.dismissTitle": "close this card (proposals stay in Settings → Extensions)",
     "skills.partialResult": "{0} succeeded / {1} failed: {2}",
+    "skills.stale": "cannot apply — the target skill changed after this proposal was staged",
+    "skills.staleShort": "stale (target changed)",
     "skills.delete": "Delete",
     "skills.cancel": "Cancel",
     "skills.deleteConfirm": "Delete the skill \"{0}\"?\n(It is moved to the archive and can be restored.)",
@@ -2662,15 +2666,21 @@ function proposalNode(kind, item, act) {
   const warns = Array.isArray(item.warnings) && item.warnings.length > 0
     ? `<div class="reason">⚠ ${esc(item.warnings.join("; "))}</div>`
     : "";
+  const staleNote = item.stale === true ? `<div class="reason">⚠ ${esc(t("skills.stale"))}</div>` : "";
   node.innerHTML = `
     <div class="kind">${esc(kind)} · ${esc(item.kind)} · ${esc(item.id)}</div>
     <div class="summary">${esc(item.summary)}</div>
-    ${reason}${warns}
+    ${reason}${warns}${staleNote}
     <div class="row">
       <button data-act="approve">${esc(t("approval.approve"))}</button>
       <button class="ghost" data-act="reject">${esc(t("approval.denyShort"))}</button>
     </div>`;
-  node.querySelector('button[data-act="approve"]').addEventListener("click", () => act(true, node));
+  const approveBtn = node.querySelector('button[data-act="approve"]');
+  if (item.stale === true) {
+    approveBtn.disabled = true;
+    approveBtn.title = t("skills.stale");
+  }
+  approveBtn.addEventListener("click", () => act(true, node));
   node.querySelector('button[data-act="reject"]').addEventListener("click", () => act(false, node));
   return node;
 }
@@ -2843,7 +2853,18 @@ async function maybeSuggestSkills() {
     body.className = "skill-suggest-body";
     body.innerHTML =
       `<div class="ss-head"><div class="ss-title">💡 ${esc(t("skills.suggestTitle"))}</div></div>` +
-      fresh.map((x) => `<div class="ss-item"><b>${esc(x.name ?? x.id ?? "?")}</b><span>${esc(x.description ?? "")}</span></div>`).join("");
+      fresh
+        .map((x) => {
+          const stale = x.stale === true;
+          return (
+            `<div class="ss-item${stale ? " is-stale" : ""}">` +
+            `<b>${stale ? "⚠ " : ""}${esc(x.name ?? x.id ?? "?")}</b>` +
+            `<span>${esc(x.description ?? "")}</span>` +
+            (stale ? `<span class="ss-stale">${esc(t("skills.stale"))}</span>` : "") +
+            `</div>`
+          );
+        })
+        .join("");
     const head = body.querySelector(".ss-head");
     const dismiss = document.createElement("button");
     dismiss.type = "button";
@@ -2870,6 +2891,11 @@ async function maybeSuggestSkills() {
     dismiss.addEventListener("click", () => card.remove());
     // approve/reject each proposal independently so one stale item
     // (e.g. a CAS-refused patch) cannot block the rest
+    const anyApprovable = fresh.some((x) => x.stale !== true);
+    if (!anyApprovable) {
+      approve.disabled = true;
+      approve.title = t("skills.stale");
+    }
     let remaining = [...fresh];
     const settle = async (verb, okMsg) => {
       approve.disabled = true;
@@ -2877,6 +2903,11 @@ async function maybeSuggestSkills() {
       const succeeded = [];
       const failures = [];
       for (const x of remaining) {
+        if (verb === "approve" && x.stale === true) {
+          // marked stale by the server (CAS mismatch): applying can only fail
+          failures.push({ item: x, message: `${x.name ?? x.id}: ${t("skills.staleShort")}` });
+          continue;
+        }
         try {
           await rpc(`skills.${verb}`, { prefix: x.id });
           succeeded.push(x.name ?? x.id);
@@ -2896,7 +2927,8 @@ async function maybeSuggestSkills() {
           (succeeded.length > 0 ? "✓ " : "✗ ") +
           t("skills.partialResult", String(succeeded.length), String(failures.length), failures.map((f) => f.message).join(" / "));
         status.style.color = "var(--err)";
-        approve.disabled = false;
+        approve.disabled = !remaining.some((x) => x.stale !== true); // nothing left worth approving?
+        approve.title = approve.disabled ? t("skills.stale") : "";
         reject.disabled = false;
       }
     };

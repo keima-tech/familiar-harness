@@ -94,6 +94,9 @@ export class PendingSkillStore {
       reason: s.reason,
       warnings: s.warnings,
       createdAt: s.createdAt,
+      name: s.name,
+      description: s.description,
+      ...(s.snapshotBodyHash ? { snapshotBodyHash: s.snapshotBodyHash } : {}),
     }));
   }
 }

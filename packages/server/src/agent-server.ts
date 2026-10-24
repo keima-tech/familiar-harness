@@ -1381,7 +1381,19 @@ export class AgentServer {
   }
 
   private skillsPending(): Record<string, unknown> {
-    return { items: this.selfImprove.pendingSkills.toApi(this.selfImprove.pendingSkills.list()) };
+    const items = this.selfImprove.pendingSkills.toApi(this.selfImprove.pendingSkills.list());
+    // mark patches/removes whose target changed since staging (CAS mismatch):
+    // approving them can only fail, so the UI offers reject instead
+    const skills = this.selfImprove.skills;
+    const marked = items.map((item) => {
+      if (item.kind === "create" || item.snapshotBodyHash === undefined) {
+        return { ...item, stale: false };
+      }
+      const current = skills.bodyHash(item.name ?? item.target ?? "");
+      const stale = current === undefined || current !== item.snapshotBodyHash;
+      return { ...item, stale };
+    });
+    return { items: marked };
   }
 
   private skillsApprove(params: Record<string, unknown>): Record<string, unknown> {

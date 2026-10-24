@@ -1745,7 +1745,6 @@ function renderTranscript(messages) {
         {
           resultLabel: t("tool.result"),
           durationMs: duration,
-          forceExpanded: true, // history: show results so the transcript reads complete
           ...(typeof m.meta?.diff === "string" ? { diff: m.meta.diff } : {}),
         },
       );
@@ -2160,11 +2159,13 @@ function appendToolCard(name, args, resultContent, status, opts = {}) {
     </div>
     <div class="tc-body" ${expanded ? "" : "hidden"}>${bodyHtml}</div>`;
   if (expanded) wrap.classList.add("open");
-  wrap.querySelector(".tc-toggle").addEventListener("click", () => {
+  const toggleBody = () => {
     const body = wrap.querySelector(".tc-body");
     body.hidden = !body.hidden;
     wrap.classList.toggle("open", !body.hidden);
-  });
+  };
+  wrap.querySelector(".tc-toggle").addEventListener("click", toggleBody);
+  wrap.querySelector(".toolrow").addEventListener("click", toggleBody); // the whole row toggles
   tr.appendChild(wrap);
   scrollBottom();
   const entry = {

@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import https from "node:https";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -89,6 +90,7 @@ export class AgentServer {
 
   constructor(    opts: {
       config?: ResolvedConfig;
+      version?: string;
       store?: SessionStore;
       tools?: ToolRegistry;
       approval?: ApprovalAdapter;
@@ -105,6 +107,8 @@ export class AgentServer {
       disableHooks?: boolean;
     } = {},
   ) {
+    this.serverVersion = opts.version ?? "0.0.0";
+
     this.cfg = opts.config ?? loadConfig();
     this.store = opts.store ?? new SqliteSessionStore(familiarPaths.stateDb());
     this.providers = new ProviderRegistry(this.cfg);
@@ -330,6 +334,8 @@ export class AgentServer {
         return this.connectorsTest(params);
       case "skills.save":
         return this.skillsSave(params);
+      case 'update.check':
+        return this.updateCheck();
       case "google.authUrl":
         return this.googleAuthUrl(params);
       case "google.exchange":
@@ -791,6 +797,68 @@ export class AgentServer {
     } catch (err) {
       return { ok: false, message: err instanceof Error ? err.message : String(err) };
     }
+  }
+
+  private serverVersion = "0.0.0";
+  private semverCmp(a: string, b: string): number {
+    const triple = (v: string): [number, number, number] => {
+      const [nums] = String(v).split('-');
+      const p = (nums ?? '').split('.').map((n) => Number.parseInt(n, 10));
+      return [p[0] ?? 0, p[1] ?? 0, p[2] ?? 0];
+    };
+    const [pa, pb] = [triple(a), triple(b)];
+    for (let i = 0; i < 3; i++) {
+      if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) - (pb[i] ?? 0);
+    }
+    return 0;
+  }
+
+  /** GET a URL as a buffer, tolerating self-signed CAs on the second try
+   * (self-hosted Forgejo instances). FAMILIAR_TLS_STRICT=1 disables the fallback. */
+  private httpsGetBuffer(url: string): Promise<{ ok: boolean; buffer: Buffer }> {
+    const viaNodeHttps = () =>
+      new Promise<{ ok: boolean; buffer: Buffer }>((resolve, reject) => {
+        const req = https.get(url, { rejectUnauthorized: false }, (res: import("node:http").IncomingMessage) => {
+          const chunks: Buffer[] = [];
+          res.on("data", (c: Buffer) => chunks.push(c));
+          res.on("end", () =>
+            resolve({ ok: (res.statusCode ?? 500) < 400, buffer: Buffer.concat(chunks) }),
+          );
+        });
+        req.on("error", reject);
+        req.setTimeout(20_000, () => req.destroy(new Error("timeout")));
+      });
+    return fetch(url, { signal: AbortSignal.timeout(15_000) })
+      .then(async (res) => ({ ok: res.ok, buffer: Buffer.from(await res.arrayBuffer()) }))
+      .catch((err) => {
+        const code = String((err as { cause?: { code?: string } }).cause?.code ?? "");
+        if (!/CERT|SSL|TLS/i.test(code) || process.env.FAMILIAR_TLS_STRICT === "1") throw err;
+        return viaNodeHttps();
+      });
+  }
+
+  private async updateCheck(): Promise<Record<string, unknown>> {
+    const host = process.env.FAMILIAR_FORGEJO || 'https://example.invalid:3000';
+    const repo = process.env.FAMILIAR_REPO || 'owner/familiar-harness';
+    let latest = '';
+    let releaseUrl = host + '/' + repo + '/releases';
+    try {
+      const res = await this.httpsGetBuffer(host + '/api/v1/repos/' + repo + '/releases');
+      if (!res.ok) throw new Error('HTTP error');
+      const releases = JSON.parse(res.buffer.toString('utf8')) as Array<{ tag_name?: string; html_url?: string }>;
+      for (const r of releases) {
+        const v = (r.tag_name ?? '').replace(/^v/, '');
+        if (!v) continue;
+        if (!latest || this.semverCmp(v, latest) > 0) {
+          latest = v;
+          releaseUrl = r.html_url ?? releaseUrl;
+        }
+      }
+    } catch {
+      return { current: this.serverVersion, latest: '', available: false, error: 'cannot reach the release host' };
+    }
+    const available = latest !== '' && this.semverCmp(latest, this.serverVersion) > 0;
+    return { current: this.serverVersion, latest, available, releaseUrl };
   }
 
   private googleState: string | null = null;

@@ -1308,7 +1308,13 @@ async function refreshSessions() {
   }
   applySessionFilter();
   if (!state.sessionId && state.sessions.length > 0) {
-    await openSession(state.sessions[0].id);
+    // reopen the session the user was last viewing (falls back to the newest)
+    let target = state.sessions[0].id;
+    try {
+      const last = localStorage.getItem("familiar.lastSession");
+      if (last && state.sessions.some((x) => x.id === last)) target = last;
+    } catch { /* ignore */ }
+    await openSession(target);
   }
 }
 
@@ -1557,6 +1563,7 @@ async function openSession(id) {
   for (const li of document.querySelectorAll("#sessions li")) {
     li.classList.toggle("active", li.dataset.id === id);
   }
+  try { localStorage.setItem("familiar.lastSession", id); } catch { /* ignore */ }
   const data = await rpc("session.get", { id });
   const s = data.session;
   state.currentSession = s;

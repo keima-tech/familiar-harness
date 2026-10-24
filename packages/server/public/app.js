@@ -1712,13 +1712,13 @@ function truncate(text, cap) {
 }
 
 function renderTranscript(messages) {
-  const t = $("#transcript");
-  t.innerHTML = "";
+  const tr = $("#transcript");
+  tr.innerHTML = "";
   state.pendingToolCards = [];
   state.toolCounter = 0;
   const visible = messages.filter((m) => m.meta?.ephemeral !== true);
   if (visible.length === 0) {
-    t.appendChild(emptyStateNode());
+    tr.appendChild(emptyStateNode());
     return;
   }
   const cur = state.currentSession;
@@ -2128,7 +2128,7 @@ function diffHtml(diff) {
 }
 
 function appendToolCard(name, args, resultContent, status, opts = {}) {
-  const t = $("#transcript");
+  const tr = $("#transcript");
   const wrap = document.createElement("div");
   wrap.className = `toolwrap ${status === "err" ? "is-error" : status === "run" ? "is-run" : ""}`;
   const argsText = String(args ?? "");
@@ -2165,7 +2165,7 @@ function appendToolCard(name, args, resultContent, status, opts = {}) {
     body.hidden = !body.hidden;
     wrap.classList.toggle("open", !body.hidden);
   });
-  t.appendChild(wrap);
+  tr.appendChild(wrap);
   scrollBottom();
   const entry = {
     name,
@@ -2217,9 +2217,9 @@ function completeToolCard(entry, content, isError, diff) {
 
 function scrollBottom(force = false) {
   if (!force && prefs.autoscroll === false) return;
-  const t = $("#transcript");
-  const near = t.scrollHeight - t.scrollTop - t.clientHeight < 240;
-  if (force || near) t.scrollTop = t.scrollHeight;
+  const tr = $("#transcript");
+  const near = tr.scrollHeight - tr.scrollTop - tr.clientHeight < 240;
+  if (force || near) tr.scrollTop = tr.scrollHeight;
 }
 
 // live streaming: one bubble per assistant step for the active session
@@ -2323,7 +2323,12 @@ function connectEvents() {
       return;
     }
     if (frame.type !== "event") return;
-    onEvent(frame.sessionId, frame.event);
+    // one bad render must not break the rest of the event stream
+    try {
+      onEvent(frame.sessionId, frame.event);
+    } catch (err) {
+      console.warn("[familiar] event render failed:", frame.event?.type, err);
+    }
   });
 }
 
@@ -2717,7 +2722,7 @@ async function maybeSuggestSkills() {
     void notifyDesktop(t("notify.skillSuggest"), names, { urgent: false });
 
     // inline card in the transcript
-    const t = $("#transcript");
+    const tr = $("#transcript");
     const card = document.createElement("div");
     card.className = "skill-suggest";
     const body = document.createElement("div");
@@ -2738,7 +2743,7 @@ async function maybeSuggestSkills() {
     status.className = "ss-status";
     actions.append(approve, reject, status);
     card.append(body, actions);
-    t.appendChild(card);
+    tr.appendChild(card);
     scrollBottom();
     approve.addEventListener("click", async () => {
       approve.disabled = true;

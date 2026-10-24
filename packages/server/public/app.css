@@ -1004,6 +1004,28 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
 
 
 /* ---- responsive (smartphone portrait) ---- */
+@media (max-width: 900px) {
+  /* composer chips: compact + ellipsized so everything fits on one row */
+  .composer-foot { gap: 3px; }
+  #mode-chip, #model-chip, #effort-chip {
+    font-size: 11px; padding: 3px 5px; max-width: 96px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  #model-chip { max-width: 120px; }
+  .composer-foot button#composer-new,
+  .composer-foot > button#retry { width: 24px; height: 24px; font-size: 12px; }
+  /* popovers become full-width bottom sheets (model picker / effort / attach) */
+  .composer-foot .pop {
+    position: fixed; left: 6px; right: 6px; bottom: 8px; top: auto;
+    max-width: none; width: auto; max-height: 62vh; overflow-y: auto; z-index: 90;
+  }
+  #model-pop { min-width: 0; }
+  /* topbar popovers (ctx gauge pane) anchor below the topbar */
+  .top-actions .pop {
+    position: fixed; left: 6px; right: 6px; top: 54px; bottom: auto;
+    max-width: none;
+  }
+}
 #sidebar-toggle { display: none; }
 @media (max-width: 900px) {
   #app { grid-template-columns: 1fr; grid-template-areas: "main"; }

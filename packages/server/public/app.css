@@ -41,7 +41,13 @@ body {
 }
 #sidebar { grid-area: side; }
 #main { grid-area: main; }
-#rightpane { grid-area: drawer; width: var(--pane-w, 360px); min-width: 280px; max-width: 60vw; }
+#rightpane {
+  grid-area: drawer; width: var(--pane-w, 360px); min-width: 280px; max-width: 60vw;
+}
+@media (max-width: 900px) {
+  /* the pane becomes a fixed overlay on narrow screens: ignore the saved width */
+  #rightpane { width: min(420px, 100vw) !important; min-width: 0; max-width: none; }
+}
 
 /* scrollbars (webkit) */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -996,6 +1002,28 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
 .files-md-toolbar .ghost.active { color: var(--accent); font-weight: 700; }
 .files-md { font-size: 12.5px; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background: var(--bg); overflow-x: auto; }
 
+
+/* ---- responsive (smartphone portrait) ---- */
+#sidebar-toggle { display: none; }
+@media (max-width: 900px) {
+  #app { grid-template-columns: 1fr; grid-template-areas: "main"; }
+  #sidebar {
+    position: fixed; left: 0; top: 0; bottom: 0; width: min(300px, 85vw); z-index: 70;
+    transform: translateX(-105%); transition: transform 0.2s ease;
+    box-shadow: 14px 0 40px rgba(0, 0, 0, 0.55); display: flex;
+  }
+  #sidebar.open { transform: none; }
+  #sidebar-toggle { display: inline-flex; }
+  #rightpane {
+    position: fixed; right: 0; top: 0; bottom: 0; width: min(420px, 100vw) !important;
+    z-index: 65; box-shadow: -14px 0 40px rgba(0, 0, 0, 0.55);
+  }
+  #pane-resizer { display: none; }
+  #composer textarea { font-size: 16px; } /* prevents the iOS focus zoom */
+  .title-wrap { max-width: calc(100% - 8px); }
+  #session-meta { display: none; }
+  .top-actions { gap: 6px; }
+}
 
 /* ---- appearance: segmented mode buttons + labeled new-session button ---- */
 .segment-row { display: flex; gap: 6px; }

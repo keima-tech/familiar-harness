@@ -4663,6 +4663,11 @@ function boot() {
   });
 
   $("#new-session").addEventListener("click", () => openNewSessionModal());
+  $("#sidebar-toggle").addEventListener("click", () => $("#sidebar").classList.toggle("open"));
+  const closeSidebar = () => $("#sidebar").classList.remove("open");
+  $("#sessions").addEventListener("click", (ev) => {
+    if (window.matchMedia("(max-width: 900px)").matches && ev.target.closest("li[data-id]")) closeSidebar();
+  });
   initUpdateUi();
   $("#ns-close").addEventListener("click", closeNewSessionModal);
   $("#ns-cancel").addEventListener("click", closeNewSessionModal);

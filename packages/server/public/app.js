@@ -131,7 +131,12 @@ const STR = {
     "skills.save": "保存",
     "skills.saved": "スキルを保存しました: {0}",
     "skills.loading": "読み込み中…",
-    "skills.pendingToast": "AI がスキル作成を提案しています({0}件)— 拡張機能タブで確認",
+    "skills.pendingToast": "AI がスキル作成を提案しています({0}件)",
+    "skills.suggestTitle": "AI がスキルの作成を提案しています",
+    "skills.approveCreate": "承認して作成",
+    "skills.rejectShort": "却下",
+    "skills.createdMsg": "スキルを作成しました — 設定 → 拡張機能 で編集できます",
+    "skills.rejectedMsg": "提案を却下しました",
     "notify.skillSuggest": "Familiar Harness — スキル作成の提案",
     "pane.files": "ファイル",
     "skills.edit": "スキルの編集",
@@ -466,7 +471,12 @@ const STR = {
     "skills.save": "save",
     "skills.saved": "skill saved: {0}",
     "skills.loading": "loading…",
-    "skills.pendingToast": "the AI staged {0} skill proposal(s) — see the extensions tab",
+    "skills.pendingToast": "the AI staged {0} skill proposal(s)",
+    "skills.suggestTitle": "The AI suggests creating a skill",
+    "skills.approveCreate": "approve & create",
+    "skills.rejectShort": "dismiss",
+    "skills.createdMsg": "skill created — edit it in 設定 → 拡張機能",
+    "skills.rejectedMsg": "proposal dismissed",
     "notify.skillSuggest": "Familiar Harness — skill proposal",
     "pane.files": "files",
     "skills.edit": "edit skills",
@@ -1728,6 +1738,7 @@ function renderTranscript(messages) {
         {
           resultLabel: t("tool.result"),
           durationMs: duration,
+          forceExpanded: true, // history: show results so the transcript reads complete
           ...(typeof m.meta?.diff === "string" ? { diff: m.meta.diff } : {}),
         },
       );
@@ -2126,7 +2137,7 @@ function appendToolCard(name, args, resultContent, status, opts = {}) {
   state.toolCounter += 1;
   const num = state.toolCounter;
   const duration = opts.durationMs !== undefined ? (opts.durationMs / 1000).toFixed(1) : "";
-  const expanded = prefs.toolsExpanded === true && status !== "run";
+  const expanded = (prefs.toolsExpanded === true || opts.forceExpanded === true) && status !== "run";
   const bodyHtml = `
       ${opts.diff ? diffHtml(opts.diff) : ""}
       ${argsText !== "" ? `<div class="tc-section"><h5>${esc(t("tool.args"))}</h5><pre>${esc(truncate(argsBlock, ARGS_CAP))}</pre></div>` : ""}
@@ -2684,16 +2695,69 @@ async function refreshTodo() {
   }
 }
 
-/** After a turn, nudge the user when the AI staged skill proposals. */
+/** After a turn, nudge the user when the AI staged skill proposals:
+ * an inline card in the transcript with one-click approve/reject. */
 async function maybeSuggestSkills() {
   try {
     const res = await rpc("skills.pending");
     const items = res.items ?? [];
-    if (items.length === 0 || items.length === (maybeSuggestSkills.lastCount ?? 0)) return;
-    maybeSuggestSkills.lastCount = items.length;
-    const names = items.map((x) => x.name ?? x.id ?? "?").slice(0, 3).join(", ");
+    if (items.length === 0) return;
+    const fresh = items.filter((x) => !maybeSuggestSkills.seen?.has(x.id));
+    if (fresh.length === 0) return;
+    maybeSuggestSkills.seen = maybeSuggestSkills.seen ?? new Set();
+    for (const x of fresh) maybeSuggestSkills.seen.add(x.id);
+    const names = fresh.map((x) => x.name ?? x.id ?? "?").join(", ");
     void notifyDesktop(t("notify.skillSuggest"), names, { urgent: false });
-    toast(t("skills.pendingToast", items.length), "ok");
+
+    // inline card in the transcript
+    const t = $("#transcript");
+    const card = document.createElement("div");
+    card.className = "skill-suggest";
+    const body = document.createElement("div");
+    body.className = "skill-suggest-body";
+    body.innerHTML =
+      `<div class="ss-title">💡 ${esc(t("skills.suggestTitle"))}</div>` +
+      fresh.map((x) => `<div class="ss-item"><b>${esc(x.name ?? x.id ?? "?")}</b><span>${esc(x.description ?? "")}</span></div>`).join("");
+    const actions = document.createElement("div");
+    actions.className = "ss-actions";
+    const approve = document.createElement("button");
+    approve.type = "button";
+    approve.textContent = t("skills.approveCreate");
+    const reject = document.createElement("button");
+    reject.type = "button";
+    reject.className = "ghost";
+    reject.textContent = t("skills.rejectShort");
+    const status = document.createElement("span");
+    status.className = "ss-status";
+    actions.append(approve, reject, status);
+    card.append(body, actions);
+    t.appendChild(card);
+    scrollBottom();
+    approve.addEventListener("click", async () => {
+      approve.disabled = true;
+      try {
+        for (const x of fresh) await rpc("skills.approve", { prefix: x.id });
+        status.textContent = "✓ " + t("skills.createdMsg");
+        status.style.color = "var(--ok)";
+        approve.remove();
+        reject.remove();
+      } catch (err) {
+        status.textContent = "✗ " + err.message;
+        status.style.color = "var(--err)";
+        approve.disabled = false;
+      }
+    });
+    reject.addEventListener("click", async () => {
+      reject.disabled = true;
+      try {
+        for (const x of fresh) await rpc("skills.reject", { prefix: x.id });
+        status.textContent = t("skills.rejectedMsg");
+        approve.remove();
+      } catch (err) {
+        status.textContent = "✗ " + err.message;
+        reject.disabled = false;
+      }
+    });
   } catch { /* non-fatal */ }
 }
 
@@ -4663,8 +4727,20 @@ function boot() {
   });
 
   $("#new-session").addEventListener("click", () => openNewSessionModal());
-  $("#sidebar-toggle").addEventListener("click", () => $("#sidebar").classList.toggle("open"));
-  const closeSidebar = () => $("#sidebar").classList.remove("open");
+  const closeSidebar = () => {
+    $("#sidebar").classList.remove("open");
+    $("#drawer-backdrop").hidden = true;
+  };
+  const openSidebar = () => {
+    $("#sidebar").classList.add("open");
+    if (window.matchMedia("(max-width: 900px)").matches) $("#drawer-backdrop").hidden = false;
+  };
+  $("#sidebar-toggle").addEventListener("click", () => {
+    if ($("#sidebar").classList.contains("open")) closeSidebar();
+    else openSidebar();
+  });
+  $("#close-sidebar").addEventListener("click", closeSidebar);
+  $("#drawer-backdrop").addEventListener("click", closeSidebar);
   $("#sessions").addEventListener("click", (ev) => {
     if (window.matchMedia("(max-width: 900px)").matches && ev.target.closest("li[data-id]")) closeSidebar();
   });

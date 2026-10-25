@@ -1219,7 +1219,7 @@ const THEMES = {
     dark: { bg: "#002b36", panel: "#073642", panel2: "#0e4653", text: "#eee8d5", dim: "#657b83", accent: "#268bd2", ok: "#859900", warn: "#b58900", err: "#dc322f", border: "#0a444f", bubble: "#268bd2", hover: "#0a3e4a", codebg: "#06333f" },
     light: { bg: "#fdf6e3", panel: "#eee8d5", panel2: "#fbf4de", text: "#657b83", dim: "#93a1a1", accent: "#268bd2", ok: "#859900", warn: "#b58900", err: "#dc322f", border: "#dcd6c1", bubble: "#268bd2", hover: "#e9e1cc", codebg: "#f6efdd" },
   },
-  "One Dark": {
+  One: {
     dark: { bg: "#282c34", panel: "#21252b", panel2: "#2f343e", text: "#d7dae0", dim: "#636d83", accent: "#61afef", ok: "#98c379", warn: "#d19a66", err: "#e06c75", border: "#3e4451", bubble: "#4c78cc", hover: "#373c46", codebg: "#232730" },
     light: { bg: "#f2f3f5", panel: "#fafbfc", panel2: "#ffffff", text: "#383a42", dim: "#82899a", accent: "#4078f2", ok: "#50a14f", warn: "#c18401", err: "#e45649", border: "#dcdfe4", bubble: "#4078f2", hover: "#e8eaed", codebg: "#f4f5f7" },
   },
@@ -1242,7 +1242,7 @@ const THEME_DESC = {
   Everforest: { ja: "落ち着いた森の緑系", en: "calm forest greens" },
   Gruvbox: { ja: "暖かいレトロ調のコントラスト", en: "warm retro contrast" },
   Solarized: { ja: "古典的なターミナル配色(青緑基調)", en: "classic terminal palette (teal-based)" },
-  "One Dark": { ja: "Atom/VSCode 由来の定番ダーク", en: "the familiar Atom/VSCode dark" },
+  One: { ja: "Atom/VSCode 由来の定番ダーク", en: "the familiar Atom/VSCode dark" },
   Oxocarbon: { ja: "IBM Carbon 風のモノトーン+青アクセント", en: "IBM Carbon-style monochrome with blue accents" },
 };
 
@@ -1250,7 +1250,9 @@ const THEME_DESC = {
 const DEFAULT_THEME = "Tokyo Night";
 
 function currentThemeName() {
-  return localStorage.getItem("familiar.theme") ?? DEFAULT_THEME;
+  const saved = localStorage.getItem("familiar.theme") ?? DEFAULT_THEME;
+  // legacy name from before the "One Dark" → "One" rename
+  return saved === "One Dark" ? "One" : saved;
 }
 
 function currentModePref() {

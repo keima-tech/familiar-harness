@@ -1,70 +1,35 @@
-import fs from "node:fs";
-import { unifiedDiff } from "./diff.js";
-import fsp from "node:fs/promises";
+import type { PlatformPath } from "node:path";
 import path from "node:path";
+import { unifiedDiff } from "./diff.js";
 import type { Tool } from "./registry.js";
 import type { ToolContext, ToolOutput } from "./registry.js";
 
-const SKIP_DIR_NAMES = new Set([
-  "node_modules",
-  ".git",
-  "dist",
-  "build",
-  "out",
-  "target",
-  "coverage",
-  ".venv",
-  "venv",
-  "__pycache__",
-]);
-
 const READ_SIZE_CAP = 256 * 1024;
+const READ_TRANSFER_CAP = 8 * 1024 * 1024;
+const GREP_SCAN_CAP = 1024 * 1024;
 
 // ---------------------------------------------------------------------------
-// Shared helpers
+// Shared helpers (all path math uses the backend's path flavor so a Windows
+// client driving a Linux ssh host still resolves posix paths correctly)
 // ---------------------------------------------------------------------------
 
-function resolveInCwd(argsPath: string, ctx: ToolContext): string {
-  return path.isAbsolute(argsPath) ? path.normalize(argsPath) : path.resolve(ctx.cwd, argsPath);
+function backendPath(ctx: ToolContext): PlatformPath {
+  return ctx.backend.path;
 }
 
-function isInside(base: string, target: string): boolean {
-  const rel = path.relative(base, target);
-  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+function resolveInCwd(argsPath: string, ctx: ToolContext): string {
+  const p = backendPath(ctx);
+  return p.isAbsolute(argsPath) ? p.normalize(argsPath) : p.resolve(ctx.cwd, argsPath);
+}
+
+function isInside(p: PlatformPath, base: string, target: string): boolean {
+  const rel = p.relative(base, target);
+  return rel === "" || (!rel.startsWith("..") && !p.isAbsolute(rel));
 }
 
 function isBinary(buf: Buffer): boolean {
   const head = buf.subarray(0, Math.min(buf.length, 1024));
   return head.includes(0);
-}
-
-/** Iterative file walker skipping build/vendor/hidden directories. */
-export async function* walkFiles(
-  root: string,
-  extraSkip?: string,
-): AsyncGenerator<string> {
-  const stack: string[] = [root];
-  while (stack.length > 0) {
-    const dir = stack.pop();
-    if (!dir) break;
-    let entries: fs.Dirent[];
-    try {
-      entries = await fsp.readdir(dir, { withFileTypes: true });
-    } catch {
-      continue; // unreadable/unmountable
-    }
-    for (const ent of entries) {
-      const full = path.join(dir, ent.name);
-      if (ent.isDirectory()) {
-        if (ent.name.startsWith(".") || SKIP_DIR_NAMES.has(ent.name) || ent.name === extraSkip) {
-          continue;
-        }
-        stack.push(full);
-      } else if (ent.isFile()) {
-        yield full;
-      }
-    }
-  }
 }
 
 /** Mini-glob → RegExp (*, **, ?, [class]; '/' = separator on every OS). */
@@ -109,6 +74,11 @@ export function relativePosix(root: string, full: string): string {
   return rel.split(path.sep).join("/");
 }
 
+function relativeFrom(p: PlatformPath, root: string, full: string): string {
+  const rel = p.relative(root, full);
+  return rel.split(p.sep).join("/");
+}
+
 // ---------------------------------------------------------------------------
 // read
 // ---------------------------------------------------------------------------
@@ -134,7 +104,7 @@ export function createReadTool(): Tool {
       const absolute = resolveInCwd(argPath, ctx);
 
       try {
-        const buf = await fsp.readFile(absolute);
+        const buf = await ctx.backend.readFile(absolute, READ_TRANSFER_CAP);
         if (isBinary(buf)) {
           return { content: `{binary file, not shown: ${absolute}}`, isError: true };
         }
@@ -193,7 +163,7 @@ export function createWriteTool(): Tool {
       const content = typeof args.content === "string" ? args.content : "";
       if (!argPath) return { content: "argument 'path' is required", isError: true };
       const absolute = resolveInCwd(argPath, ctx);
-      if (!ctx.yolo && !isInside(ctx.cwd, absolute)) {
+      if (!ctx.yolo && !isInside(backendPath(ctx), ctx.cwd, absolute)) {
         const approved = await ctx.approval.request({
           tool: "write",
           summary: pathApprovalSummary(absolute),
@@ -201,15 +171,15 @@ export function createWriteTool(): Tool {
         if (!approved) return { content: "[denied by user]", isError: true };
       }
       try {
-        await fsp.mkdir(path.dirname(absolute), { recursive: true });
+        await ctx.backend.mkdirp(backendPath(ctx).dirname(absolute));
         let before = "";
         try {
-          const prev = await fsp.readFile(absolute);
+          const prev = await ctx.backend.readFile(absolute, 512 * 1024);
           if (!isBinary(prev)) before = prev.toString("utf8");
         } catch {
           /* new file */
         }
-        await fsp.writeFile(absolute, content, "utf8");
+        await ctx.backend.writeFile(absolute, content);
         const diff = isBinary(Buffer.from(content, "utf8")) ? "" : unifiedDiff(before, content);
         return {
           content: `wrote ${absolute} (${Buffer.byteLength(content, "utf8")} bytes)`,
@@ -251,7 +221,7 @@ export function createEditTool(): Tool {
         return { content: "old_string and new_string are identical", isError: true };
       }
       const absolute = resolveInCwd(argPath, ctx);
-      if (!ctx.yolo && !isInside(ctx.cwd, absolute)) {
+      if (!ctx.yolo && !isInside(backendPath(ctx), ctx.cwd, absolute)) {
         const approved = await ctx.approval.request({
           tool: "edit",
           summary: `edit file: ${absolute}`,
@@ -259,7 +229,8 @@ export function createEditTool(): Tool {
         if (!approved) return { content: "[denied by user]", isError: true };
       }
       try {
-        const buf = await fsp.readFile(absolute);
+        // no read cap: the full content must round-trip back to the file
+        const buf = await ctx.backend.readFile(absolute);
         if (isBinary(buf)) return { content: `{binary file, refused: ${absolute}}`, isError: true };
         const text = buf.toString("utf8");
         let count = 0;
@@ -287,7 +258,7 @@ export function createEditTool(): Tool {
         const updated = replaceAll
           ? text.split(oldString).join(newString)
           : text.replace(oldString, newString);
-        await fsp.writeFile(absolute, updated, "utf8");
+        await ctx.backend.writeFile(absolute, updated);
         return {
           content: `edited ${absolute} (${count} replacement${count === 1 ? "" : "s"})`,
           isError: false,
@@ -321,29 +292,28 @@ export function createGlobTool(): Tool {
     async execute(args, ctx) {
       const pattern = typeof args.pattern === "string" ? args.pattern : "";
       if (!pattern) return { content: "argument 'pattern' is required", isError: true };
+      const p = backendPath(ctx);
       const rootDir =
         typeof args.path === "string" && args.path !== ""
           ? resolveInCwd(args.path, ctx)
           : ctx.cwd;
 
       const re = globToRegExp(pattern);
-      const hits: { rel: string; full: string; mtime: number }[] = [];
+      const matched: string[] = [];
       try {
-        for await (const full of walkFiles(rootDir)) {
-          const rel = relativePosix(rootDir, full);
-          if (!re.test(rel)) continue;
-          let mtime = 0;
-          try {
-            if (fs.existsSync(full)) mtime = fs.statSync(full).mtimeMs;
-          } catch {
-            /* stat raced away */
-          }
-          hits.push({ rel, full, mtime });
-          if (hits.length >= 2000) break;
+        for await (const full of ctx.backend.walk(rootDir)) {
+          if (!re.test(relativeFrom(p, rootDir, full))) continue;
+          matched.push(full);
+          if (matched.length >= 2000) break;
         }
       } catch (err) {
         return { content: `glob failed: ${describeErr(err)}`, isError: true };
       }
+      const stats = await ctx.backend.statMany(matched);
+      const hits = matched.map((full) => ({
+        rel: relativeFrom(p, rootDir, full),
+        mtime: stats.get(full)?.mtimeMs ?? 0,
+      }));
       hits.sort((a, b) => b.mtime - a.mtime);
       if (hits.length === 0) return { content: "(no matches)", isError: false };
       return {
@@ -381,19 +351,20 @@ export function createGrepTool(): Tool {
         500,
         Math.max(1, Number.isFinite(args.max_results) ? Number(args.max_results) : 100),
       );
+      const p = backendPath(ctx);
       let rootDir = ctx.cwd;
       let singleFile: string | undefined;
       if (typeof args.path === "string" && args.path !== "") {
-        const p = resolveInCwd(args.path, ctx);
-        let st: fs.Stats | null = null;
+        const candidate = resolveInCwd(args.path, ctx);
+        let stat: Awaited<ReturnType<typeof ctx.backend.stat>> | null = null;
         try {
-          st = await fsp.stat(p);
+          stat = await ctx.backend.stat(candidate);
         } catch {
-          st = null;
+          stat = null;
         }
-        if (!st) return { content: `path not found: ${p}`, isError: true };
-        if (st.isFile()) singleFile = p;
-        else rootDir = p;
+        if (!stat) return { content: `path not found: ${candidate}`, isError: true };
+        if (stat.isFile) singleFile = candidate;
+        else rootDir = candidate;
       }
 
       const flags = args.case_sensitive === false ? "gim" : "gm";
@@ -409,31 +380,36 @@ export function createGrepTool(): Tool {
           : null;
 
       const lines: string[] = [];
-      const files = singleFile ? [singleFile] : [];
-      if (!singleFile) {
-        for await (const full of walkFiles(rootDir)) {
-          files.push(full);
-        }
+      let candidates: string[] = [];
+      if (singleFile) {
+        candidates = [singleFile];
+      } else {
+        for await (const full of ctx.backend.walk(rootDir)) candidates.push(full);
       }
-      for (const full of files) {
-        if (lines.length >= maxResults) break;
-        if (includeRe && !includeRe.test(path.posix.basename(relativePosix(rootDir, full)))) continue;
-        let text: string;
-        try {
-          const buf = await fsp.readFile(full);
-          if (isBinary(buf)) continue;
-          text = buf.toString("utf8", 0, Math.min(buf.length, 1024 * 1024));
-        } catch {
-          continue;
-        }
-        const rel = relativePosix(ctx.cwd, full) || path.basename(full);
-        const srcLines = text.split("\n");
-        for (let i = 0; i < srcLines.length && lines.length < maxResults; i++) {
-          regex.lastIndex = 0;
-          const line = srcLines[i] ?? "";
-          if (regex.test(line)) {
-            const preview = line.length > 240 ? line.slice(0, 240) + "…" : line;
-            lines.push(`${rel}:${i + 1}: ${preview}`);
+      if (includeRe) {
+        candidates = candidates.filter((full) =>
+          includeRe.test(p.basename(relativeFrom(p, rootDir, full))),
+        );
+      }
+
+      // Read in batches: one round trip per group of files (fast on ssh).
+      const BATCH = 50;
+      for (let i = 0; i < candidates.length && lines.length < maxResults; i += BATCH) {
+        const batch = candidates.slice(i, i + BATCH);
+        const contents = await ctx.backend.readMany(batch, GREP_SCAN_CAP);
+        for (const full of batch) {
+          if (lines.length >= maxResults) break;
+          const buf = contents.get(full);
+          if (!buf || isBinary(buf)) continue;
+          const rel = relativeFrom(p, ctx.cwd, full) || p.basename(full);
+          const srcLines = buf.toString("utf8").split("\n");
+          for (let li = 0; li < srcLines.length && lines.length < maxResults; li++) {
+            regex.lastIndex = 0;
+            const line = srcLines[li] ?? "";
+            if (regex.test(line)) {
+              const preview = line.length > 240 ? line.slice(0, 240) + "…" : line;
+              lines.push(`${rel}:${li + 1}: ${preview}`);
+            }
           }
         }
       }
@@ -451,5 +427,5 @@ function describeErr(err: unknown): string {
   const code = (err as NodeJS.ErrnoException | null)?.code;
   if (code === "ENOENT") return "file not found";
   if (code === "EACCES") return "permission denied";
-  return String(err);
+  return String((err as Error | null)?.message ?? err);
 }

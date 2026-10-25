@@ -83,7 +83,11 @@ if (forward) {
   process.on("SIGTERM", stop); process.on("SIGINT", stop);
 } else {
   const command = positional.slice(1).join(" ");
-  const child = spawn("/bin/sh", ["-c", command], { stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn("/bin/sh", ["-c", command], {
+    stdio: ["pipe", "pipe", "pipe"],
+    // model a distinct remote machine: a different $HOME for the remote shell
+    env: { ...process.env, HOME: process.env.FAKE_SSH_REMOTE_HOME || process.env.HOME },
+  });
   process.stdin.pipe(child.stdin);
   child.stdout.pipe(process.stdout);
   child.stderr.pipe(process.stderr);
@@ -246,6 +250,7 @@ const app = spawn(
       FAMILIAR_PORTS: LOCAL_PORTS.join(","),
       FAMILIAR_SPAWN_PORT: String(LOCAL_PORTS[0]),
       FAMILIAR_SSH_BIN: fakeSsh,
+      FAKE_SSH_REMOTE_HOME: remoteHome, // the "remote" shell gets its own home
     },
     stdio: "ignore",
     detached: true, // own process group: kill the whole xvfb/electron tree
@@ -261,6 +266,15 @@ try {
   }, "desktop page");
   await waitFor(() => probe(`typeof window.familiarDesktop?.connections === "function"`), "preload bridge");
   check(true, "desktop shell exposes the connection bridge");
+
+  const localFs = await evalOnce(`rpc("fs.list", { path: ${JSON.stringify(repoRoot)} }).then((r) => r.entries.length)`);
+  check(typeof localFs === "number" && localFs > 0, "local fs.list still works", String(localFs));
+  const localSuggest = await evalOnce(`rpc("fs.suggest", { prefix: ${JSON.stringify(path.join(repoRoot, "packa"))}, cwd: ${JSON.stringify(repoRoot)} })`);
+  check(
+    (localSuggest?.items ?? []).some((i) => i.path === path.join(repoRoot, "packages")),
+    "local fs.suggest still works",
+    JSON.stringify(localSuggest?.items),
+  );
 
   await evalOnce(`openNewSessionModal(); 1`);
   await sleep(500);
@@ -370,6 +384,20 @@ try {
     .catch(() => -1);
   check(localList === 0, "local server does not know the remote session", `count=${localList}`);
 
+  // ---- serve mode: the same attachment flow uploads to the remote server ----
+  const serveUpload = await evalOnce(`(async () => {
+    const file = new File(["serve upload\\n"], "serve notes.txt", { type: "text/plain" });
+    await attachFiles([file]);
+    return { composer: document.querySelector("#input").value };
+  })()`);
+  const serveUploadPath = (/@(\S+)/.exec(String(serveUpload?.composer ?? "")) ?? [])[1] ?? "";
+  check(
+    serveUploadPath.startsWith(path.join(remoteHome, ".familiar", "uploads")) && fs.existsSync(serveUploadPath),
+    "serve mode: attachment uploads through the remote server",
+    String(serveUpload?.composer),
+  );
+  await evalOnce(`document.querySelector("#input").value = ""; 1`);
+
   // ---- remote page cannot pivot to other hosts / local shell ---------------
   const guards = await probe(`(async () => {
     const out = {};
@@ -398,6 +426,81 @@ try {
   check(!back?.remoteMode && back?.localMode && !back?.badge && !back?.banner, "back on the local UI", JSON.stringify(back));
   const tmpAfter = countSshTmpDirs();
   check(tmpAfter === tmpBefore, "local token temp dirs cleaned up", `before=${tmpBefore} after=${tmpAfter}`);
+
+  // ---- SSH proxy: tools over ssh, nothing installed on the remote ----------
+  const proxyProfile = await evalOnce(`(async () => {
+    const r = await window.familiarDesktop.saveConnection({
+      name: "Proxy host", host: "proxy1", user: "tester", mode: "proxy",
+    });
+    return r.connections.find((p) => p.host === "proxy1") ?? null;
+  })()`);
+  check(proxyProfile?.mode === "proxy", "proxy profile saved with mode", JSON.stringify(proxyProfile));
+  const proxyId = proxyProfile?.id ?? "";
+
+  const proxyPick = await evalOnce(`(async () => {
+    openNewSessionModal();
+    await new Promise((r) => setTimeout(r, 500));
+    selectNsTarget(${JSON.stringify(proxyId)});
+    for (let i = 0; i < 60; i++) {
+      await new Promise((r) => setTimeout(r, 200));
+      const rows = document.querySelectorAll("#ns-remote-list .ns-row").length;
+      if (rows > 0) return { rows, create: document.querySelector("#ns-create").textContent };
+    }
+    return { rows: 0, create: document.querySelector("#ns-create").textContent };
+  })()`);
+  check(proxyPick?.rows > 0, "proxy target browses remote folders over ssh", JSON.stringify(proxyPick));
+  check(proxyPick?.create === "作成", "proxy target keeps the 作成 button", String(proxyPick?.create));
+
+  const proxyCreated = await evalOnce(`(async () => {
+    document.querySelector("#ns-remote-cwd").value = ${JSON.stringify(remoteWork)};
+    await createSessionFromModal();
+    return {
+      remote: state.currentSession?.remote ?? null,
+      cwd: state.currentSession?.cwd,
+      port: location.port,
+      meta: document.querySelector("#session-meta").textContent,
+    };
+  })()`);
+  check(proxyCreated?.remote?.host === "proxy1", "proxy session carries the ssh target", JSON.stringify(proxyCreated));
+  check(
+    proxyCreated?.cwd === remoteWork && proxyCreated?.port === String(LOCAL_PORTS[0]),
+    "proxy session stays in the local UI",
+    JSON.stringify(proxyCreated),
+  );
+  check(/ssh: tester@proxy1/.test(String(proxyCreated?.meta)), "session meta shows the ssh host", String(proxyCreated?.meta));
+
+  await evalOnce(`void rpc("session.send", { id: state.sessionId, text: "@write proxy-note.txt", yolo: true }); 1`);
+  const proxyNote = path.join(remoteWork, "proxy-note.txt");
+  await waitFor(() => fs.existsSync(proxyNote), "proxy write tool", 30_000);
+  check(fs.readFileSync(proxyNote, "utf8").includes("mock content from Familiar"), "proxy tools write to the remote cwd");
+
+  const proxyRead = await evalOnce(`rpc("fs.read", { session: state.sessionId, path: ${JSON.stringify(proxyNote)} })`);
+  check(String(proxyRead?.content ?? "").includes("mock content from Familiar"), "fs.read follows the proxy backend", JSON.stringify(proxyRead).slice(0, 160));
+  const proxySuggest = await evalOnce(`rpc("fs.suggest", { session: state.sessionId, cwd: state.currentSession.cwd, prefix: ${JSON.stringify(path.join(remoteWork, "proxy-"))} })`);
+  check(
+    (proxySuggest?.items ?? []).some((i) => i.path === proxyNote),
+    "fs.suggest follows the proxy backend",
+    JSON.stringify(proxySuggest?.items),
+  );
+
+  const uploaded = await evalOnce(`(async () => {
+    const file = new File(["hello from the client\\n"], "notes data.txt", { type: "text/plain" });
+    await attachFiles([file]);
+    return { composer: document.querySelector("#input").value };
+  })()`);
+  const uploadedPath = (/@(\S+)/.exec(String(uploaded?.composer ?? "")) ?? [])[1] ?? "";
+  check(
+    uploadedPath.startsWith(path.join(remoteHome, ".familiar", "uploads")),
+    "non-image attachment uploads to the remote host",
+    String(uploaded?.composer),
+  );
+  check(uploadedPath.endsWith("notes_data.txt"), "uploaded name is sanitized", uploadedPath);
+  check(uploadedPath !== "" && fs.existsSync(uploadedPath), "uploaded file exists on the remote side", uploadedPath);
+  check(
+    uploadedPath !== "" && fs.readFileSync(uploadedPath, "utf8") === "hello from the client\n",
+    "uploaded content round-trips",
+  );
+  await evalOnce(`document.querySelector("#input").value = ""; 1`);
 
   // ---- EN mode: every new string is translated (no CJK fallback) -----------
   const cjk = await evalOnce(`(() => {

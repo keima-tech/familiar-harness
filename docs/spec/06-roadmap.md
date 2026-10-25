@@ -750,3 +750,37 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   実行先リスト・接続→リモート UI 切替・cwd プリフィル・リモートでの
   セッション作成と write ツールの着地・state.db の分離・origin ガード 3 種・
   ローカル復帰・一時ディレクトリ掃除・EN 文字列。typecheck / smoke も通過。
+
+## v0.1.0 の実装メモ㊲(2026-10-26、SSH プロキシ実行・非画像添付のリモート転送)
+
+- **SSH プロキシ方式**: リモートに familiar を入れず、ローカルの `familiar serve` のまま
+  ツール実行だけを `ssh` で行う接続方式を追加(Claude Code デスクトップの SSH 接続と
+  同じ考え方)。接続プロファイルに `mode: "serve" | "proxy"` を追加(既定 serve)。
+- **実行バックエンド抽象化**(`packages/core/src/exec/`): `ExecBackend`
+  (exec/readFile/writeFile/mkdirp/exists/stat/listDir/walk/statMany/readMany/home)を
+  導入し、`LocalBackend`(従来の node fs + child_process そのまま)と
+  `SshBackend`(system ssh。`sh -c` へ単一 argv、read は `head -c`、write は stdin の
+  `cat >`、一覧/走査/stat は POSIX シェルスクリプト、バッチ読みは base64)を実装。
+  Linux/macOS は ControlMaster/ControlPersist で多重化、Windows は都度接続。
+  ツール側は `ctx.backend` 経由に統一(`bash`/`read`/`write`/`edit`/`glob`/`grep`)。
+  パス演算はバックエンドの flavor を使うため、Windows クライアント→Linux リモートでも
+  POSIX パスが壊れない。
+- **セッション**: `SessionRecord.remote`(`{host,user,port,identityFile}`)を追加し
+  sqlite に `remote` 列を追加マイグレーション。`session.create` は `ssh` パラメータで
+  絶対パスのリモート cwd を受け付け、`task` サブエージェントが継承。システムプロンプトに
+  リモート実行の注記を追加。`lsp_diagnostics` は SSH セッションでは無効化。
+- **RPC**: `fs.list/read/preview/dirs/suggest` が `session`(または `ssh`)で
+  バックエンドを切り替え。新規 `fs.upload`(base64→バックエンドへ書き込み)。
+- **非画像添付**: ドロップ/添付した非画像ファイルを `fs.upload` で
+  リモートの `<ホーム>/.familiar/uploads/<session-id>/` へ転送し、`@<リモートパス>` を
+  挿入(familiar サーバ方式でも同じ経路でリモート側ホームに保存)。最大 20MB(クライアント
+  側は 15MB でガード)。画像は従来どおり base64 でモデルへ。
+- **UI**: 接続フォームに「接続方式」、実行先リストのバッジ(familiar サーバ / SSH プロキシ)、
+  プロキシ選択時は新規セッションダイアログでリモートフォルダーを閲覧(`fs.dirs` + ssh)、
+  作成はローカルのまま `session.create`。セッションメタに `ssh: user@host`。
+  作業フォルダーダイアログはリモートで `~` 展開+絶対パス必須。EN/JA 対応。
+- **検証**: `packages/desktop/scripts/ssh-e2e.mjs` を 39 項目に拡張 — プロキシプロファイル
+  保存、リモートフォルダー閲覧、ローカル UI のままセッション作成、meta 表示、
+  `@write` がリモート cwd に着地、`fs.read`/`fs.suggest` のバックエンド追従、
+  非画像アップロード(プロキシ+familiar サーバ両方式)、EN 文字列。
+  エンジン単体(偽 ssh + ローカル serve)でも 14 項目確認。typecheck / smoke 通過。

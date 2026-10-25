@@ -19,6 +19,7 @@ import {
   type Tool,
   type ToolContext,
 } from "../tools/index.js";
+import { createBackend } from "../exec/index.js";
 import { DenyApprovalAdapter, type ApprovalAdapter } from "../tools/permissions.js";
 import type { ToolOutput } from "../tools/registry.js";
 import { buildSystemPrompt, todoSection } from "./prompts.js";
@@ -116,6 +117,10 @@ export class AgentRunner {
     const session = this.store.getSession(opts.sessionId);
     if (!session) throw new Error(`session not found: ${opts.sessionId}`);
 
+    // Every file/command tool call talks to this backend: this machine, or an
+    // ssh host when the session was created in proxy mode.
+    const backend = createBackend(session.remote ?? null);
+
     const providerId = opts.provider ?? session.provider;
     const model = opts.model ?? session.model;
     const profile = opts.profile ?? session.profile;
@@ -180,6 +185,14 @@ export class AgentRunner {
           if (section !== "") extra.push(section);
         }
         for (const part of opts.extraSystem ?? []) extra.push(part);
+        if (session.remote) {
+          extra.push(
+            `## Remote execution\n` +
+              `This session runs on the SSH host \`${backend.label}\` — bash/read/write/edit/glob/grep ` +
+              `execute there over ssh, and the working directory \`${session.cwd}\` is on that host. ` +
+              `LSP diagnostics and local MCP servers are not routed to the remote.`,
+          );
+        }
 
         const system = buildSystemPrompt(this.cfg, {
           cwd: session.cwd,
@@ -291,6 +304,7 @@ export class AgentRunner {
         const toolCtx: ToolContext = {
           sessionId: session.id,
           cwd: session.cwd,
+          backend,
           yolo,
           config: this.cfg,
           approval: this.approval,

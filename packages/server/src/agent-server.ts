@@ -9,6 +9,7 @@ import type {
   ModelInfo,
   RpcContext,
   SessionRecord,
+  SessionRemote,
   TodoItem,
   ToolCall,
   Usage,
@@ -19,6 +20,8 @@ import {
 } from "@familiar/protocol";
 import {
   AgentRunner,
+  createBackend,
+  type ExecBackend,
   loadConfig,
   configFilePath,
   writeConnectorsToDisk,
@@ -287,6 +290,7 @@ export class AgentServer {
       provider: parent.provider,
       model: parent.model,
       cwd: parent.cwd,
+      ...(parent.remote ? { remote: parent.remote } : {}),
     });
     log.debug(`subagent task: session ${child.id} (parent ${parent.id.slice(0, 8)})`);
     // Single-level recursion by design (M2): the subagent runner has no taskRunner.
@@ -359,6 +363,8 @@ export class AgentServer {
         return this.fsDirs(params);
       case "fs.suggest":
         return this.fsSuggest(params);
+      case "fs.upload":
+        return this.fsUpload(params);
       case "todo.list":
         return this.todoList(params);
       case "session.create":
@@ -577,7 +583,7 @@ export class AgentServer {
    * pdf come back base64-encoded (capped), markdown and text as content,
    * unknown binaries as an info stub. Read-only.
    */
-  private fsPreview(params: Record<string, unknown>): {
+  private async fsPreview(params: Record<string, unknown>): Promise<{
     path: string;
     kind: "image" | "audio" | "video" | "pdf" | "markdown" | "text" | "binary";
     mime?: string;
@@ -586,27 +592,28 @@ export class AgentServer {
     truncated?: boolean;
     size: number;
     tooLarge?: boolean;
-  } {
+  }> {
+    const backend = this.backendFor(params);
     const raw = (str(params, "path") ?? "").trim();
-    const target = this.resolveFsPath(raw);
-    let stat: fs.Stats;
+    const target = await this.resolveOnBackend(backend, raw);
+    let stat: Awaited<ReturnType<ExecBackend["stat"]>>;
     try {
-      stat = fs.statSync(target);
+      stat = await backend.stat(target);
     } catch {
       throw new RpcError(RPC_ERROR_INVALID_PARAMS, `cannot stat: ${target}`);
     }
-    if (!stat.isFile()) throw new RpcError(RPC_ERROR_INVALID_PARAMS, `not a file: ${target}`);
+    if (!stat.isFile) throw new RpcError(RPC_ERROR_INVALID_PARAMS, `not a file: ${target}`);
     const size = stat.size;
     const ext = path.extname(target).replace(".", "").toLowerCase();
 
     if (ext === "md" || ext === "markdown") {
       const CAP = 256 * 1024;
-      const buf = fs.readFileSync(target);
+      const buf = await backend.readFile(target, CAP + 1);
       if (buf.subarray(0, 8192).includes(0)) return { path: target, kind: "binary", size };
       return {
         path: target, kind: "markdown",
         content: buf.subarray(0, CAP).toString("utf8"),
-        truncated: buf.length > CAP, size,
+        truncated: buf.length > CAP || size > CAP, size,
       };
     }
 
@@ -618,82 +625,73 @@ export class AgentServer {
         : "pdf";
       const cap = kind === "audio" || kind === "video" ? 64 * 1024 * 1024 : 20 * 1024 * 1024;
       if (size > cap) return { path: target, kind, mime, size, tooLarge: true };
-      const buf = fs.readFileSync(target);
+      const buf = await backend.readFile(target, cap);
       return { path: target, kind, mime, dataBase64: buf.toString("base64"), size };
     }
 
     // everything else: text unless it sniffs binary
     const TEXT_CAP = 256 * 1024;
-    const buf = fs.readFileSync(target);
+    const buf = await backend.readFile(target, TEXT_CAP + 1);
     if (buf.subarray(0, Math.min(buf.length, 8192)).includes(0)) {
       return { path: target, kind: "binary", size };
     }
     return {
       path: target, kind: "text",
       content: buf.subarray(0, TEXT_CAP).toString("utf8"),
-      truncated: buf.length > TEXT_CAP, size,
+      truncated: buf.length > TEXT_CAP || size > TEXT_CAP, size,
     };
   }
 
   /** Directory listing with files, for the GUI file tree (read-only). */
-  private fsList(params: Record<string, unknown>): {
+  private async fsList(params: Record<string, unknown>): Promise<{
     path: string;
     entries: Array<{ name: string; path: string; dir: boolean; size: number }>;
     home: string;
-  } {
+  }> {
+    const backend = this.backendFor(params);
     const raw = (str(params, "path") ?? "").trim();
-    const target = this.resolveFsPath(raw);
-    let dirents: fs.Dirent[];
+    const target = await this.resolveOnBackend(backend, raw);
+    let listed;
     try {
-      dirents = fs.readdirSync(target, { withFileTypes: true });
+      listed = await backend.listDir(target);
     } catch {
       throw new RpcError(RPC_ERROR_INVALID_PARAMS, `cannot list directory: ${target}`);
     }
-    const mapped = dirents
+    const mapped = listed
       .filter((e) => !e.name.startsWith("."))
-      .map((e) => {
-        let size = 0;
-        if (e.isFile()) {
-          try {
-            size = fs.statSync(path.join(target, e.name)).size;
-          } catch {
-            /* unreadable entry — report size 0 */
-          }
-        }
-        return { name: e.name, path: path.join(target, e.name), dir: e.isDirectory(), size };
-      })
-      .sort((a, b) => (a.dir === b.dir ? a.name.localeCompare(b.name) : a.dir ? -1 : 1))
+      .map((e) => ({ name: e.name, path: e.path, dir: e.dir, size: e.size }))
       .slice(0, 500);
-    return { path: target, entries: mapped, home: os.homedir() };
+    return { path: target, entries: mapped, home: await backend.home() };
   }
 
   /** Read a text file for the GUI viewer. Capped at 256 KiB; binary files
    * (NUL byte sniff) are rejected rather than rendered as mojibake. */
-  private fsRead(params: Record<string, unknown>): {
+  private async fsRead(params: Record<string, unknown>): Promise<{
     path: string;
     content: string;
     truncated: boolean;
     size: number;
-  } {
+  }> {
+    const backend = this.backendFor(params);
     const raw = (str(params, "path") ?? "").trim();
-    const target = this.resolveFsPath(raw);
-    let stat: fs.Stats;
+    const target = await this.resolveOnBackend(backend, raw);
+    let stat: Awaited<ReturnType<ExecBackend["stat"]>>;
     try {
-      stat = fs.statSync(target);
+      stat = await backend.stat(target);
     } catch {
       throw new RpcError(RPC_ERROR_INVALID_PARAMS, `cannot stat: ${target}`);
     }
-    if (!stat.isFile()) throw new RpcError(RPC_ERROR_INVALID_PARAMS, `not a file: ${target}`);
+    if (!stat.isFile) throw new RpcError(RPC_ERROR_INVALID_PARAMS, `not a file: ${target}`);
     const CAP = 256 * 1024;
-    const buf = fs.readFileSync(target);
+    const buf = await backend.readFile(target, CAP + 1);
     if (buf.subarray(0, Math.min(buf.length, 8192)).includes(0)) {
       throw new RpcError(RPC_ERROR_INVALID_PARAMS, `binary file: ${target}`);
     }
     return {
       path: target,
       content: buf.subarray(0, CAP).toString("utf8"),
-      truncated: buf.length > CAP,
-      size: buf.length,
+      truncated: buf.length > CAP || stat.size > CAP,
+      size: stat.size,
     };
   }
 
@@ -1059,58 +1057,146 @@ export class AgentServer {
     return { ok: true, path: file, created: !existing, warnings };
   }
 
-  private fsDirs(params: Record<string, unknown>): { dirs: string[]; home: string } {
+  // -------------------------------------------------------------------------
+  // execution backends (this machine, or an ssh host for proxy sessions)
+  // -------------------------------------------------------------------------
+
+  /** Validate an ssh target from RPC params (`session.create`, browser RPCs). */
+  private parseRemote(input: unknown): SessionRemote | undefined {
+    if (input === undefined || input === null || input === "") return undefined;
+    if (typeof input !== "object") {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, "ssh must be an object");
+    }
+    const o = input as Record<string, unknown>;
+    const host = String(o["host"] ?? "").trim();
+    if (!host || /[\s/]/.test(host) || host.startsWith("-")) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, "ssh.host is required");
+    }
+    const user = String(o["user"] ?? "").trim();
+    if (user && !/^[A-Za-z0-9._-]+$/.test(user)) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, `invalid ssh.user: ${user}`);
+    }
+    const portRaw = Number(o["port"] ?? 22);
+    const port = Number.isInteger(portRaw) && portRaw > 0 && portRaw < 65536 ? portRaw : 22;
+    const identityFile = String(o["identityFile"] ?? "").trim();
+    return {
+      host,
+      ...(user ? { user } : {}),
+      ...(port !== 22 ? { port } : {}),
+      ...(identityFile ? { identityFile } : {}),
+    };
+  }
+
+  /** File RPC backend: the session's ssh host when a session is given, else
+   * an inline `ssh` target (new-session browsing), else this machine. */
+  private backendFor(params: Record<string, unknown>): ExecBackend {
+    const sessionId = str(params, "session");
+    if (sessionId) {
+      const session = this.store.getSession(sessionId);
+      if (session?.remote) return createBackend(session.remote);
+      return createBackend();
+    }
+    return createBackend(this.parseRemote(params["ssh"]) ?? null);
+  }
+
+  /** Resolve a GUI-supplied path on the backend; mirrors resolveFsPath but
+   * uses the remote home for ssh backends (never the local one). */
+  private async resolveOnBackend(backend: ExecBackend, raw: string, base?: string): Promise<string> {
+    if (backend.kind === "local") {
+      return base !== undefined ? this.resolveFsPath(raw, base) : this.resolveFsPath(raw);
+    }
+    const p = backend.path;
+    const home = await backend.home();
+    const text = raw.trim();
+    if (text === "" || text === "~") return home;
+    if (text.startsWith("~/")) return p.join(home, text.slice(2));
+    if (p.isAbsolute(text)) return p.normalize(text);
+    if (base !== undefined && base !== "") return p.resolve(base, text);
+    return p.join(home, text);
+  }
+
+  /** Upload a composer attachment: written on the session's backend so the
+   * model can `read` it at the returned path (proxy and serve modes alike). */
+  private async fsUpload(params: Record<string, unknown>): Promise<{ path: string; size: number }> {
+    const backend = this.backendFor(params);
+    const rawName = (str(params, "name") ?? "").trim() || "upload.bin";
+    const name = rawName
+      .replace(/[\\/]+/g, "_")
+      .replace(/[^A-Za-z0-9._-]+/g, "_")
+      .replace(/^[.]+/, "")
+      .slice(0, 100) || "upload.bin";
+    const data = str(params, "data") ?? "";
+    if (data === "") throw new RpcError(RPC_ERROR_INVALID_PARAMS, "data (base64) is required");
+    const buf = Buffer.from(data, "base64");
+    const MAX = 20 * 1024 * 1024;
+    if (buf.length > MAX) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, `attachment too large (max ${MAX / 1024 / 1024}MB)`);
+    }
+    const sessionId = str(params, "session");
+    const bucket = sessionId ? sessionId.slice(0, 8) : "adhoc";
+    const p = backend.path;
+    const home = await backend.home();
+    const dir = p.join(home, ".familiar", "uploads", bucket);
+    await backend.mkdirp(dir);
+    const unique = `${Date.now().toString(36)}-${crypto.randomBytes(3).toString("hex")}-${name}`;
+    const target = p.join(dir, unique);
+    await backend.writeFile(target, buf);
+    return { path: target, size: buf.length };
+  }
+
+  private async fsDirs(params: Record<string, unknown>): Promise<{ dirs: string[]; home: string }> {
+    const backend = this.backendFor(params);
     const raw = (str(params, "path") ?? "").trim();
-    const target = this.resolveFsPath(raw);
+    const sessionId = str(params, "session");
+    const cwdOf = sessionId ? this.store.getSession(sessionId)?.cwd : undefined;
+    const target = await this.resolveOnBackend(backend, raw, cwdOf);
     let dirs: string[];
     try {
-      dirs = fs
-        .readdirSync(target, { withFileTypes: true })
-        .filter((e) => e.isDirectory() && !e.name.startsWith("."))
-        .map((e) => path.join(target, e.name))
+      const entries = await backend.listDir(target);
+      dirs = entries
+        .filter((e) => e.dir && !e.name.startsWith("."))
+        .map((e) => e.path)
         .sort((a, b) => a.localeCompare(b));
     } catch {
       throw new RpcError(RPC_ERROR_INVALID_PARAMS, `cannot list directory: ${target}`);
     }
-    return { dirs, home: os.homedir() };
+    return { dirs, home: await backend.home() };
   }
 
   /**
    * Path suggestions for the composer's "@" token: lists dirs AND files whose
    * name starts with the typed prefix (directories first, capped at 20).
    */
-  private fsSuggest(params: Record<string, unknown>): { items: Array<{ path: string; dir: boolean }> } {
+  private async fsSuggest(
+    params: Record<string, unknown>,
+  ): Promise<{ items: Array<{ path: string; dir: boolean }> }> {
     const prefix = (str(params, "prefix") ?? "").trim();
     if (prefix === "") return { items: [] };
+    const backend = this.backendFor(params);
+    const p = backend.path;
     const lastSep = Math.max(prefix.lastIndexOf("/"), prefix.lastIndexOf("\\"));
     const dirPart = lastSep >= 0 ? prefix.slice(0, lastSep + 1) : "";
     const namePrefix = lastSep >= 0 ? prefix.slice(lastSep + 1) : prefix;
     const cwd = str(params, "cwd");
     let target: string;
     if (dirPart === "") {
-      target = cwd && cwd !== "" ? path.resolve(cwd) : os.homedir();
-    } else if (
-      dirPart.startsWith("/") ||
-      dirPart.startsWith("~") ||
-      /^[a-zA-Z]:[\\/]/.test(dirPart)
-    ) {
-      target = this.resolveFsPath(dirPart);
+      target = cwd && cwd !== "" ? await this.resolveOnBackend(backend, cwd) : await backend.home();
+    } else if (p.isAbsolute(dirPart) || dirPart.startsWith("~") || /^[a-zA-Z]:[\\/]/.test(dirPart)) {
+      target = await this.resolveOnBackend(backend, dirPart);
     } else {
-      target = this.resolveFsPath(dirPart, cwd && cwd !== "" ? cwd : process.cwd());
+      const fallback = backend.kind === "local" ? process.cwd() : await backend.home();
+      target = await this.resolveOnBackend(backend, dirPart, cwd && cwd !== "" ? cwd : fallback);
     }
-    let entries: import("node:fs").Dirent[];
+    let entries;
     try {
-      entries = fs.readdirSync(target, { withFileTypes: true });
+      entries = await backend.listDir(target);
     } catch {
       return { items: [] };
     }
     const q = namePrefix.toLowerCase();
     const matched = entries.filter((e) => e.name.toLowerCase().startsWith(q));
-    matched.sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name));
-    const items = matched.slice(0, 20).map((e) => ({
-      path: path.join(target, e.name),
-      dir: e.isDirectory(),
-    }));
+    matched.sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name));
+    const items = matched.slice(0, 20).map((e) => ({ path: e.path, dir: e.dir }));
     return { items };
   }
 
@@ -1123,6 +1209,7 @@ export class AgentServer {
   }
 
   private async createSession(params: Record<string, unknown>): Promise<SessionRecord> {
+    const remote = this.parseRemote(params["ssh"]);
     const provider = str(params, "provider") ?? this.cfg.default_provider;
     const pc = this.cfg.providers[provider];
     if (!pc) throw new RpcError(RPC_ERROR_INVALID_PARAMS, `unknown provider: ${provider}`);
@@ -1135,9 +1222,22 @@ export class AgentServer {
       );
     }
     // `~`-prefixed cwds (typed in the new-session/cwd dialogs) resolve to the
-    // server's home — important in remote mode, where "~" means the SSH host.
+    // server's home. ssh proxy sessions take the path as given: it lives on
+    // the remote host, so local path math must not touch it.
     const rawCwd = str(params, "cwd");
-    const cwd = rawCwd ? this.resolveFsPath(rawCwd) : process.cwd();
+    let cwd: string;
+    if (remote) {
+      const remoteCwd = (rawCwd ?? "").trim();
+      if (!remoteCwd.startsWith("/")) {
+        throw new RpcError(
+          RPC_ERROR_INVALID_PARAMS,
+          "ssh sessions need an absolute cwd on the remote host",
+        );
+      }
+      cwd = path.posix.normalize(remoteCwd);
+    } else {
+      cwd = rawCwd ? this.resolveFsPath(rawCwd) : process.cwd();
+    }
     const effortParam = str(params, "effort") ?? "";
     const effort = normalizeEffort(effortParam);
     if (effortParam !== "" && !effort) {
@@ -1150,6 +1250,7 @@ export class AgentServer {
       profile: str(params, "profile"),
       effort,
       cwd,
+      ...(remote ? { remote } : {}),
     });
     // M5: session_start lifecycle hook (awaited; hooks can never throw).
     if (this.hooks) {

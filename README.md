@@ -160,7 +160,10 @@ ssh -L 46210:127.0.0.1:46210 user@server
 
 For LAN-only exposure use `familiar serve --bind 0.0.0.0` **together with** token auth (`familiar token --write`); put a TLS reverse proxy in front for anything public.
 
-**Desktop app:** *Settings → Connections* stores SSH hosts (no secrets, just host/user/port/identity file). Pick one under *"+" → Runs on* in the new-session dialog and the app starts `familiar serve` on that machine over SSH (keys/ssh-agent only, strict host-key checking), forwards a free local port, and switches the window to that host — sessions, tools and files then run remotely. *Back to local* returns. The remote machine needs the same Familiar version and a `known_hosts` entry.
+**Desktop app:** *Settings → Connections* stores SSH hosts (no secrets, just host/user/port/identity file + connection mode). Pick one under *"+" → Runs on* in the new-session dialog:
+
+- *familiar server* — the app starts `familiar serve` on that machine over SSH (keys/ssh-agent only, strict host-key checking), forwards a free local port, and switches the window to that host. Needs the same Familiar version and a `known_hosts` entry; *Back to local* returns.
+- *SSH proxy* — nothing is installed remotely: the session stays local while `bash/read/write/edit/glob/grep` execute on the host over ssh (ControlMaster-multiplexed on Linux/macOS). Remote folders are browsed from the dialog, and dragged non-image files are uploaded to the remote host and referenced as `@path`. LSP diagnostics and MCP servers stay local.
 
 ### Architecture
 

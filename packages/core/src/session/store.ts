@@ -3,6 +3,7 @@ import path from "node:path";
 import type {
   ChatMessage,
   SessionRecord,
+  SessionRemote,
   ToolCall,
 } from "@familiar/protocol";
 import { ensureDir } from "../paths.js";
@@ -19,6 +20,8 @@ export interface SessionStore {
     profile?: string;
     effort?: string;
     cwd: string;
+    /** ssh proxy target: tools run on this host instead of locally */
+    remote?: SessionRemote;
   }): SessionRecord;
   getSession(id: string): SessionRecord | null;
   listSessions(): SessionRecord[];
@@ -54,6 +57,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   profile TEXT,
   effort TEXT NOT NULL DEFAULT '',
   cwd TEXT NOT NULL,
+  remote TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -80,6 +84,7 @@ interface SessionRow {
   model: string;
   profile: string | null;
   cwd: string;
+  remote: string | null;
   created_at: number;
   updated_at: number;
   effort: string | null;
@@ -97,6 +102,10 @@ export class SqliteSessionStore implements SessionStore {
     if (!cols.some((c) => c.name === "effort")) {
       this.db.exec(`ALTER TABLE sessions ADD COLUMN effort TEXT NOT NULL DEFAULT ''`);
     }
+    // migration: ssh proxy sessions carry a remote target (JSON)
+    if (!cols.some((c) => c.name === "remote")) {
+      this.db.exec(`ALTER TABLE sessions ADD COLUMN remote TEXT`);
+    }
   }
 
   createSession(opts: {
@@ -106,13 +115,14 @@ export class SqliteSessionStore implements SessionStore {
     profile?: string;
     effort?: string;
     cwd: string;
+    remote?: SessionRemote;
   }): SessionRecord {
     const id = crypto.randomUUID();
     const now = Date.now();
     this.db
       .prepare(
-        `INSERT INTO sessions (id, title, provider, model, profile, effort, cwd, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO sessions (id, title, provider, model, profile, effort, cwd, remote, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -122,6 +132,7 @@ export class SqliteSessionStore implements SessionStore {
         opts.profile ?? null,
         opts.effort ?? "",
         opts.cwd,
+        opts.remote ? JSON.stringify(opts.remote) : null,
         now,
         now,
       );
@@ -133,6 +144,7 @@ export class SqliteSessionStore implements SessionStore {
       profile: opts.profile,
       ...(opts.effort ? { effort: opts.effort } : {}),
       cwd: opts.cwd,
+      ...(opts.remote ? { remote: opts.remote } : {}),
       createdAt: now,
       updatedAt: now,
     };
@@ -268,6 +280,14 @@ export class SqliteSessionStore implements SessionStore {
 }
 
 function toRecord(row: SessionRow): SessionRecord {
+  let remote: SessionRemote | undefined;
+  if (row.remote) {
+    try {
+      remote = JSON.parse(row.remote) as SessionRemote;
+    } catch {
+      remote = undefined; // corrupt blob: treat as a local session
+    }
+  }
   return {
     id: row.id,
     title: row.title,
@@ -276,6 +296,7 @@ function toRecord(row: SessionRow): SessionRecord {
     profile: row.profile ?? undefined,
     effort: row.effort ? row.effort : null,
     cwd: row.cwd,
+    ...(remote ? { remote } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

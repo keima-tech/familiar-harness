@@ -239,5 +239,28 @@ ssh -L 46210:127.0.0.1:46210 <user>@<server-host>
 - リモートは POSIX シェル(Linux/macOS)前提。ホスト鍵は事前に `known_hosts` に登録しておく
   必要があります。`familiar` が PATH に無い場合はプロファイルの「リモートの familiar パス」で
   絶対パスを指定(未検出時は `~/.local/bin/familiar` / `/usr/local/bin/familiar` も探索)。
-- 非画像ファイルのドラッグ&ドロップはリモート時に無効です(ローカルパスはリモートで解決
-  できないため)。画像の添付はそのまま使えます。
+- 非画像ファイルのドラッグ&ドロップは**リモートへアップロード**され(下記)、
+  `@<リモートパス>` としてプロンプトに入ります。画像はそのまま添付できます。
+
+#### SSH プロキシ方式(リモートに何もインストールしない)
+
+接続プロファイルの「接続方式」で **SSH プロキシ** を選ぶと、リモートには familiar を
+入れず、ローカルの `familiar serve` のままツール実行だけを `ssh` で行います
+(Claude Code デスクトップの SSH 接続と同じ考え方)。
+
+- `bash` / `read` / `write` / `edit` / `glob` / `grep` はセッションの ssh バックエンド
+  (`packages/core/src/exec/`)経由でリモートの POSIX シェル上で実行されます。
+  ツール呼び出しごとに `ssh` を起動しますが、Linux/macOS クライアントは
+  ControlMaster(`~/.familiar` ではなく `$TMPDIR/familiar-ssh-mux`)で接続を多重化します。
+- セッションはローカルに保存され(`session.remote` に ssh 先を記録)、GUI の
+  セッションメタに `ssh: user@host` と表示されます。`task` サブエージェントにも継承されます。
+- ファイル関連 RPC(`fs.list` / `fs.read` / `fs.preview` / `fs.dirs` / `fs.suggest` /
+  `fs.upload`)は `session` を渡すと同じバックエンドを通ります。セッション作成前の
+  リモートフォルダー閲覧は `ssh` パラメータで行います。
+- **非画像ファイルの添付**: `fs.upload` がリモートの
+  `<ホーム>/.familiar/uploads/<session-id>/` へ書き込み、`@<リモートパス>` を挿入します
+  (familiar サーバ方式でも同じ RPC を使うため、リモート側のホームに保存されます)。
+- 制約: リモートに POSIX シェルが必要です(`find` / `stat` / `base64` / `wc` を使用)。
+  `lsp_diagnostics` はローカル実行のため SSH セッションでは無効(エラーで bash での
+  代替を案内)。MCP サーバはローカル側で動作します。作業フォルダーは絶対パスで指定
+  してください(`~` はリモートのホームに展開されます)。

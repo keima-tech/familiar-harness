@@ -37,6 +37,15 @@ export function createLspTool(_cwdHint?: string): Tool {
       if (p === "") {
         return { content: "lsp_diagnostics: 'path' is required", isError: true };
       }
+      if (ctx.backend.kind === "ssh") {
+        return {
+          content:
+            "lsp_diagnostics is unavailable in SSH sessions — the language server runs on this machine, " +
+            "but the files live on the remote host. Run the project's own check command with bash instead " +
+            '(e.g. tsc --noEmit, cargo check, eslint).',
+          isError: true,
+        };
+      }
       const hub = getLspHub(ctx.config);
       if (!hub) {
         return {

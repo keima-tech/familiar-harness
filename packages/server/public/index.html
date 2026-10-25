@@ -207,7 +207,8 @@
             <div class="ns-remote-head"><span class="ns-remote-ic">🖥</span><b id="ns-remote-name"></b></div>
             <div class="ns-label" data-i18n="ns.remoteCwd">リモートの作業フォルダー (任意)</div>
             <input id="ns-remote-cwd" type="text" spellcheck="false" autocomplete="off" placeholder="~/work" />
-            <div class="ns-remote-hint" data-i18n="ns.remoteHint">接続後、リモート側のフォルダーを選べます。空欄ならホームディレクトリから始まります。</div>
+            <div id="ns-remote-list" class="ns-folders" hidden></div>
+            <div id="ns-remote-hint" class="ns-remote-hint"></div>
           </div>
         </div>
         <div class="form-error" hidden></div>

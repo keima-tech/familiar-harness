@@ -1,0 +1,360 @@
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import nodePath, { type PlatformPath } from "node:path";
+import type { SessionRemote } from "@familiar/protocol";
+import {
+  OutputCollector,
+  SKIP_DIR_NAMES,
+  type DirEntry,
+  type ExecBackend,
+  type ExecOptions,
+  type ExecResult,
+  type StatInfo,
+} from "./types.js";
+
+/** Remote reads are capped so a huge file cannot stall a turn. */
+const REMOTE_READ_CAP = 8 * 1024 * 1024;
+const HELPER_TIMEOUT_MS = 60_000;
+const BATCH_TIMEOUT_MS = 120_000;
+const STDOUT_CAP = 48 * 1024 * 1024;
+
+function sshBin(): string {
+  return process.env["FAMILIAR_SSH_BIN"] || "ssh";
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Tools-on-SSH execution: every call spawns the system `ssh` client, so the
+ * remote needs nothing but a POSIX shell. A ControlMaster socket (POSIX
+ * clients) turns the per-call round trips into one reused TCP connection.
+ */
+export class SshBackend implements ExecBackend {
+  readonly kind = "ssh" as const;
+  readonly path: PlatformPath = nodePath.posix;
+  readonly label: string;
+  private homeDir = "";
+
+  constructor(private readonly target: SessionRemote) {
+    this.label = `${target.user ? `${target.user}@` : ""}${target.host}`;
+  }
+
+  private baseArgs(): string[] {
+    const args = [
+      "-T",
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "StrictHostKeyChecking=yes",
+      "-o",
+      "ConnectTimeout=15",
+      "-o",
+      "ServerAliveInterval=15",
+      "-o",
+      "ServerAliveCountMax=4",
+      "-o",
+      "LogLevel=ERROR",
+    ];
+    // Connection multiplexing: reuse one TCP/auth for every tool call.
+    // Not available in OpenSSH for Windows, so POSIX clients only.
+    if (process.platform !== "win32") {
+      try {
+        const dir = nodePath.join(os.tmpdir(), "familiar-ssh-mux");
+        fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+        args.push(
+          "-o",
+          "ControlMaster=auto",
+          "-o",
+          `ControlPath=${nodePath.join(dir, "%C")}`,
+          "-o",
+          "ControlPersist=120",
+        );
+      } catch {
+        /* fall back to per-call connections */
+      }
+    }
+    if (this.target.port && this.target.port !== 22) args.push("-p", String(this.target.port));
+    if (this.target.identityFile) args.push("-i", this.target.identityFile);
+    if (this.target.user) args.push("-l", this.target.user);
+    args.push(this.target.host);
+    return args;
+  }
+
+  /** ssh command string: change into cwd (remote-side) then run the script. */
+  private remoteCommand(script: string, cwd?: string): string {
+    const exec = `exec sh -c ${shellQuote(script)}`;
+    return cwd ? `cd ${shellQuote(cwd)} && ${exec}` : exec;
+  }
+
+  /** Run a script, capturing stdout as a Buffer and stderr as text. */
+  private run(
+    script: string,
+    opts: { input?: string | Buffer; cwd?: string; timeoutMs?: number } = {},
+  ): Promise<{ exitCode: number; stdout: Buffer; stderr: string }> {
+    return new Promise((resolve) => {
+      const child = spawn(
+        sshBin(),
+        [...this.baseArgs(), "--", this.remoteCommand(script, opts.cwd)],
+        { stdio: ["pipe", "pipe", "pipe"] },
+      );
+      const stdout: Buffer[] = [];
+      let stdoutLen = 0;
+      let stderr = "";
+      let settled = false;
+      const timeoutMs = opts.timeoutMs ?? HELPER_TIMEOUT_MS;
+      const finalize = (exitCode: number) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve({ exitCode, stdout: Buffer.concat(stdout), stderr });
+      };
+      const timer = setTimeout(() => {
+        try {
+          child.kill("SIGTERM");
+        } catch {
+          /* already gone */
+        }
+        finalize(-1);
+      }, timeoutMs);
+      child.stdout.on("data", (chunk: Buffer) => {
+        if (stdoutLen < STDOUT_CAP) {
+          stdout.push(chunk);
+          stdoutLen += chunk.length;
+        }
+      });
+      child.stderr.on("data", (chunk: Buffer) => {
+        if (stderr.length < 4096) stderr += chunk.toString("utf8");
+      });
+      child.on("error", (err) => {
+        stderr += `failed to spawn ${sshBin()}: ${err.message}`;
+        finalize(-1);
+      });
+      child.on("close", (code) => finalize(code ?? -1));
+      if (opts.input !== undefined) {
+        try {
+          child.stdin.end(opts.input);
+        } catch {
+          /* already gone */
+        }
+      } else {
+        child.stdin.end();
+      }
+    });
+  }
+
+  private async mustRun(
+    script: string,
+    opts: { input?: string | Buffer; cwd?: string; timeoutMs?: number } = {},
+  ): Promise<Buffer> {
+    const res = await this.run(script, opts);
+    if (res.exitCode !== 0) {
+      throw new Error(
+        `ssh ${this.label}: command failed (${res.exitCode})${res.stderr.trim() ? `: ${res.stderr.trim()}` : ""}`,
+      );
+    }
+    return res.stdout;
+  }
+
+  async exec(command: string, opts: ExecOptions = {}): Promise<ExecResult> {
+    return new Promise((resolve) => {
+      const child = spawn(
+        sshBin(),
+        [...this.baseArgs(), "--", this.remoteCommand(command, opts.cwd)],
+        { stdio: ["pipe", "pipe", "pipe"] },
+      );
+      const out = new OutputCollector();
+      let settled = false;
+      const timeoutMs = opts.timeoutMs ?? 30_000;
+      const finalize = (exitCode: number, timedOut: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        const text = out.text();
+        resolve({
+          exitCode,
+          output:
+            (timedOut ? `${text}\n[familiar: command timed out after ${timeoutMs}ms]` : text).trimEnd() ||
+            "(no output)",
+          timedOut,
+        });
+      };
+      const timer = setTimeout(() => {
+        try {
+          child.kill("SIGTERM");
+        } catch {
+          /* already gone */
+        }
+        finalize(-1, true);
+      }, timeoutMs);
+      child.stdout.on("data", (chunk: Buffer) => out.append(chunk));
+      child.stderr.on("data", (chunk: Buffer) => out.append(chunk));
+      child.on("error", (err) => {
+        out.append(Buffer.from(`failed to spawn ${sshBin()}: ${err.message}`));
+        finalize(-1, false);
+      });
+      child.on("close", (code) => finalize(code ?? -1, false));
+      if (opts.input !== undefined) {
+        try {
+          child.stdin.end(opts.input);
+        } catch {
+          /* already gone */
+        }
+      } else {
+        child.stdin.end();
+      }
+    });
+  }
+
+  async readFile(file: string, maxBytes?: number): Promise<Buffer> {
+    const cap = maxBytes ?? REMOTE_READ_CAP;
+    return this.mustRun(`head -c ${cap} ${shellQuote(file)}`, { timeoutMs: BATCH_TIMEOUT_MS });
+  }
+
+  async writeFile(file: string, data: string | Buffer): Promise<void> {
+    const dir = nodePath.posix.dirname(file);
+    await this.mustRun(`mkdir -p ${shellQuote(dir)} && cat > ${shellQuote(file)}`, {
+      input: data,
+      timeoutMs: BATCH_TIMEOUT_MS,
+    });
+  }
+
+  async mkdirp(dir: string): Promise<void> {
+    await this.mustRun(`mkdir -p ${shellQuote(dir)}`);
+  }
+
+  async exists(file: string): Promise<boolean> {
+    const res = await this.run(`test -e ${shellQuote(file)}`);
+    return res.exitCode === 0;
+  }
+
+  async stat(file: string): Promise<StatInfo> {
+    const out = await this.mustRun(
+      [
+        `f=${shellQuote(file)}`,
+        'if [ -d "$f" ]; then t=d; elif [ -f "$f" ]; then t=f; else t=o; fi',
+        "s=$(stat -c '%Y %s' \"$f\" 2>/dev/null) || s=$(stat -f '%m %z' \"$f\" 2>/dev/null) || exit 1",
+        `printf '%s %s' "$t" "$s"`,
+      ].join("\n"),
+    );
+    const m = /^([dfo]) (\d+) (\d+)$/.exec(out.toString("utf8").trim());
+    if (!m) throw new Error(`ssh ${this.label}: cannot stat ${file}`);
+    return {
+      mtimeMs: Number(m[2]) * 1000,
+      size: Number(m[3]),
+      isDir: m[1] === "d",
+      isFile: m[1] === "f",
+    };
+  }
+
+  async listDir(dir: string): Promise<DirEntry[]> {
+    const out = await this.mustRun(
+      [
+        `d=${shellQuote(dir)}`,
+        `[ -d "$d" ] || exit 1`,
+        'for f in "$d"/* "$d"/.[!.]*; do',
+        '  [ -e "$f" ] || continue',
+        '  b=${f##*/}',
+        '  if [ -d "$f" ]; then t=d; s=0',
+        '  elif [ -f "$f" ]; then t=f; s=$(wc -c < "$f" 2>/dev/null || printf 0)',
+        "  else t=o; s=0; fi",
+        `  printf '%s\\0%s\\0%s\\0' "$t" "$s" "$b"`,
+        "done",
+      ].join("\n"),
+    );
+    const parts = out.toString("utf8").split("\0");
+    const entries: DirEntry[] = [];
+    for (let i = 0; i + 2 < parts.length; i += 3) {
+      const type = parts[i] ?? "";
+      const size = Number(parts[i + 1] ?? "0") || 0;
+      const name = parts[i + 2] ?? "";
+      if (name === "") continue;
+      entries.push({
+        name,
+        path: nodePath.posix.join(dir, name),
+        dir: type === "d",
+        size: type === "f" ? size : 0,
+      });
+    }
+    entries.sort((a, b) => (a.dir === b.dir ? a.name.localeCompare(b.name) : a.dir ? -1 : 1));
+    return entries;
+  }
+
+  async *walk(root: string): AsyncGenerator<string> {
+    const skips = [...SKIP_DIR_NAMES].filter((n) => !n.startsWith("."));
+    const pruneNames = ["'.*'", ...skips.map((n) => shellQuote(n))].join(" -o -name ");
+    const out = await this.mustRun(
+      `find ${shellQuote(root)} -mindepth 1 \\( -type d \\( -name ${pruneNames} \\) \\) -prune -o -type f -print0`,
+      { timeoutMs: BATCH_TIMEOUT_MS },
+    );
+    for (const line of out.toString("utf8").split("\0")) {
+      if (line !== "") yield line;
+    }
+  }
+
+  async statMany(files: string[]): Promise<Map<string, StatInfo>> {
+    const stats = new Map<string, StatInfo>();
+    if (files.length === 0) return stats;
+    const out = await this.mustRun(
+      [
+        "while IFS= read -r f; do",
+        '  [ -n "$f" ] || continue',
+        "  s=$(stat -c '%Y %s' \"$f\" 2>/dev/null) || s=$(stat -f '%m %z' \"$f\" 2>/dev/null) || s=''",
+        '  [ -n "$s" ] || continue',
+        `  printf '%s\\t%s\\n' "$s" "$f"`,
+        "done",
+      ].join("\n"),
+      { input: `${files.join("\n")}\n`, timeoutMs: BATCH_TIMEOUT_MS },
+    );
+    for (const line of out.toString("utf8").split("\n")) {
+      const m = /^(\d+) (\d+)\t(.+)$/.exec(line);
+      if (!m) continue;
+      stats.set(m[3] ?? "", {
+        mtimeMs: Number(m[1]) * 1000,
+        size: Number(m[2]),
+        isDir: false,
+        isFile: true,
+      });
+    }
+    return stats;
+  }
+
+  async readMany(files: string[], maxBytes: number): Promise<Map<string, Buffer>> {
+    const outMap = new Map<string, Buffer>();
+    if (files.length === 0) return outMap;
+    const out = await this.mustRun(
+      [
+        "while IFS= read -r f; do",
+        '  [ -n "$f" ] || continue',
+        '  [ -f "$f" ] || continue',
+        `  printf '%s\\0' "$f"`,
+        `  head -c ${maxBytes} "$f" 2>/dev/null | base64 | tr -d '\\n'`,
+        "  printf '\\0'",
+        "done",
+      ].join("\n"),
+      { input: `${files.join("\n")}\n`, timeoutMs: BATCH_TIMEOUT_MS },
+    );
+    const parts = out.toString("utf8").split("\0");
+    for (let i = 0; i + 1 < parts.length; i += 2) {
+      const file = parts[i] ?? "";
+      if (file === "") continue;
+      const b64 = parts[i + 1] ?? "";
+      outMap.set(file, b64 === "" ? Buffer.alloc(0) : Buffer.from(b64, "base64"));
+    }
+    return outMap;
+  }
+
+  async home(): Promise<string> {
+    if (this.homeDir === "") {
+      const out = await this.mustRun(`printf '%s' "$HOME"`);
+      this.homeDir = out.toString("utf8").trim();
+    }
+    return this.homeDir;
+  }
+
+  async dispose(): Promise<void> {
+    /* ControlPersist closes the mux socket on its own */
+  }
+}

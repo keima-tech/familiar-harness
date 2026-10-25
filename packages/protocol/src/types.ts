@@ -81,6 +81,15 @@ export function messageAttachments(msg: ChatMessage): MessageAttachment[] {
   );
 }
 
+/** SSH proxy target: sessions whose tools run on another host over ssh — the
+ * remote needs no familiar installation, only a POSIX shell. */
+export interface SessionRemote {
+  host: string;
+  user?: string;
+  port?: number;
+  identityFile?: string;
+}
+
 export interface SessionRecord {
   id: string;
   title: string;
@@ -90,6 +99,8 @@ export interface SessionRecord {
   /** reasoning effort for models that support it: "low" | "medium" | "high"; null = provider default */
   effort?: string | null;
   cwd: string;
+  /** set when tools execute on a remote host over ssh (proxy mode) */
+  remote?: SessionRemote | null;
   createdAt: number;
   updatedAt: number;
 }

@@ -78,6 +78,9 @@ function sanitizeProfile(input, existing) {
   const port = Number.isInteger(portRaw) && portRaw > 0 && portRaw < 65536 ? portRaw : 22;
   const identityFile = clean(input.identityFile, 4096);
   const remoteBin = clean(input.remoteBin, 4096) || "familiar";
+  // serve: start `familiar serve` on the host over a tunnel (needs familiar there)
+  // proxy: nothing installed remotely — every tool call runs over ssh
+  const mode = input.mode === "proxy" ? "proxy" : "serve";
   const name = clean(input.name, 80) || `${user ? `${user}@` : ""}${host}`;
   const id = clean(existing?.id ?? input.id, 64) || crypto.randomUUID();
   return {
@@ -86,6 +89,7 @@ function sanitizeProfile(input, existing) {
     host,
     port,
     user,
+    ...(mode === "proxy" ? { mode } : {}),
     ...(identityFile ? { identityFile } : {}),
     remoteBin,
   };

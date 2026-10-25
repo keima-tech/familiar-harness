@@ -1,10 +1,13 @@
 import type { ToolSchema } from "@familiar/protocol";
 import type { ResolvedConfig } from "../config.js";
+import type { ExecBackend } from "../exec/index.js";
 import type { ApprovalAdapter } from "./permissions.js";
 
 export interface ToolContext {
   sessionId: string;
   cwd: string;
+  /** Where files/commands actually live: this machine or an ssh host. */
+  backend: ExecBackend;
   yolo: boolean;
   config: ResolvedConfig;
   approval: ApprovalAdapter;

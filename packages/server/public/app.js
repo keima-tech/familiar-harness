@@ -202,6 +202,10 @@ const STR = {
     "ns.connectFailed": "接続できませんでした: {0}",
     "ns.remoteCwd": "リモートの作業フォルダー (任意)",
     "ns.remoteHint": "接続後、リモート側のフォルダーを選べます。空欄ならホームディレクトリから始まります。",
+    "ns.serveBadge": "familiar サーバ",
+    "ns.proxyBadge": "SSH プロキシ",
+    "ns.proxyHint": "このフォルダーでリモートのセッションを作成します(~ はリモートのホームに展開)",
+    "ns.creating": "作成中…",
     "top.search": "トランスクリプト内検索 (Ctrl+F)",
     "top.sessionActions": "セッション操作",
     "top.sessions": "セッション一覧",
@@ -255,7 +259,10 @@ const STR = {
     "remote.current": "現在の接続",
     "remote.readOnly": "リモート接続の設定はローカル側でのみ変更できます。",
     "ssh.title": "SSH 接続",
-    "ssh.desc": "リモートで familiar serve を起動し、SSH トンネル経由でそのマシンのツールとフォルダーを使います。認証は鍵または ssh-agent です。",
+    "ssh.desc": "SSH ホストを登録します。familiar サーバ方式はリモートで familiar serve を起動してトンネル接続、SSH プロキシ方式はリモートに何も入れずツール呼び出しだけを ssh で実行します。認証は鍵または ssh-agent です。",
+    "ssh.mode": "接続方式",
+    "ssh.modeServe": "familiar サーバを起動 (要インストール)",
+    "ssh.modeProxy": "SSH プロキシ (インストール不要)",
     "ssh.name": "表示名",
     "ssh.host": "ホスト (例: build.example.com)",
     "ssh.user": "ユーザー (任意)",
@@ -318,6 +325,10 @@ const STR = {
     "toast.dropAttach": "ドロップで添付しました: {0}",
     "toast.attachFailed": "添付ファイルのパスを取得できませんでした: {0}",
     "attach.remotePath": "SSH 接続中はローカルのファイルパスを参照できません(画像はそのまま添付できます)",
+    "attach.uploaded": "アップロードしました: {0}",
+    "attach.uploadFailed": "アップロードに失敗しました: {0}",
+    "attach.remoteNoSession": "先にセッションを作成してください",
+    "attach.fileTooLarge": "ファイルが大きすぎます (最大 {0}MB): {1}",
     "toast.stopRequested": "停止を要求しました…",
     "toast.effortSet": "エフォート: {0}",
     "toast.effortNext": "エフォート: {0} (次のセッションから適用)",
@@ -482,6 +493,7 @@ const STR = {
     "todo.done": "完了",
     "tool.diff": "変更差分",
     "toast.cwdSet": "作業フォルダー: {0}",
+    "toast.cwdAbsolute": "リモートのフォルダーは絶対パスで指定してください",
     "toast.cwdFailed": "フォルダーを変更できませんでした: {0}",
     "prov.badUrl": "エンドポイントは http:// か https:// で始めてください",
     "prov.default": "既定",
@@ -617,6 +629,10 @@ const STR = {
     "ns.connectFailed": "Could not connect: {0}",
     "ns.remoteCwd": "remote working folder (optional)",
     "ns.remoteHint": "You can pick a remote folder after connecting. Leave empty to start in the remote home directory.",
+    "ns.serveBadge": "familiar server",
+    "ns.proxyBadge": "SSH proxy",
+    "ns.proxyHint": "create a remote session in this folder (~ expands to the remote home)",
+    "ns.creating": "Creating…",
     "top.search": "search in transcript (Ctrl+F)",
     "top.sessionActions": "session actions",
     "top.sessions": "sessions",
@@ -670,7 +686,10 @@ const STR = {
     "remote.current": "Current connection",
     "remote.readOnly": "Remote connection settings can only be changed on the local machine.",
     "ssh.title": "SSH connections",
-    "ssh.desc": "Starts `familiar serve` on a remote machine and uses that machine's tools and folders through an SSH tunnel. Authentication uses keys or ssh-agent.",
+    "ssh.desc": "Register SSH hosts. The familiar-server mode starts `familiar serve` on the host through a tunnel; the SSH-proxy mode installs nothing remotely and runs each tool call over ssh. Authentication uses keys or ssh-agent.",
+    "ssh.mode": "Connection mode",
+    "ssh.modeServe": "run familiar serve (install required)",
+    "ssh.modeProxy": "SSH proxy (nothing to install)",
     "ssh.name": "Display name",
     "ssh.host": "Host (e.g. build.example.com)",
     "ssh.user": "User (optional)",
@@ -733,6 +752,10 @@ const STR = {
     "toast.dropAttach": "attached via drop: {0}",
     "toast.attachFailed": "could not resolve a file path: {0}",
     "attach.remotePath": "Local file paths are not available while connected over SSH (images still attach normally)",
+    "attach.uploaded": "Uploaded: {0}",
+    "attach.uploadFailed": "Upload failed: {0}",
+    "attach.remoteNoSession": "open a session first",
+    "attach.fileTooLarge": "file too large (max {0}MB): {1}",
     "toast.stopRequested": "stop requested…",
     "toast.effortSet": "effort: {0}",
     "toast.effortNext": "effort: {0} (applies from the next session)",
@@ -897,6 +920,7 @@ const STR = {
     "todo.done": "done",
     "tool.diff": "changes",
     "toast.cwdSet": "working folder: {0}",
+    "toast.cwdAbsolute": "remote folders need an absolute path",
     "toast.cwdFailed": "could not change folder: {0}",
     "prov.badUrl": "endpoint must start with http:// or https://",
     "prov.default": "default",
@@ -1790,6 +1814,9 @@ async function openSession(id) {
   const bits = [s.provider];
   if (s.model) bits.push(s.model);
   if (s.profile) bits.push(`profile: ${s.profile}`);
+  if (s.remote) {
+    bits.push(`ssh: ${s.remote.user ? `${s.remote.user}@` : ""}${s.remote.host}`);
+  }
   $("#session-meta").textContent = bits.join(" · ");
   renderSessionCwd(s);
   renderModelChip();
@@ -1857,7 +1884,7 @@ async function refreshCwdSuggest() {
   const { dir, prefix } = cwdQueryParts($("#cwd-input").value);
   let res;
   try {
-    res = await rpc("fs.dirs", { path: dir });
+    res = await rpc("fs.dirs", { path: dir, ...(state.sessionId ? { session: state.sessionId } : {}) });
   } catch {
     box.innerHTML = "";
     return;
@@ -1887,10 +1914,18 @@ async function refreshCwdSuggest() {
 
 async function confirmCwd() {
   const s = state.currentSession;
-  const v = $("#cwd-input").value.trim();
+  let v = $("#cwd-input").value.trim();
   const errBox = $("#cwd-overlay .form-error");
   if (!s || v === "") return;
   try {
+    if (s.remote) {
+      // remote folders live on the ssh host: expand ~ there and require an
+      // absolute path (local path math must never touch it)
+      const info = await rpc("fs.dirs", { path: v, session: s.id });
+      if (v === "~") v = info.home;
+      else if (v.startsWith("~/")) v = `${info.home}${v.slice(1)}`;
+      if (!v.startsWith("/")) throw new Error(t("toast.cwdAbsolute"));
+    }
     const updated = await rpc("session.update", { id: s.id, cwd: v });
     state.currentSession = updated;
     renderSessionCwd(updated);
@@ -2178,7 +2213,11 @@ async function refreshFilePop(token) {
   const list = $("#cmd-list");
   let res;
   try {
-    res = await rpc("fs.suggest", { prefix: token, cwd: state.currentSession?.cwd ?? "" });
+    res = await rpc("fs.suggest", {
+      prefix: token,
+      cwd: state.currentSession?.cwd ?? "",
+      ...(state.sessionId ? { session: state.sessionId } : {}),
+    });
   } catch {
     $("#cmd-pop").hidden = true;
     return;
@@ -3173,7 +3212,7 @@ async function renderFilesTab() {
   tree.appendChild(list);
   let res;
   try {
-    res = await rpc("fs.list", { path: root });
+    res = await rpc("fs.list", { path: root, ...(state.sessionId ? { session: state.sessionId } : {}) });
   } catch (err) {
     list.innerHTML = `<div class="files-note">${esc(t("files.loadFailed", err.message))}</div>`;
     return;
@@ -3193,7 +3232,7 @@ async function filesExpand(dirPath, childBox, depth) {
   childBox.innerHTML = `<div class="files-note">${esc(t("files.loading"))}</div>`;
   let res;
   try {
-    res = await rpc("fs.list", { path: dirPath });
+    res = await rpc("fs.list", { path: dirPath, ...(state.sessionId ? { session: state.sessionId } : {}) });
   } catch (err) {
     childBox.innerHTML = `<div class="files-note">${esc(t("files.loadFailed", err.message))}</div>`;
     return;
@@ -3254,7 +3293,7 @@ async function openFileViewer(filePath) {
   view.hidden = false;
   let res;
   try {
-    res = await rpc("fs.preview", { path: filePath });
+    res = await rpc("fs.preview", { path: filePath, ...(state.sessionId ? { session: state.sessionId } : {}) });
   } catch (err) {
     view.innerHTML = `<div class="files-note">${esc(t("files.loadFailed", err.message))}</div>`;
     return;
@@ -4336,6 +4375,24 @@ function sshField(label, value, placeholder = "") {
   return { wrap, input };
 }
 
+function sshSelect(label, value, options) {
+  const wrap = document.createElement("label");
+  wrap.className = "ssh-field";
+  const span = document.createElement("span");
+  span.textContent = label;
+  const sel = document.createElement("select");
+  sel.className = "select-control";
+  for (const [text, val] of options) {
+    const opt = document.createElement("option");
+    opt.value = val;
+    opt.textContent = text;
+    if (val === value) opt.selected = true;
+    sel.appendChild(opt);
+  }
+  wrap.append(span, sel);
+  return { wrap, input: sel };
+}
+
 function sshActionRow(buttons) {
   const row = document.createElement("div");
   row.className = "conn-actions";
@@ -4407,7 +4464,8 @@ async function renderConnectionsSection(content, stale = () => false) {
   for (const pr of connState.connections) {
     const row = document.createElement("div");
     row.className = "ssh-row";
-    row.innerHTML = `<div class="ssh-main"><b>${esc(pr.name)}</b><small>${esc(sshProfileLabel(pr))}</small></div>`;
+    const modeBadge = pr.mode === "proxy" ? t("ns.proxyBadge") : t("ns.serveBadge");
+    row.innerHTML = `<div class="ssh-main"><b>${esc(pr.name)}</b><small>${esc(sshProfileLabel(pr))} · ${esc(modeBadge)}</small></div>`;
     const test = document.createElement("button");
     test.type = "button";
     test.className = "ghost";
@@ -4456,7 +4514,9 @@ async function renderConnectionsSection(content, stale = () => false) {
         toast(String(err?.message ?? err), "err");
       }
     });
-    row.appendChild(sshActionRow([connect, test, edit, del]));
+    row.appendChild(
+      sshActionRow(pr.mode === "proxy" ? [test, edit, del] : [connect, test, edit, del]),
+    );
     list.appendChild(row);
   }
   list.appendChild(result);
@@ -4468,9 +4528,13 @@ async function renderConnectionsSection(content, stale = () => false) {
   const host = sshField(t("ssh.host"), editing?.host ?? "", "build.example.com");
   const user = sshField(t("ssh.user"), editing?.user ?? "");
   const port = sshField(t("ssh.port"), editing?.port ?? 22);
+  const mode = sshSelect(t("ssh.mode"), editing?.mode === "proxy" ? "proxy" : "serve", [
+    [t("ssh.modeServe"), "serve"],
+    [t("ssh.modeProxy"), "proxy"],
+  ]);
   const key = sshField(t("ssh.key"), editing?.identityFile ?? "", "~/.ssh/id_ed25519");
   const bin = sshField(t("ssh.remoteBin"), editing?.remoteBin ?? "", "familiar");
-  form.append(name.wrap, host.wrap, user.wrap, port.wrap, key.wrap, bin.wrap);
+  form.append(name.wrap, host.wrap, user.wrap, port.wrap, mode.wrap, key.wrap, bin.wrap);
 
   const fresult = document.createElement("span");
   fresult.className = "conn-result";
@@ -4480,6 +4544,7 @@ async function renderConnectionsSection(content, stale = () => false) {
     host: host.input.value.trim(),
     user: user.input.value.trim(),
     port: Number.parseInt(port.input.value, 10) || 22,
+    mode: mode.input.value,
     identityFile: key.input.value.trim(),
     remoteBin: bin.input.value.trim() || "familiar",
   });
@@ -5147,6 +5212,30 @@ function sshProfileLabel(p) {
   return `${user}${p.host}${port}`;
 }
 
+/** RPC `ssh` parameter for a stored profile (no secrets in it). */
+function sshParams(p) {
+  return {
+    host: p.host,
+    ...(p.user ? { user: p.user } : {}),
+    ...(p.port && p.port !== 22 ? { port: p.port } : {}),
+    ...(p.identityFile ? { identityFile: p.identityFile } : {}),
+  };
+}
+
+/** True when the current session's tools do not run on this machine. */
+function remoteToolsActive() {
+  return remoteBoot.isRemote || !!state.currentSession?.remote;
+}
+
+function bytesToBase64(bytes) {
+  let bin = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(bin);
+}
+
 function showConnBanner(text) {
   $("#conn-banner-text").textContent = text;
   $("#conn-banner").hidden = false;
@@ -5262,7 +5351,8 @@ function renderNsTargets() {
   };
   row("local", "💻", t("ns.localMachine"), t("ns.localHint"));
   for (const p of connState.connections) {
-    row(p.id, "🖥", p.name, sshProfileLabel(p));
+    const badge = p.mode === "proxy" ? t("ns.proxyBadge") : t("ns.serveBadge");
+    row(p.id, "🖥", p.name, `${sshProfileLabel(p)} · ${badge}`);
   }
   const add = document.createElement("button");
   add.type = "button";
@@ -5283,15 +5373,72 @@ function selectNsTarget(id, opts = {}) {
   if (id !== "local" && !connState.connections.some((p) => p.id === id)) id = "local";
   nsTarget = id;
   const remote = id !== "local";
+  const profile = connState.connections.find((p) => p.id === id);
+  const proxy = profile?.mode === "proxy";
   $("#ns-local-picker").hidden = remote;
   $("#ns-remote-picker").hidden = !remote;
-  const profile = connState.connections.find((p) => p.id === id);
   $("#ns-remote-name").textContent = profile ? sshProfileLabel(profile) : "";
-  $("#ns-create").textContent = t(remote ? "ns.connect" : "ns.create");
+  $("#ns-remote-list").hidden = !proxy;
+  $("#ns-remote-hint").textContent = t(proxy ? "ns.proxyHint" : "ns.remoteHint");
+  $("#ns-create").textContent = t(remote ? (proxy ? "ns.create" : "ns.connect") : "ns.create");
   for (const el of $("#ns-targets").querySelectorAll("[data-target]")) {
     el.classList.toggle("selected", el.dataset.target === id);
   }
   if (!opts.silent) (remote ? $("#ns-remote-cwd") : $("#ns-folder-input")).focus();
+  if (proxy) {
+    $("#ns-remote-cwd").value = "";
+    void renderNsRemoteDirs();
+  } else {
+    $("#ns-remote-list").innerHTML = "";
+  }
+}
+
+/** Browse the remote host's folders for a proxy target (fs.dirs over ssh). */
+let nsRemoteTimer = null;
+
+async function renderNsRemoteDirs() {
+  const box = $("#ns-remote-list");
+  const profile = connState.connections.find((p) => p.id === nsTarget);
+  if (!profile || profile.mode !== "proxy" || $("#new-session-overlay").hidden) return;
+  const ssh = sshParams(profile);
+  const typed = $("#ns-remote-cwd").value.trim();
+  box.innerHTML = `<div class="mp-note">${esc(t("skills.loading"))}</div>`;
+  let res;
+  try {
+    res = await rpc("fs.dirs", { path: typed, ssh });
+  } catch {
+    box.innerHTML = `<div class="mp-note">${esc(t("ns.noMatch"))}</div>`;
+    return;
+  }
+  if (nsTarget !== profile.id || $("#new-session-overlay").hidden) return;
+  const home = typeof res.home === "string" ? res.home : "";
+  const dirs = (res.dirs ?? []).slice(0, 60);
+  box.innerHTML = "";
+  if (home && home !== typed && baseName(home)) {
+    box.appendChild(nsRemoteRow("🏠", baseName(home), home));
+  }
+  for (const dir of dirs) {
+    box.appendChild(nsRemoteRow("📁", baseName(dir), dir));
+  }
+  if (box.childElementCount === 0) {
+    box.innerHTML = `<div class="mp-note">${esc(t("ns.noMatch"))}</div>`;
+  }
+}
+
+function nsRemoteRow(icon, name, value) {
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = "ns-row";
+  row.innerHTML =
+    `<span class="ns-icon">${icon}</span>` +
+    `<span class="ns-text"><span class="ns-name">${esc(name)}</span>` +
+    `<span class="ns-path">${esc(value)}</span></span>`;
+  row.addEventListener("click", () => {
+    $("#ns-remote-cwd").value = value.endsWith("/") ? value : `${value}/`;
+    void renderNsRemoteDirs();
+    $("#ns-remote-cwd").focus();
+  });
+  return row;
 }
 
 /** Recent working folders from the session history (deduped, newest first). */
@@ -5385,24 +5532,49 @@ async function createSessionFromModal() {
     errBox.hidden = false;
   };
   if (nsTarget !== "local") {
-    // SSH target: hand the profile to the shell, which opens the tunnel and
-    // loads the remote UI; the remote dialog opens pre-filled with the cwd.
+    // SSH target, two flavors:
+    //  - familiar server: the shell starts `familiar serve` over a tunnel and loads
+    //    the remote UI (the dialog there pre-fills the cwd)
+    //  - SSH proxy: the session stays local, but every tool call runs on the
+    //    remote host over ssh (nothing installed remotely)
     const api = connApi();
-    if (!api || typeof api.connectProfile !== "function") {
+    const profile = connState.connections.find((p) => p.id === nsTarget);
+    if (!profile) {
       showErr(t("ssh.desktopOnly"));
       return;
     }
     const connectBtn = $("#ns-create");
     errBox.hidden = true;
     connectBtn.disabled = true;
-    connectBtn.textContent = t("ns.connecting");
     try {
+      if (profile.mode === "proxy") {
+        connectBtn.textContent = t("ns.creating");
+        const ssh = sshParams(profile);
+        const info = await rpc("fs.dirs", { path: "", ssh });
+        let cwd = $("#ns-remote-cwd").value.trim();
+        if (cwd === "" || cwd === "~") cwd = info.home;
+        else if (cwd.startsWith("~/")) cwd = `${info.home}${cwd.slice(1)}`;
+        const created = await rpc("session.create", { cwd, ssh });
+        state.sessionId = created.id;
+        closeNewSessionModal();
+        await refreshSessions();
+        await openSession(created.id);
+        $("#input").focus();
+        return;
+      }
+      if (!api || typeof api.connectProfile !== "function") {
+        showErr(t("ssh.desktopOnly"));
+        connectBtn.disabled = false;
+        connectBtn.textContent = t("ns.connect");
+        return;
+      }
+      connectBtn.textContent = t("ns.connecting");
       await api.connectProfile(nsTarget, { newSession: true, cwd: $("#ns-remote-cwd").value.trim() });
       // the window navigates to the remote UI; keep the button disabled
     } catch (err) {
       showErr(t("ns.connectFailed", err?.message ?? err));
       connectBtn.disabled = false;
-      connectBtn.textContent = t("ns.connect");
+      connectBtn.textContent = t(profile.mode === "proxy" ? "ns.create" : "ns.connect");
     }
     return;
   }
@@ -5533,6 +5705,7 @@ function resolveFilePath(f) {
 const ATTACH_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const ATTACH_MAX = 4;             // images per message (mirrors the server cap)
 const ATTACH_MAX_BYTES = 5 * 1024 * 1024;
+const ATTACH_UPLOAD_MAX_BYTES = 15 * 1024 * 1024; // non-image upload cap (server caps at 20MB)
 
 /** Read one image file into a { media_type, data, name } attachment. */
 function fileToAttachment(f) {
@@ -5583,9 +5756,30 @@ async function attachFiles(fileList) {
       toast(t("toast.attachFailed", f.name), "err");
       continue;
     }
-    if (remoteBoot.isRemote) {
-      // the tools run on the SSH host — a local path would not resolve there
-      toast(t("attach.remotePath"), "info");
+    if (remoteToolsActive()) {
+      // tools run on the SSH host — upload the bytes there and reference the
+      // remote path (proxy and familiar-server sessions alike)
+      if (!state.sessionId) {
+        toast(t("attach.remoteNoSession"), "err");
+        continue;
+      }
+      if (f.size > ATTACH_UPLOAD_MAX_BYTES) {
+        toast(t("attach.fileTooLarge", String(Math.floor(ATTACH_UPLOAD_MAX_BYTES / 1024 / 1024)), f.name), "err");
+        continue;
+      }
+      try {
+        const bytes = new Uint8Array(await f.arrayBuffer());
+        const res = await rpc("fs.upload", {
+          session: state.sessionId,
+          name: f.name,
+          data: bytesToBase64(bytes),
+        });
+        insertIntoComposer(`@${res.path} `);
+        refs.push(res.path);
+        toast(t("attach.uploaded", res.path), "ok");
+      } catch (err) {
+        toast(t("attach.uploadFailed", err?.message ?? err), "err");
+      }
       continue;
     }
     insertIntoComposer(`@${ref} `);
@@ -5687,6 +5881,10 @@ function boot() {
       ev.preventDefault();
       void createSessionFromModal();
     }
+  });
+  $("#ns-remote-cwd").addEventListener("input", () => {
+    clearTimeout(nsRemoteTimer);
+    nsRemoteTimer = setTimeout(() => void renderNsRemoteDirs(), 250);
   });
   $("#ns-browse").addEventListener("click", async () => {
     try {

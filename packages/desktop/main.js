@@ -359,6 +359,11 @@ ipcMain.handle("conn:connect", async (ev, input) => {
   const id = String(input?.id ?? "");
   const profile = getProfile(id);
   if (!profile) throw new Error("connection profile not found");
+  if (profile.mode === "proxy") {
+    // proxy profiles create a local session whose tools run over ssh; there is
+    // no remote server to tunnel to
+    throw new Error("SSH proxy connections are created from the new-session dialog");
+  }
   if (activeConn) await disconnectConnection();
   const conn = new SshConnection(profile);
   try {

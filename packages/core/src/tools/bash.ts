@@ -1,31 +1,13 @@
-import { spawn } from "node:child_process";
-import path from "node:path";
 import type { Tool } from "./registry.js";
-import type { ToolContext, ToolOutput } from "./registry.js";
-import { approveOrDeny, type ApprovalRequest } from "./permissions.js";
+import { approveOrDeny } from "./permissions.js";
+import { resolveShellCommand } from "../exec/index.js";
 
-const OUTPUT_CAP = 256 * 1024; // keep head 128KB + tail 128KB
-const HEAD_KEEP = 128 * 1024;
-const TAIL_KEEP = 128 * 1024;
+/** Windows-first shell resolution is re-exported for compatibility; the
+ * actual execution goes through the session's ExecBackend (local or ssh). */
+export { resolveShellCommand };
+export type { ResolvedShellCommand } from "../exec/local.js";
+
 const DEFAULT_TIMEOUT_MS = 30_000;
-
-export interface ResolvedShellCommand {
-  file: string;
-  args: string[];
-  shellName: string;
-}
-
-/** Windows-first shell resolution (AGENTS.md: go through this, never spawn raw). */
-export function resolveShellCommand(command: string): ResolvedShellCommand {
-  if (process.platform === "win32") {
-    return {
-      file: "powershell.exe",
-      args: ["-NoProfile", "-NonInteractive", "-Command", command],
-      shellName: "powershell",
-    };
-  }
-  return { file: "bash", args: ["-c", command], shellName: "bash" };
-}
 
 export function createBashTool(): Tool {
   return {
@@ -52,10 +34,12 @@ export function createBashTool(): Tool {
       if (Number.isFinite(args.timeout_ms) && Number(args.timeout_ms) > 0) {
         timeoutMs = Math.min(Number(args.timeout_ms), ctx.config.permissions.bash.max_timeout_ms);
       }
+      const p = ctx.backend.path;
       let cwd = ctx.cwd;
       if (typeof args.cwd === "string" && args.cwd !== "") {
-        cwd = path.isAbsolute(args.cwd) ? path.normalize(args.cwd) : path.resolve(ctx.cwd, args.cwd);
-        if (cwd !== ctx.cwd && !cwd.startsWith(ctx.cwd + path.sep)) {
+        cwd = p.isAbsolute(args.cwd) ? p.normalize(args.cwd) : p.resolve(ctx.cwd, args.cwd);
+        const inside = cwd === ctx.cwd || cwd.startsWith(ctx.cwd.endsWith(p.sep) ? ctx.cwd : ctx.cwd + p.sep);
+        if (!inside) {
           return { content: `cwd must stay inside ${ctx.cwd}`, isError: true };
         }
       }
@@ -77,86 +61,8 @@ export function createBashTool(): Tool {
         };
       }
 
-      const shell = resolveShellCommand(command);
-      const result = await runShell(shell.file, shell.args, cwd, timeoutMs);
+      const result = await ctx.backend.exec(command, { cwd, timeoutMs });
       return { content: result.output, isError: result.exitCode !== 0 };
     },
   };
-}
-
-interface ShellRunResult {
-  exitCode: number;
-  output: string;
-}
-
-function runShell(
-  file: string,
-  args: string[],
-  cwd: string,
-  timeoutMs: number,
-): Promise<ShellRunResult> {
-  return new Promise((resolve) => {
-    const child = spawn(file, args, { cwd, env: { ...process.env } });
-
-    let head = Buffer.alloc(0);
-    let tail = Buffer.alloc(0);
-    let overflowed = false;
-
-    const append = (chunk: Buffer) => {
-      if (!overflowed) {
-        head = Buffer.concat([head, chunk]);
-      } else {
-        tail = Buffer.concat([tail, chunk]);
-      }
-      if (!overflowed && head.length > OUTPUT_CAP) {
-        overflowed = true;
-        tail = head.subarray(HEAD_KEEP);
-        head = head.subarray(0, HEAD_KEEP);
-      }
-      if (overflowed && tail.length > TAIL_KEEP) {
-        tail = tail.subarray(tail.length - TAIL_KEEP);
-      }
-    };
-
-    child.stdout.on("data", (d: Buffer) => append(d));
-    child.stderr.on("data", (d: Buffer) => append(d));
-
-    let settled = false;
-    const finalize = (exitCode: number, timedOut: boolean) => {
-      if (settled) return;
-      settled = true;
-      let output = head.toString("utf8");
-      if (overflowed) {
-        output += `\n[output truncated]${tail.length > 0 ? "\n" + tail.toString("utf8") : ""}`;
-      }
-      if (timedOut) output += `\n[familiar: command timed out after ${timeoutMs}ms]`;
-      resolve({ exitCode, output: output.trimEnd() || "(no output)" });
-    };
-
-    const timer = setTimeout(() => {
-      try {
-        child.kill("SIGTERM");
-        setTimeout(() => {
-          try {
-            child.kill("SIGKILL");
-          } catch {
-            /* already dead */
-          }
-        }, 3000);
-      } catch {
-        /* already dead */
-      }
-      finalize(-1, true);
-    }, timeoutMs);
-
-    child.on("error", (err) => {
-      clearTimeout(timer);
-      settled = true;
-      resolve({ exitCode: -1, output: `failed to spawn ${file}: ${err.message}` });
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      finalize(code ?? -1, false);
-    });
-  });
 }

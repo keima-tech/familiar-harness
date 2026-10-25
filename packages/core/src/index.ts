@@ -1,6 +1,7 @@
 export * from "./agent/loop.js";
 export * from "./agent/prompts.js";
 export * from "./config.js";
+export * from "./exec/index.js";
 export * from "./logger.js";
 export * from "./paths.js";
 export * from "./providers/base.js";

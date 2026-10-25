@@ -715,3 +715,38 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   (main の stdout ログでアサート)・承認 dock 描画+緊急通知・
   turn.end イベント経路の通知。xvfb ではウィンドウにフォーカスがある
   ため非緊急通知はフォーカスゲートで抑制される点も確認(仕様どおり)。
+
+## v0.1.0 の実装メモ㊱(2026-10-26、SSH 接続先でセッションを実行)
+
+- **デスクトップの SSH 接続先**: 「設定 → 接続」でホスト/ユーザー/ポート/
+  秘密鍵ファイル/リモート familiar パスを登録(`~/.familiar/desktop.json` 0600・
+  秘密情報なし)。新規セッションモーダルに「実行先」リスト(このマシン +
+  各プロファイル + 追加ショートカット)を追加。SSH を選ぶとセッションは
+  リモートで実行され、ウィンドウごとリモート UI へ切り替わる。
+- **接続方式(方式 A)**: 1 本目の SSH で
+  `familiar serve --port 0 --bind 127.0.0.1 --print-ready --token-file <tmp>` を
+  起動。トークンは desktop が生成し **SSH の stdin 経由**でリモートの 0600
+  一時ファイルへ書く(argv/環境変数/ログ/プロファイルに残らない)。ready 行
+  (`FAMILIAR_READY {json}`)から実ポートを得て、2 本目の `ssh -N -L` でローカルの
+  空きポートをリモート loopback へ転送。`BatchMode=yes`(鍵/ssh-agent のみ)、
+  `StrictHostKeyChecking=yes`、`ExitOnForwardFailure=yes`。リモートは
+  POSIX シェル(Linux/macOS)前提。
+- **引き継ぎ**: 切替 URL は `?token=…&remote=1&conn=<id>&host=…&new=1&cwd=…`。
+  リモート UI は新規セッションダイアログを cwd 付きで自動オープン(空欄時は
+  リモート home)。`session.create` は `~` を**サーバ側**ホームへ展開。
+  `/healthz` に `hostname` / `platform` / `home` を追加。
+- **セキュリティ**: preload の接続系 IPC はローカル origin のみ
+  (`conn:save/delete/connect/test`、ネイティブピッカー、`shell:openPath`、
+  更新適用)。リモート UI に許すのは `conn:list`(現在の接続のみ・他ホストは
+  非公開)と `conn:disconnect`(ローカルへ戻る)。ナビゲーション/リダイレクトは
+  信頼 origin に固定し、他 origin はブラウザへ渡す。
+- **UI**: トップバーにリモートバッジ(`SSH: host`)、切断時バナー+
+  「ローカルに戻る」。リモート時はネイティブフォルダ選択・「外部アプリで開く」・
+  更新チェック・非画像 `@path` 添付を無効化(画像添付は可)。リモートの接続設定は
+  読み取り専用。i18n は JA/EN 両対応(EN モード CJK ゼロ)。
+- **検証**: `packages/desktop/scripts/ssh-e2e.mjs`(`npm run -w packages/desktop
+  e2e:ssh`)— 偽 ssh(`FAMILIAR_SSH_BIN`。`-L` を実 TCP 転送、リモートコマンドを
+  ローカル実行)で sshd 不要。25 項目: 設定フォーム保存・desktop.json 0600・
+  実行先リスト・接続→リモート UI 切替・cwd プリフィル・リモートでの
+  セッション作成と write ツールの着地・state.db の分離・origin ガード 3 種・
+  ローカル復帰・一時ディレクトリ掃除・EN 文字列。typecheck / smoke も通過。

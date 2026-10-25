@@ -12,10 +12,16 @@ const http = require("node:http");
 const https = require("node:https");
 const os = require("node:os");
 
+/** Test/dev override: FAMILIAR_PORTS=46310,46311 + FAMILIAR_SPAWN_PORT=46310 keeps
+ * automated runs off the default 46210 (they would fight a real serve). */
+const envPorts = (process.env.FAMILIAR_PORTS ?? "")
+  .split(",")
+  .map((p) => Number.parseInt(p, 10))
+  .filter((p) => Number.isInteger(p) && p > 0 && p < 65536);
 const CFG = {
-  ports: [46210, 46211, 46212], // try in order; first free lives
+  ports: envPorts.length > 0 ? envPorts : [46210, 46211, 46212], // try in order; first free lives
   healthTimeoutMs: 400,
-  spawnPort: 46210,
+  spawnPort: Number.parseInt(process.env.FAMILIAR_SPAWN_PORT ?? "", 10) || envPorts[0] || 46210,
 };
 
 let mainWindow = null;

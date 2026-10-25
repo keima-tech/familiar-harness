@@ -1,8 +1,9 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
 import { log } from "../logger.js";
+import { sshStdioSpec, type StdioSpec } from "../exec/ssh.js";
 import { resolveShellCommand } from "../tools/bash.js";
-import type { JsonSchemaObject } from "@familiar/protocol";
+import type { JsonSchemaObject, SessionRemote } from "@familiar/protocol";
 import type { McpServerConfig, ResolvedConfig } from "../config.js";
 import type { Tool } from "../tools/registry.js";
 import type { ToolContext, ToolOutput } from "../tools/registry.js";
@@ -42,6 +43,8 @@ export class McpClient {
   constructor(
     readonly name: string,
     private readonly cfg: McpServerConfig,
+    /** when set, the server runs on an SSH host instead of this machine */
+    private readonly spawnSpec?: StdioSpec,
   ) {}
 
   get state(): McpServerState | "stopped" {
@@ -54,16 +57,25 @@ export class McpClient {
   /** Spawn the server and complete the MCP initialize handshake. */
   private ensureStarted(): void {
     if (this.process) return;
-    const line = [this.cfg.command, ...(this.cfg.args ?? [])].join(" ");
-    if (line.trim() === "") throw new Error("mcp server has empty command");
-    // Repo policy: never spawn a raw command — go through resolveShellCommand
-    // (bash on Linux, PowerShell on Windows).
-    const shell = resolveShellCommand(line);
-    const child = spawn(shell.file, shell.args, {
-      cwd: this.cfg.cwd ?? process.cwd(),
-      env: { ...process.env, ...(this.cfg.env ?? {}) },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    let child: ChildProcess;
+    if (this.spawnSpec) {
+      // Proxy session: the "child" is the ssh client; the MCP server process
+      // lives on the remote host with its stdio piped through.
+      child = spawn(this.spawnSpec.file, this.spawnSpec.args, {
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } else {
+      const line = [this.cfg.command, ...(this.cfg.args ?? [])].join(" ");
+      if (line.trim() === "") throw new Error("mcp server has empty command");
+      // Repo policy: never spawn a raw command — go through resolveShellCommand
+      // (bash on Linux, PowerShell on Windows).
+      const shell = resolveShellCommand(line);
+      child = spawn(shell.file, shell.args, {
+        cwd: this.cfg.cwd ?? process.cwd(),
+        env: { ...process.env, ...(this.cfg.env ?? {}) },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    }
     // MCP servers must not keep a CLI process alive past its work; the exit
     // cleanup in the server layer reaps them when --yolo runs finish.
     child.unref?.();
@@ -105,6 +117,13 @@ export class McpClient {
       for (const [, p] of this.pending) p.reject(new Error(`mcp ${this.name}: server exited`));
       this.pending.clear();
     });
+    // A server whose command does not exist makes stdin writes fail with
+    // EPIPE; without this listener node would crash the whole host process.
+    child.stdin?.on("error", (err) => {
+      this.lastError = err.message;
+      for (const [, p] of this.pending) p.reject(new Error(`mcp ${this.name}: ${err.message}`));
+      this.pending.clear();
+    });
     this.process = child;
   }
 
@@ -112,7 +131,14 @@ export class McpClient {
     this.ensureStarted();
     const id = this.nextId++;
     const msg = JSON.stringify({ jsonrpc: "2.0", id, method, ...(params === undefined ? {} : { params }) });
-    this.process!.stdin!.write(`${msg}\n`);
+    try {
+      if (!this.process!.stdin?.writable) throw new Error("stdin is not writable");
+      this.process!.stdin.write(`${msg}\n`);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      this.lastError = detail;
+      return Promise.reject(new Error(`mcp ${this.name}: ${detail}`));
+    }
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
@@ -192,10 +218,20 @@ export class McpHub {
   private readonly clients = new Map<string, McpClient>();
   private discovery?: Promise<void>;
 
-  constructor(private readonly cfg: ResolvedConfig) {
+  constructor(private readonly cfg: ResolvedConfig, opts: { remote?: SessionRemote } = {}) {
     for (const [name, serverCfg] of Object.entries(cfg.mcp?.servers ?? {})) {
       if (serverCfg.disabled === true) continue;
-      this.clients.set(name, new McpClient(name, serverCfg));
+      let spec: StdioSpec | undefined;
+      if (opts.remote) {
+        const rc = serverCfg.remote ?? {};
+        const cwd = rc.cwd ?? serverCfg.cwd;
+        const env = rc.env ?? serverCfg.env;
+        spec = sshStdioSpec(opts.remote, rc.command ?? serverCfg.command, rc.args ?? serverCfg.args ?? [], {
+          ...(cwd ? { cwd } : {}),
+          ...(env ? { env } : {}),
+        });
+      }
+      this.clients.set(name, new McpClient(name, serverCfg, spec));
     }
   }
 

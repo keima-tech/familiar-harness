@@ -76,11 +76,21 @@ export interface CuratorConfig {
 }
 
 /** M5: MCP stdio server connection (one child process per server). */
+/** Overrides used when the server runs on an SSH host (proxy sessions). */
+export interface RemoteSpawnConfig {
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+}
+
 export interface McpServerConfig {
   command: string;
   args?: string[];
   env?: Record<string, string>;
   cwd?: string;
+  /** run a different command/args/env when spawning on an SSH host */
+  remote?: RemoteSpawnConfig;
   /** per-request timeout (ms); default 30000 */
   timeout_ms?: number;
   /** read-only MCP tools stay usable in plan mode and skip approval */
@@ -121,6 +131,8 @@ export interface LspServerConfig {
   extensions: string[];
   /** diagnostics wait per request; default 5000 */
   timeout_ms?: number;
+  /** run a different command/args when the language server runs on an SSH host */
+  remote?: RemoteSpawnConfig;
   disabled?: boolean;
 }
 
@@ -168,6 +180,8 @@ export interface ResolvedConfig {
   cron: CronConfig;
   /** M6: language servers for the lsp_diagnostics tool */
   lsp: LspConfig;
+  /** uploaded composer attachments (~/.familiar/uploads) */
+  uploads: { retention_days: number };
   context: { token_soft_limit: number; keep_last: number; compaction: CompactionConfig };
   server: { port: number; bind: string; auth_token_file?: string };
   /** GUI-configured integrations (Jira / Confluence / Redmine connectors). */
@@ -258,12 +272,14 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
   hooks: {},
   cron: { jobs: [] },
   lsp: { servers: {} },
+  uploads: { retention_days: 30 },
   context: { token_soft_limit: 81_920, keep_last: 10, compaction: { mode: "summarize" } },
   server: { port: 46_210, bind: "127.0.0.1" },
 };
 
 const KNOWN_TOP_LEVEL = new Set([
   "version",
+  "uploads",
   "default_provider",
   "default_model",
   "fallback",

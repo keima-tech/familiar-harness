@@ -53,6 +53,8 @@ export interface ExecBackend {
   statMany(files: string[]): Promise<Map<string, StatInfo>>;
   /** Binary-safe read of up to maxBytes per file (grep-style scans). */
   readMany(files: string[], maxBytes: number): Promise<Map<string, Buffer>>;
+  /** Recursively delete a directory (best-effort callers pass safe paths). */
+  removeTree(dir: string): Promise<void>;
   /** Host home directory (remote $HOME for ssh). */
   home(): Promise<string>;
   dispose(): Promise<void>;

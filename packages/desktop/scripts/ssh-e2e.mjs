@@ -35,7 +35,28 @@ const remoteWork = path.join(remoteHome, "work");
 const binDir = path.join(base, "bin");
 for (const dir of [localHome, remoteHome, remoteWork, binDir]) fs.mkdirSync(dir, { recursive: true });
 
-const CONFIG = `version: 1\ndefault_provider: mock\nproviders:\n  mock:\n    kind: mock\nserver:\n  port: 0\n  bind: 127.0.0.1\n`;
+const CONFIG = `version: 1
+default_provider: mock
+providers:
+  mock:
+    kind: mock
+server:
+  port: 0
+  bind: 127.0.0.1
+mcp:
+  servers:
+    remote:
+      command: mcp-home-mock
+      read_only: true
+lsp:
+  servers:
+    mock:
+      command: mock-lsp-remote
+      extensions: [txt]
+      timeout_ms: 8000
+uploads:
+  retention_days: 30
+`;
 fs.writeFileSync(path.join(localHome, "config.yaml"), CONFIG);
 fs.writeFileSync(path.join(remoteHome, "config.yaml"), CONFIG);
 
@@ -45,6 +66,39 @@ fs.writeFileSync(
   `#!/bin/sh\nexport HOME=${JSON.stringify(remoteHome)}\nexport FAMILIAR_HOME=${JSON.stringify(remoteHome)}\nexec node ${JSON.stringify(path.join(repoRoot, "packages", "cli", "dist", "familiar.js"))} "$@"\n`,
 );
 fs.chmodSync(shim, 0o755);
+
+// Remote-only MCP server: names its tool after the host's $HOME, so seeing
+// the tool proves the process was spawned through ssh (not locally).
+const MCP_MOCK = `#!/usr/bin/env node
+"use strict";
+const path = require("node:path");
+const { createInterface } = require("node:readline");
+const home = process.env.HOME || "/";
+const tool = "where_" + (path.basename(home).replace(/[^A-Za-z0-9_]/g, "_") || "unknown");
+const send = (o) => process.stdout.write(JSON.stringify(o) + "\\n");
+const rl = createInterface({ input: process.stdin });
+rl.on("line", (line) => {
+  let m;
+  try { m = JSON.parse(line); } catch { return; }
+  if (m.method === "initialize") {
+    send({ id: m.id, result: { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "home-mock", version: "0.0.1" } } });
+  } else if (m.method === "tools/list") {
+    send({ id: m.id, result: { tools: [{ name: tool, description: "reports the host home", inputSchema: { type: "object", properties: {} } }] } });
+  } else if (m.method === "tools/call") {
+    send({ id: m.id, result: { content: [{ type: "text", text: "home: " + home }] } });
+  }
+});
+`;
+const mcpMock = path.join(binDir, "mcp-home-mock");
+fs.writeFileSync(mcpMock, MCP_MOCK);
+fs.chmodSync(mcpMock, 0o755);
+
+const lspShim = path.join(binDir, "mock-lsp-remote");
+fs.writeFileSync(
+  lspShim,
+  `#!/bin/sh\nexec node ${JSON.stringify(path.join(repoRoot, "packages", "cli", "scripts", "mock-lsp-server.mjs"))} "$@"\n`,
+);
+fs.chmodSync(lspShim, 0o755);
 
 // Minimal fake ssh: -L becomes a real forward, the server command runs via sh
 // with stdin piped (that is how the token file is streamed over).
@@ -86,7 +140,13 @@ if (forward) {
   const child = spawn("/bin/sh", ["-c", command], {
     stdio: ["pipe", "pipe", "pipe"],
     // model a distinct remote machine: a different $HOME for the remote shell
-    env: { ...process.env, HOME: process.env.FAKE_SSH_REMOTE_HOME || process.env.HOME },
+    env: {
+      ...process.env,
+      HOME: process.env.FAKE_SSH_REMOTE_HOME || process.env.HOME,
+      ...(process.env.FAKE_SSH_REMOTE_PATH
+        ? { PATH: process.env.FAKE_SSH_REMOTE_PATH + ":" + process.env.PATH }
+        : {}),
+    },
   });
   process.stdin.pipe(child.stdin);
   child.stdout.pipe(process.stdout);
@@ -251,6 +311,7 @@ const app = spawn(
       FAMILIAR_SPAWN_PORT: String(LOCAL_PORTS[0]),
       FAMILIAR_SSH_BIN: fakeSsh,
       FAKE_SSH_REMOTE_HOME: remoteHome, // the "remote" shell gets its own home
+      FAKE_SSH_REMOTE_PATH: binDir, //     …and its own PATH (remote-only tools)
     },
     stdio: "ignore",
     detached: true, // own process group: kill the whole xvfb/electron tree
@@ -483,6 +544,50 @@ try {
     JSON.stringify(proxySuggest?.items),
   );
 
+  // MCP + language servers run on the ssh host (the commands exist only on
+  // the remote PATH, so a local spawn cannot produce these results).
+  const toolDump = await evalOnce(`(async () => {
+    await rpc("session.send", { id: state.sessionId, text: "@dump-prompt-tools", yolo: true });
+    const d = await rpc("session.get", { id: state.sessionId });
+    const m = [...(d.messages ?? [])].reverse().find((x) => x.role === "assistant");
+    return m ? m.content : "";
+  })()`);
+  check(
+    String(toolDump).includes("mcp__remote__where_remote_home"),
+    "MCP server spawns on the ssh host",
+    String(toolDump).slice(0, 240),
+  );
+
+  const mcpStatus = await evalOnce(`rpc("mcp.status", { session: state.sessionId })`);
+  check(
+    mcpStatus?.remote === "tester@proxy1" && (mcpStatus?.servers ?? []).some((x) => x.name === "remote"),
+    "mcp.status reports the ssh host's servers",
+    JSON.stringify(mcpStatus),
+  );
+
+  fs.writeFileSync(path.join(remoteWork, "bad.txt"), "ok\nFAIL: broken\n");
+  const lspResult = await evalOnce(`(async () => {
+    await rpc("session.send", { id: state.sessionId, text: "@lsp " + ${JSON.stringify(path.join(remoteWork, "bad.txt"))}, yolo: true });
+    const d = await rpc("session.get", { id: state.sessionId });
+    const m = [...(d.messages ?? [])].reverse().find((x) => x.role === "tool" && x.name === "lsp_diagnostics");
+    return m ? m.content : "";
+  })()`);
+  check(/MOCK001/.test(String(lspResult)), "language server runs on the ssh host", String(lspResult).slice(0, 240));
+
+  const localToolDump = await evalOnce(`(async () => {
+    const s = await rpc("session.create", { cwd: ${JSON.stringify(repoRoot)} });
+    await rpc("session.send", { id: s.id, text: "@dump-prompt-tools", yolo: true });
+    const d = await rpc("session.get", { id: s.id });
+    const m = [...(d.messages ?? [])].reverse().find((x) => x.role === "assistant");
+    await rpc("session.delete", { id: s.id });
+    return m ? m.content : "";
+  })()`);
+  check(
+    !String(localToolDump).includes("mcp__remote__"),
+    "local sessions do not spawn the remote-only MCP command",
+    String(localToolDump).slice(0, 240),
+  );
+
   const uploaded = await evalOnce(`(async () => {
     const file = new File(["hello from the client\\n"], "notes data.txt", { type: "text/plain" });
     await attachFiles([file]);
@@ -501,6 +606,11 @@ try {
     "uploaded content round-trips",
   );
   await evalOnce(`document.querySelector("#input").value = ""; 1`);
+
+  const uploadBucket = path.dirname(uploadedPath);
+  await evalOnce(`rpc("session.delete", { id: state.sessionId }).then(() => 1)`);
+  await waitFor(() => !fs.existsSync(uploadBucket), "remote upload cleanup", 20_000);
+  check(!fs.existsSync(uploadBucket), "deleting a session removes its remote uploads");
 
   // ---- EN mode: every new string is translated (no CJK fallback) -----------
   const cjk = await evalOnce(`(() => {

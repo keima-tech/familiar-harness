@@ -145,6 +145,10 @@ export class LocalBackend implements ExecBackend {
     return out;
   }
 
+  async removeTree(dir: string): Promise<void> {
+    await fsp.rm(dir, { recursive: true, force: true });
+  }
+
   async home(): Promise<string> {
     return os.homedir();
   }

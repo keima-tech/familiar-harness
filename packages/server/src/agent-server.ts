@@ -49,6 +49,7 @@ import {
   CronScheduler,
   DenyApprovalAdapter,
   disposeLspHub,
+  disposeSshLspHubs,
   type ApprovalAdapter,
   type CronJob,
   type CuratorScheduler,
@@ -57,6 +58,7 @@ import {
   type ProviderPatch,
   type SessionStore,
   type SelfImproveContext,
+  type Tool,
   type ToolRegistry,
 } from "@familiar/core";
 import { log } from "@familiar/core";
@@ -178,6 +180,8 @@ export class AgentServer {
   /** M5: MCP dynamic tools */
   readonly mcp?: McpHub;
   private mcpDiscover?: Promise<void>;
+  /** MCP hubs bound to SSH hosts (proxy sessions), one per target */
+  private readonly remoteMcpHubs = new Map<string, McpHub>();
   /** M5: lifecycle hooks */
   readonly hooks?: HookRunner;
   /** M5: scheduled prompts (public for CLI/serve display) */
@@ -212,8 +216,116 @@ export class AgentServer {
   /** Kill MCP servers / cron timers (serve shutdown, tests). */
   dispose(): void {
     this.mcp?.stopAll();
+    for (const hub of this.remoteMcpHubs.values()) hub.stopAll();
+    this.remoteMcpHubs.clear();
     this.cronScheduler?.stop();
+    if (this.uploadPruner) clearInterval(this.uploadPruner);
+    this.uploadPruner = undefined;
     disposeLspHub();
+    disposeSshLspHubs();
+  }
+
+  /** Uploaded attachments for a deleted session (proxy and serve modes). */
+  private async cleanupUploads(session: SessionRecord): Promise<void> {
+    try {
+      const backend = createBackend(session.remote ?? null);
+      const p = backend.path;
+      const home = await backend.home();
+      await backend.removeTree(p.join(home, ".familiar", "uploads", session.id.slice(0, 8)));
+    } catch (err) {
+      log.debug(
+        `uploads: cleanup for ${session.id.slice(0, 8)} failed: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+  }
+
+  private uploadPruner?: NodeJS.Timeout;
+
+  /** Serve process: periodically drop old uploads from this machine. */
+  startUploadPruner(intervalMinutes = 360): void {
+    if (this.uploadPruner) return;
+    const tick = (): void => {
+      try {
+        this.pruneUploads();
+      } catch (err) {
+        log.debug(`uploads: prune failed: ${err instanceof Error ? err.message : err}`);
+      }
+    };
+    tick();
+    this.uploadPruner = setInterval(tick, Math.max(5, intervalMinutes) * 60_000);
+    this.uploadPruner.unref?.();
+  }
+
+  /** Delete files older than `uploads.retention_days` (0 disables) and drop
+   * empty buckets. Remote buckets are removed when their session is deleted. */
+  private pruneUploads(): void {
+    const days = this.cfg.uploads?.retention_days ?? 0;
+    if (days <= 0) return;
+    const root = path.join(os.homedir(), ".familiar", "uploads");
+    if (!fs.existsSync(root)) return;
+    const cutoff = Date.now() - days * 86_400_000;
+    let removed = 0;
+    const walk = (dir: string): boolean => {
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return false;
+      }
+      let empty = true;
+      for (const ent of entries) {
+        const full = path.join(dir, ent.name);
+        if (ent.isDirectory()) {
+          if (walk(full)) {
+            try {
+              fs.rmdirSync(full);
+              removed += 1;
+            } catch {
+              empty = false;
+            }
+          } else {
+            empty = false;
+          }
+        } else {
+          try {
+            if (fs.statSync(full).mtimeMs < cutoff) {
+              fs.unlinkSync(full);
+              removed += 1;
+              continue;
+            }
+          } catch {
+            /* unreadable — keep it */
+          }
+          empty = false;
+        }
+      }
+      return empty;
+    };
+    walk(root);
+    if (removed > 0) log.info(`uploads: pruned ${removed} item(s) older than ${days}d`);
+  }
+
+  /** MCP hub for an SSH target (lazily spawned, cached per host). */
+  private remoteMcpHub(target: SessionRemote): McpHub {
+    const key = `${target.user ?? ""}@${target.host}:${target.port ?? 22}:${target.identityFile ?? ""}`;
+    let hub = this.remoteMcpHubs.get(key);
+    if (!hub) {
+      hub = new McpHub(this.cfg, { remote: target });
+      installMcpExitCleanup(hub);
+      this.remoteMcpHubs.set(key, hub);
+    }
+    return hub;
+  }
+
+  /** Tools a session advertises: local MCP, or per-host MCP over ssh. */
+  private async mcpToolsFor(remote?: SessionRemote | null): Promise<Tool[]> {
+    if (remote) {
+      const hub = this.remoteMcpHub(remote);
+      await hub.discover();
+      return hub.tools();
+    }
+    await this.mcpReady();
+    return this.mcp?.tools() ?? [];
   }
 
   private async runCronJob(job: CronJob): Promise<void> {
@@ -297,6 +409,7 @@ export class AgentServer {
     const subRunner = new AgentRunner(this.cfg, this.providers, this.store, {
       approval: this.approval,
     });
+    const subRemoteTools = parent.remote ? await this.mcpToolsFor(parent.remote) : undefined;
     await subRunner.runTurn({
       sessionId: child.id,
       userText: args.prompt,
@@ -307,6 +420,8 @@ export class AgentServer {
       onEvent: () => {
         /* subagent events are swallowed in M2 */
       },
+      ...(subRemoteTools ? { extraTools: subRemoteTools } : {}),
+      ...(parent.remote ? { excludeToolPrefix: "mcp__" } : {}),
     });
     const msgs = this.store.getMessages(child.id);
     const lastAssistant = [...msgs].reverse().find((m) => m.role === "assistant");
@@ -378,9 +493,11 @@ export class AgentServer {
       case "session.delete": {
         const delId = str(params, "id");
         if (!delId) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "session id is required");
+        const doomed = this.store.getSession(delId);
         const deleted = this.store.deleteSession(delId);
         if (!deleted) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "session not found");
         this.todos.drop(delId);
+        if (doomed) void this.cleanupUploads(doomed);
         return { deleted: true };
       }
       case "session.update":
@@ -430,6 +547,15 @@ export class AgentServer {
         return { phase1, consolidation: outcome };
       }
       case "mcp.status": {
+        // with a session: proxy sessions report the ssh host's servers instead
+        const sessionId = str(params, "session");
+        const session = sessionId ? this.store.getSession(sessionId) : null;
+        if (session?.remote) {
+          const hub = this.remoteMcpHub(session.remote);
+          await hub.discover();
+          const label = `${session.remote.user ? `${session.remote.user}@` : ""}${session.remote.host}`;
+          return { servers: hub.status(), remote: label };
+        }
         await this.mcpReady();
         return { servers: this.mcp?.status() ?? [] };
       }
@@ -1361,6 +1487,8 @@ export class AgentServer {
     const controller = new AbortController();
     this.activeTurns.set(sessionId, controller);
     try {
+      // Proxy sessions advertise the host's MCP tools instead of local ones.
+      const remoteTools = session.remote ? await this.mcpToolsFor(session.remote) : undefined;
       const res = await this.runner.runTurn({
         sessionId,
         userText: text,
@@ -1374,6 +1502,8 @@ export class AgentServer {
         maxSteps: num(params, "maxSteps"),
         signal: controller.signal,
         onEvent: events,
+        ...(remoteTools ? { extraTools: remoteTools } : {}),
+        ...(session.remote ? { excludeToolPrefix: "mcp__" } : {}),
       });
       // M3: background self-review of this turn (stage-only). It must not
       // hold the per-session turn lock — a review can take up to a minute and

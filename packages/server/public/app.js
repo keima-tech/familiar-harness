@@ -4307,11 +4307,11 @@ async function renderExtensionsSection(content, stale = () => false) {
     row.textContent = err.message;
     mount.appendChild(row);
   }
-  // MCP servers
-  const mcpCard = card(t("ext.mcp"), t("ext.mcpDesc"));
-  put(mcpCard);
+  // MCP servers (proxy sessions report the ssh host's servers)
   try {
-    const res = await rpc("mcp.status");
+    const res = await rpc("mcp.status", state.sessionId ? { session: state.sessionId } : {});
+    const mcpCard = card(t("ext.mcp"), res.remote ? `SSH: ${res.remote} · ${t("ext.mcpDesc")}` : t("ext.mcpDesc"));
+    put(mcpCard);
     const servers = res.servers ?? [];
     if (servers.length === 0) {
       mcpCard.appendChild(pairRow("—", t("stat.noServers")));
@@ -4320,6 +4320,8 @@ async function renderExtensionsSection(content, stale = () => false) {
       mcpCard.appendChild(pairRow(sv.name ?? "(unknown)", `${sv.state ?? "?"} · ${t("ext.tools", (sv.tools ?? []).length)}${sv.error ? ` · ${sv.error}` : ""}`));
     }
   } catch (err) {
+    const mcpCard = card(t("ext.mcp"), t("ext.mcpDesc"));
+    put(mcpCard);
     const row = document.createElement("div");
     row.className = "status-err";
     row.textContent = err.message;

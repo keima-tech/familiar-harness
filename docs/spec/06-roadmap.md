@@ -768,7 +768,7 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
 - **セッション**: `SessionRecord.remote`(`{host,user,port,identityFile}`)を追加し
   sqlite に `remote` 列を追加マイグレーション。`session.create` は `ssh` パラメータで
   絶対パスのリモート cwd を受け付け、`task` サブエージェントが継承。システムプロンプトに
-  リモート実行の注記を追加。`lsp_diagnostics` は SSH セッションでは無効化。
+  リモート実行の注記を追加(当初 `lsp_diagnostics` は無効化 → ㊳ でリモート実行に対応)。
 - **RPC**: `fs.list/read/preview/dirs/suggest` が `session`(または `ssh`)で
   バックエンドを切り替え。新規 `fs.upload`(base64→バックエンドへ書き込み)。
 - **非画像添付**: ドロップ/添付した非画像ファイルを `fs.upload` で
@@ -784,3 +784,36 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   `@write` がリモート cwd に着地、`fs.read`/`fs.suggest` のバックエンド追従、
   非画像アップロード(プロキシ+familiar サーバ両方式)、EN 文字列。
   エンジン単体(偽 ssh + ローカル serve)でも 14 項目確認。typecheck / smoke 通過。
+
+## v0.1.0 の実装メモ㊳(2026-10-26、MCP/LSP のリモート実行・添付の自動掃除)
+
+- **stdio プロセスのリモート起動**: `sshStdioSpec(target, command, args, {env,cwd})`
+  (packages/core/src/exec/ssh.ts)を追加。子プロセスが ssh クライアントになり、その
+  stdio がリモート側プロセスの stdio になる(MCP / 言語サーバーを無改造で遠隔実行)。
+  base 引数は `sshArgs()` に共通化。
+- **MCP**: `McpHub(cfg, { remote })` は各サーバーを ssh 経由で起動。サーバーは
+  シェルではなく stdio スペックで spawn する(`McpClient` に spawnSpec を追加)。
+  `mcp.servers.<name>.remote: { command, args, env, cwd }` で上書き可能。
+  AgentServer は ssh 先ごとに hub をキャッシュし、`session.send` で
+  `extraTools`(リモートツール)+ `excludeToolPrefix: "mcp__"`(ローカル MCP の除外)を
+  渡す。`task` サブエージェントにも継承。`mcp.status` は `session` 付きで呼ぶと
+  そのホストの状態を返す(GUI の拡張機能セクションは現在のセッションを渡す)。
+  ついでに **既存バグ修正**: MCP コマンドが存在しない場合に `stdin.write` の EPIPE が
+  未処理例外となり serve ごと落ちていた(コマンド不在の設定で再現)→ stdin の
+  error ハンドラと writable チェックで「起動失敗として記録」に変更。
+- **LSP**: `LspTransport`(spawnSpec / uriFor / readText)を導入し、`LspClient` は
+  ファイル内容を transport 経由で取得、URI は ssh では posix で生成。ssh 先ごとに
+  `getSshLspHub(config, target, backend)` をキャッシュ(`disposeSshLspHubs`)。
+  `lsp.servers.<name>.remote: { command, args, cwd }` で上書き可能。
+  `lsp_diagnostics` は proxy セッションでリモートの言語サーバーを使う。
+- **添付の自動掃除**: `ExecBackend.removeTree` を追加し、`session.delete` で
+  `<ホーム>/.familiar/uploads/<session>` を削除。serve は `startUploadPruner()`
+  (起動時+6 時間ごと)でローカルの古い添付を削除。保持日数は
+  `uploads.retention_days`(既定 30、0 で無効)。
+- **テスト**: mock プロバイダに `@dump-prompt-tools`(広告ツール一覧)を追加。
+  ssh-e2e を 45 項目に拡張 — 偽 ssh の PATH/HOME をリモート専用にし、
+  `mcp-home-mock`($HOME をツール名にする MCP)と言語サーバー shim がリモート PATH に
+  しか無い状態で、proxy セッションが `mcp__remote__where_remote_home` を広告し
+  `lsp_diagnostics` が MOCK001 を返すこと、ローカルセッションは当該 MCP を
+  広告しないこと、セッション削除でリモート添付が消えることを検証。
+  typecheck / smoke 通過。

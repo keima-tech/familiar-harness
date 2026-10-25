@@ -9,7 +9,7 @@ import type { ResolvedConfig } from "../config.js";
 import { normalizeEffort } from "../config.js";
 import { log } from "../logger.js";
 import type { SessionStore } from "../session/store.js";
-import type { MessageAttachment, SessionRecord } from "@familiar/protocol";
+import type { MessageAttachment, SessionRecord, SessionRemote } from "@familiar/protocol";
 import type { ProviderRegistry } from "../providers/index.js";
 import { ProviderError } from "../providers/base.js";
 import {
@@ -43,6 +43,10 @@ export interface RunTurnOptions {
   plan?: boolean;
   /** M2: injected prompt sections (todo state, memory later) */
   extraSystem?: string[];
+  /** per-session dynamic tools (e.g. MCP servers spawned on an SSH host) */
+  extraTools?: Tool[];
+  /** registry tools to hide for this turn (local MCP tools in ssh sessions) */
+  excludeToolPrefix?: string;
   onEvent: (event: AgentEvent) => void;
   /** cancel the turn (provider streams abort; tools finish their step) */
   signal?: AbortSignal;
@@ -153,9 +157,19 @@ export class AgentRunner {
 
     // Plan mode (M2): only read-only tools are advertised and executable.
     const plan = opts.plan === true;
-    const baseTools: Tool[] = plan
+    let baseTools: Tool[] = plan
       ? this.tools.list().filter((t) => t.read_only === true)
       : this.tools.list();
+    // SSH sessions must not advertise local-only dynamic tools (MCP servers
+    // spawned on this machine): the server passes per-host tools instead.
+    if (opts.excludeToolPrefix) {
+      const prefix = opts.excludeToolPrefix;
+      baseTools = baseTools.filter((t) => !t.name.startsWith(prefix));
+    }
+    if (opts.extraTools && opts.extraTools.length > 0) {
+      const present = new Set(baseTools.map((t) => t.name));
+      baseTools = [...baseTools, ...opts.extraTools.filter((t) => !present.has(t.name))];
+    }
     // M3: memory/skill tools only when the self-improvement context is wired.
     const effectiveTools: Tool[] = this.selfImprove
       ? baseTools
@@ -190,7 +204,8 @@ export class AgentRunner {
             `## Remote execution\n` +
               `This session runs on the SSH host \`${backend.label}\` — bash/read/write/edit/glob/grep ` +
               `execute there over ssh, and the working directory \`${session.cwd}\` is on that host. ` +
-              `LSP diagnostics and local MCP servers are not routed to the remote.`,
+              `MCP servers and language servers configured with a remote entry run there too; ` +
+              `locally spawned MCP tools are hidden in this session.`,
           );
         }
 
@@ -305,6 +320,7 @@ export class AgentRunner {
           sessionId: session.id,
           cwd: session.cwd,
           backend,
+          remote: session.remote ?? null,
           yolo,
           config: this.cfg,
           approval: this.approval,

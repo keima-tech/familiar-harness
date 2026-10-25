@@ -13,7 +13,47 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { log } from "../logger.js";
+import { sshStdioSpec, type StdioSpec } from "../exec/ssh.js";
+import type { ExecBackend } from "../exec/types.js";
+import type { SessionRemote } from "@familiar/protocol";
 import type { LspServerConfig, ResolvedConfig } from "../config.js";
+
+/**
+ * Where a language server runs and how its files are addressed. Local servers
+ * take platform paths and read files from this machine; SSH servers get a
+ * spawn spec (the ssh client's stdio is the server's stdio), posix file URIs,
+ * and file contents fetched through the session backend.
+ */
+export interface LspTransport {
+  spawnSpec?: StdioSpec;
+  uriFor(file: string): string;
+  readText(file: string): Promise<string>;
+}
+
+function localTransport(): LspTransport {
+  return {
+    uriFor: (file) => pathToFileURL(file).toString(),
+    readText: async (file) => fs.readFileSync(file, "utf8"),
+  };
+}
+
+/** file:// URI with posix semantics (remote hosts may differ from the client). */
+function posixFileUri(file: string): string {
+  const normalized = file.startsWith("/") ? file : `/${file}`;
+  return `file://${normalized.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+function sshTransport(target: SessionRemote, server: LspServerConfig, backend: ExecBackend): LspTransport {
+  const rc = server.remote ?? {};
+  const cwd = rc.cwd;
+  return {
+    spawnSpec: sshStdioSpec(target, rc.command ?? server.command, rc.args ?? server.args ?? [], {
+      ...(cwd ? { cwd } : {}),
+    }),
+    uriFor: posixFileUri,
+    readText: async (file) => (await backend.readFile(file)).toString("utf8"),
+  };
+}
 
 export interface LspRange {
   start: { line: number; character: number };
@@ -113,7 +153,12 @@ export class LspClient {
   private opened = new Set<string>();
   private startup: Promise<void> | null = null;
 
-  constructor(language: string, serverConfig: LspServerConfig, private readonly rootUri: string) {
+  constructor(
+    language: string,
+    serverConfig: LspServerConfig,
+    private readonly rootUri: string,
+    private readonly transport: LspTransport = localTransport(),
+  ) {
     this.language = language;
     this.serverConfig = serverConfig;
     this.extensions = (serverConfig.extensions ?? []).map(normalizeExt);
@@ -135,9 +180,13 @@ export class LspClient {
     let settled = false;
     this.startup = new Promise<void>((resolve, reject) => {
       try {
-        this.child = spawn(this.serverConfig.command, this.serverConfig.args ?? [], {
-          stdio: ["pipe", "pipe", "pipe"],
-        });
+        this.child = this.transport.spawnSpec
+          ? spawn(this.transport.spawnSpec.file, this.transport.spawnSpec.args, {
+              stdio: ["pipe", "pipe", "pipe"],
+            })
+          : spawn(this.serverConfig.command, this.serverConfig.args ?? [], {
+              stdio: ["pipe", "pipe", "pipe"],
+            });
       } catch (err) {
         this.clientState = "failed";
         this.lastError = err instanceof Error ? err.message : String(err);
@@ -218,10 +267,10 @@ export class LspClient {
   /** Diagnose one file: didOpen (or didChange refresh) → publishDiagnostics. */
   async diagnose(file: string): Promise<{ diagnostics: LspDiagnostic[] | null; timedOut: boolean }> {
     await this.start();
-    const uri = pathToFileURL(file).toString();
+    const uri = this.transport.uriFor(file);
     let text = "";
     try {
-      text = fs.readFileSync(file, "utf8");
+      text = await this.transport.readText(file);
     } catch (err) {
       throw new Error(`lsp: cannot read ${file}: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -405,7 +454,10 @@ export class LspClient {
 export class LspHub {
   private clients = new Map<string, LspClient>();
 
-  constructor(private readonly cfg: ResolvedConfig) {}
+  constructor(
+    private readonly cfg: ResolvedConfig,
+    private readonly transportFor: (server: LspServerConfig) => LspTransport = () => localTransport(),
+  ) {}
 
   private rootUri: string | undefined; // frozen at first start (v1)
 
@@ -440,7 +492,12 @@ export class LspHub {
     }
     let client = this.clients.get(route.name);
     if (!client) {
-      client = new LspClient(route.name, route.config, this.rootUri ?? (this.rootUri = "file:///"));
+      client = new LspClient(
+        route.name,
+        route.config,
+        this.rootUri ?? (this.rootUri = "file:///"),
+        this.transportFor(route.config),
+      );
     }
     const res = await client.diagnose(file);
     return { language: route.name, server: route.config.command, ...res };
@@ -485,4 +542,39 @@ export function disposeLspHub(): void {
   hub?.stopAll();
   hub = null;
   hubKey = "";
+}
+
+// ---------------------------------------------------------------------------
+// SSH hubs: language servers spawned on a remote host, one hub per target
+// ---------------------------------------------------------------------------
+
+interface SshHubEntry {
+  configKey: string;
+  hub: LspHub;
+}
+
+const sshHubs = new Map<string, SshHubEntry>();
+
+/** Hub whose language servers run on an SSH host (proxy sessions). */
+export function getSshLspHub(
+  config: ResolvedConfig,
+  target: SessionRemote,
+  backend: ExecBackend,
+): LspHub | null {
+  const servers = config.lsp?.servers ?? {};
+  if (Object.keys(servers).length === 0) return null;
+  const targetKey = `${target.user ?? ""}@${target.host}:${target.port ?? 22}:${target.identityFile ?? ""}`;
+  const configKey = JSON.stringify(servers);
+  const entry = sshHubs.get(targetKey);
+  if (entry && entry.configKey === configKey) return entry.hub;
+  entry?.hub.stopAll();
+  const created = new LspHub(config, (server) => sshTransport(target, server, backend));
+  sshHubs.set(targetKey, { configKey, hub: created });
+  return created;
+}
+
+/** Called from server.dispose() and the process exit cleanup. */
+export function disposeSshLspHubs(): void {
+  for (const entry of sshHubs.values()) entry.hub.stopAll();
+  sshHubs.clear();
 }

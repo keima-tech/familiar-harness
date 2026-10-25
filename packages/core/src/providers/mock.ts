@@ -12,6 +12,7 @@ import {
  * Deterministic scripted provider for tests and offline smoke runs.
  *
  * Behaviour (stateless — decided from the tail of the transcript):
+ * - last is user, text contains `@dump-prompt-tools` → lists the advertised tool names
  * - last is user, text contains `@fail`            → throws ProviderError 503 (fallback tests)
  * - last is user text contains `@write <path>`     → tool call: write
  * - last is user, contains `@read <path>`          → tool call: read
@@ -81,6 +82,11 @@ export class MockProvider implements Provider {
           ]
         : [];
       streamText(JSON.stringify({ proposals }), onChunk);
+      return { stopReason: "end_turn", usage: { promptTokens: 1, completionTokens: 2 } };
+    }
+    if (userText.includes("@dump-prompt-tools")) {
+      const names = (params.tools ?? []).map((tool) => tool.name).sort();
+      streamText(names.length > 0 ? names.join("\n") : "(no tools)", onChunk);
       return { stopReason: "end_turn", usage: { promptTokens: 1, completionTokens: 2 } };
     }
     // `@fail` or `@fail-<providerId>`: simulate a pre-stream failure.

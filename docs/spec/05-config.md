@@ -137,6 +137,8 @@ auxiliary:
 mcp:
   servers:
     # fs: { command: npx, args: ["-y", "@modelcontextprotocol/server-filesystem", /data], read_only: true }
+    #     SSH プロキシセッション用に起動コマンドを上書きする場合:
+    #     remote: { command: /home/me/bin/mcp-fs, args: ["/srv/data"] }
 hooks:
   # post_tool_use:
   #   - node ~/.familiar/hooks/audit.js
@@ -156,6 +158,11 @@ lsp:
   servers:
     # typescript: { command: typescript-language-server, args: ["--stdio"], extensions: [ts, tsx, js, jsx] }
     # mock:       { command: node, args: ["mock-lsp-server.mjs"], extensions: [txt], timeout_ms: 5000 }
+    # SSH プロキシセッション用の上書き: remote: { command: /path/on/host/typescript-language-server }
+
+# アップロード添付の保持日数(0 で自動削除を無効化。セッション削除時は常に消去)
+# uploads:
+#   retention_days: 30
 
 # 実行時上書き(優先: settings.json > config.yaml)
 #   ~/.familiar/settings.json: { "memory_write_approval": bool, "skills_write_approval": bool }
@@ -260,7 +267,16 @@ ssh -L 46210:127.0.0.1:46210 <user>@<server-host>
 - **非画像ファイルの添付**: `fs.upload` がリモートの
   `<ホーム>/.familiar/uploads/<session-id>/` へ書き込み、`@<リモートパス>` を挿入します
   (familiar サーバ方式でも同じ RPC を使うため、リモート側のホームに保存されます)。
+- **MCP / LSP もリモートで実行**: proxy セッションでは `mcp.servers` の各サーバーと
+  `lsp.servers` の言語サーバーを **ssh 経由の stdio** で起動します(子プロセスが ssh
+  クライアントになり、その stdio がリモート側プロセスの stdio になる)。ローカルとは
+  別のコマンドが必要な場合は、各サーバーの `remote: { command, args, env, cwd }` で
+  上書きしてください(MCP は env/cwd も指定可、LSP は command/args/cwd)。リモートに
+  コマンドが無い場合、そのサーバーは起動失敗として記録されるだけです。ローカル専用の
+  MCP サーバーが混ざらないよう、ローカルの `mcp__*` ツールは proxy セッションには
+  広告されません。`mcp.status` は `session` を渡すとそのホストのサーバーを返します。
+- **添付の後始末**: アップロードはセッション削除時に `<ホーム>/.familiar/uploads/<session>` を
+  丸ごと削除します。ローカル側に残った古いファイルは `uploads.retention_days`(既定 30、
+  0 で無効)で serve 起動時+6 時間ごとに自動削除されます。
 - 制約: リモートに POSIX シェルが必要です(`find` / `stat` / `base64` / `wc` を使用)。
-  `lsp_diagnostics` はローカル実行のため SSH セッションでは無効(エラーで bash での
-  代替を案内)。MCP サーバはローカル側で動作します。作業フォルダーは絶対パスで指定
-  してください(`~` はリモートのホームに展開されます)。
+  作業フォルダーは絶対パスで指定してください(`~` はリモートのホームに展開されます)。

@@ -3,9 +3,8 @@
  * return its published diagnostics (errors / warnings / hints).
  * Read-only: usable in plan mode, needs no approval.
  */
-import path from "node:path";
 import type { Tool, ToolOutput, ToolContext } from "./registry.js";
-import { getLspHub, severityName, type LspRange } from "../lsp/index.js";
+import { getLspHub, getSshLspHub, severityName, type LspRange } from "../lsp/index.js";
 import type { ToolSchema } from "@familiar/protocol";
 
 const SCHEMA: ToolSchema["parameters"] = {
@@ -37,16 +36,12 @@ export function createLspTool(_cwdHint?: string): Tool {
       if (p === "") {
         return { content: "lsp_diagnostics: 'path' is required", isError: true };
       }
-      if (ctx.backend.kind === "ssh") {
-        return {
-          content:
-            "lsp_diagnostics is unavailable in SSH sessions — the language server runs on this machine, " +
-            "but the files live on the remote host. Run the project's own check command with bash instead " +
-            '(e.g. tsc --noEmit, cargo check, eslint).',
-          isError: true,
-        };
-      }
-      const hub = getLspHub(ctx.config);
+      // Proxy sessions spawn the language server on the ssh host over stdio;
+      // local sessions keep the process-wide local hub.
+      const hub =
+        ctx.backend.kind === "ssh" && ctx.remote
+          ? getSshLspHub(ctx.config, ctx.remote, ctx.backend)
+          : getLspHub(ctx.config);
       if (!hub) {
         return {
           content:
@@ -55,10 +50,11 @@ export function createLspTool(_cwdHint?: string): Tool {
           isError: true,
         };
       }
-      const abs = path.resolve(ctx.cwd, p);
+      const bpath = ctx.backend.path;
+      const abs = bpath.isAbsolute(p) ? bpath.normalize(p) : bpath.resolve(ctx.cwd, p);
       try {
         const result = await hub.diagnose(abs);
-        const rel = path.relative(ctx.cwd, abs) || abs;
+        const rel = bpath.relative(ctx.cwd, abs) || abs;
         if (result.timedOut && result.diagnostics === null) {
           return {
             content: `no diagnostics received from "${result.language}" within timeout (file may be clean, or the server publishes diagnostics only on demand)`,

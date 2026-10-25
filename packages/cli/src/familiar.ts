@@ -1331,6 +1331,7 @@ async function cmdServe(flags: Record<string, string | boolean>): Promise<void> 
   await server.mcpReady();
   server.startCuratorScheduler();
   server.startCronScheduler();
+  server.startUploadPruner();
   if (!printReady) {
     process.stdout.write(cyan(`familiar server listening on ${transport.url}\n`));
     process.stdout.write(dim(`  rpc:   POST ${transport.url}/rpc\n  events: WS ${transport.url}/ws\n  ui:    GET ${transport.url}/\n`));

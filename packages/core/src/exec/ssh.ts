@@ -28,6 +28,77 @@ function shellQuote(value: string): string {
 }
 
 /**
+ * Base ssh argv for a target (`-T` + BatchMode + strict host keys). POSIX
+ * clients also get ControlMaster multiplexing so per-call round trips reuse
+ * one TCP/auth connection; OpenSSH for Windows has no mux and connects anew.
+ */
+export function sshArgs(target: SessionRemote): string[] {
+  const args = [
+    "-T",
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "StrictHostKeyChecking=yes",
+    "-o",
+    "ConnectTimeout=15",
+    "-o",
+    "ServerAliveInterval=15",
+    "-o",
+    "ServerAliveCountMax=4",
+    "-o",
+    "LogLevel=ERROR",
+  ];
+  if (process.platform !== "win32") {
+    try {
+      const dir = nodePath.join(os.tmpdir(), "familiar-ssh-mux");
+      fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+      args.push(
+        "-o",
+        "ControlMaster=auto",
+        "-o",
+        `ControlPath=${nodePath.join(dir, "%C")}`,
+        "-o",
+        "ControlPersist=120",
+      );
+    } catch {
+      /* fall back to per-call connections */
+    }
+  }
+  if (target.port && target.port !== 22) args.push("-p", String(target.port));
+  if (target.identityFile) args.push("-i", target.identityFile);
+  if (target.user) args.push("-l", target.user);
+  args.push(target.host);
+  return args;
+}
+
+/** Spawn spec for a stdio child process (`MCP`, language servers) on a host. */
+export interface StdioSpec {
+  file: string;
+  args: string[];
+}
+
+/**
+ * Wrap any stdio program so it runs on the ssh host: the child we spawn is
+ * the ssh client, its stdio is the remote program's stdio, and the remote
+ * login shell expands the command line.
+ */
+export function sshStdioSpec(
+  target: SessionRemote,
+  command: string,
+  args: string[],
+  opts: { cwd?: string; env?: Record<string, string> } = {},
+): StdioSpec {
+  const parts: string[] = [command, ...args];
+  if (opts.env && Object.keys(opts.env).length > 0) {
+    const envParts = Object.entries(opts.env).map(([k, v]) => `${k}=${shellQuote(v)}`);
+    parts.unshift("env", ...envParts);
+  }
+  const line = parts.map(shellQuote).join(" ");
+  const remote = opts.cwd ? `cd ${shellQuote(opts.cwd)} && exec ${line}` : `exec ${line}`;
+  return { file: sshBin(), args: [...sshArgs(target), "--", remote] };
+}
+
+/**
  * Tools-on-SSH execution: every call spawns the system `ssh` client, so the
  * remote needs nothing but a POSIX shell. A ControlMaster socket (POSIX
  * clients) turns the per-call round trips into one reused TCP connection.
@@ -43,44 +114,7 @@ export class SshBackend implements ExecBackend {
   }
 
   private baseArgs(): string[] {
-    const args = [
-      "-T",
-      "-o",
-      "BatchMode=yes",
-      "-o",
-      "StrictHostKeyChecking=yes",
-      "-o",
-      "ConnectTimeout=15",
-      "-o",
-      "ServerAliveInterval=15",
-      "-o",
-      "ServerAliveCountMax=4",
-      "-o",
-      "LogLevel=ERROR",
-    ];
-    // Connection multiplexing: reuse one TCP/auth for every tool call.
-    // Not available in OpenSSH for Windows, so POSIX clients only.
-    if (process.platform !== "win32") {
-      try {
-        const dir = nodePath.join(os.tmpdir(), "familiar-ssh-mux");
-        fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-        args.push(
-          "-o",
-          "ControlMaster=auto",
-          "-o",
-          `ControlPath=${nodePath.join(dir, "%C")}`,
-          "-o",
-          "ControlPersist=120",
-        );
-      } catch {
-        /* fall back to per-call connections */
-      }
-    }
-    if (this.target.port && this.target.port !== 22) args.push("-p", String(this.target.port));
-    if (this.target.identityFile) args.push("-i", this.target.identityFile);
-    if (this.target.user) args.push("-l", this.target.user);
-    args.push(this.target.host);
-    return args;
+    return sshArgs(this.target);
   }
 
   /** ssh command string: change into cwd (remote-side) then run the script. */
@@ -344,6 +378,11 @@ export class SshBackend implements ExecBackend {
       outMap.set(file, b64 === "" ? Buffer.alloc(0) : Buffer.from(b64, "base64"));
     }
     return outMap;
+  }
+
+  async removeTree(dir: string): Promise<void> {
+    // Callers only pass `<home>/.familiar/uploads/<bucket>`; ignore failures.
+    await this.run(`rm -rf -- ${shellQuote(dir)}`, { timeoutMs: BATCH_TIMEOUT_MS });
   }
 
   async home(): Promise<string> {

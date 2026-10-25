@@ -25,4 +25,16 @@ contextBridge.exposeInMainWorld("familiarDesktop", {
   notify: (payload) => ipcRenderer.send("app:notify", payload),
   /** Open a file with the OS default application (file preview fallback). */
   openPath: (target) => ipcRenderer.invoke("shell:openPath", target),
+  /** SSH connection profiles + window-wide connect/disconnect (main.js). */
+  connections: () => ipcRenderer.invoke("conn:list"),
+  saveConnection: (profile) => ipcRenderer.invoke("conn:save", profile),
+  deleteConnection: (id) => ipcRenderer.invoke("conn:delete", id),
+  testConnection: (profile) => ipcRenderer.invoke("conn:test", profile),
+  connectProfile: (id, opts) => ipcRenderer.invoke("conn:connect", { id, ...(opts ?? {}) }),
+  disconnectConnection: () => ipcRenderer.invoke("conn:disconnect"),
+  onConnectionStatus: (cb) => {
+    const handler = (_ev, status) => cb(status);
+    ipcRenderer.on("conn:status", handler);
+    return () => ipcRenderer.removeListener("conn:status", handler);
+  },
 });

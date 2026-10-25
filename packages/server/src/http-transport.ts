@@ -1,6 +1,7 @@
 import { createServer, type Server } from "node:http";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
@@ -207,6 +208,11 @@ export function startHttpTransport(
             ok: true,
             protocol: "familiar/1",
             auth: authRequired ? "required" : "off",
+            // Machine identity for desktop clients that attach over SSH:
+            // the remote server is the one whose cwd/tools actually run.
+            hostname: os.hostname(),
+            platform: process.platform,
+            home: os.homedir(),
             ...(authRequired && opts.authTokenFile ? { tokenFile: opts.authTokenFile } : {}),
             ...(opts.version ? { version: opts.version } : {}),
           }),

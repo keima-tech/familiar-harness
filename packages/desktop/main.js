@@ -11,6 +11,14 @@ const path = require("node:path");
 const http = require("node:http");
 const https = require("node:https");
 const os = require("node:os");
+const {
+  SshConnection,
+  listProfiles,
+  getProfile,
+  saveProfile,
+  deleteProfile,
+  sanitizeProfile,
+} = require("./ssh");
 
 /** Test/dev override: FAMILIAR_PORTS=46310,46311 + FAMILIAR_SPAWN_PORT=46310 keeps
  * automated runs off the default 46210 (they would fight a real serve). */
@@ -27,8 +35,62 @@ const CFG = {
 let mainWindow = null;
 let child = null;
 
+/** The local serve URL/token, kept so we can always return from an SSH host. */
+let localUrl = "";
+let localToken = "";
+/** The SSH connection backing the currently loaded UI (null = local). */
+let activeConn = null;
+/** Origin of the app currently loaded in the window — the only origin the
+ * renderer is allowed to navigate to (the preload bridge is attached there). */
+let currentOrigin = "";
+
+function originOf(url) {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return "";
+  }
+}
+
+function senderOrigin(ev) {
+  try {
+    return new URL(ev.senderFrame?.url ?? ev.sender.getURL()).origin;
+  } catch {
+    return "";
+  }
+}
+
+/** Destructive/local-only IPC: only the local UI may drive the shell. A remote
+ * server serves its own app.js — never let it pivot to another host, read
+ * local files through the OS handler, or install updates. */
+function isLocalSender(ev) {
+  return localUrl !== "" && senderOrigin(ev) === originOf(localUrl);
+}
+
+function requireLocal(ev, what) {
+  if (!isLocalSender(ev)) throw new Error(`${what} is only available on the local machine`);
+}
+
+function sendConnStatus(payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("conn:status", payload);
+  }
+}
+
+function loadApp(url) {
+  currentOrigin = originOf(url);
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.loadURL(url).catch((err) => {
+    console.warn(`[familiar] loadURL failed: ${err?.message ?? err}`);
+    // a failed *remote* load means the tunnel died; local load failures are
+    // already surfaced by the window itself
+    if (activeConn) sendConnStatus({ state: "lost", reason: String(err?.message ?? err) });
+  });
+}
+
 // Native "browse" folder picker for the web UI (window.familiarDesktop.pickDirectory).
 ipcMain.handle("dialog:pickDirectory", async (ev) => {
+  requireLocal(ev, "the native folder picker");
   const win = BrowserWindow.fromWebContents(ev.sender) ?? mainWindow;
   const res = await dialog.showOpenDialog(win, {
     properties: ["openDirectory", "createDirectory"],
@@ -193,17 +255,153 @@ async function applyUpdate() {
   return updateStatus;
 }
 
-ipcMain.handle("update:check", () => checkForUpdate());
-ipcMain.handle("update:apply", () => applyUpdate());
-ipcMain.handle("update:restart", () => {
+ipcMain.handle("update:check", (ev) => {
+  requireLocal(ev, "updates");
+  return checkForUpdate();
+});
+ipcMain.handle("update:apply", (ev) => {
+  requireLocal(ev, "updates");
+  return applyUpdate();
+});
+ipcMain.handle("update:restart", (ev) => {
+  requireLocal(ev, "updates");
   app.relaunch();
   app.exit(0);
 });
 
 // open a file with the OS default application (GUI file viewer: 外部アプリで開く)
-ipcMain.handle("shell:openPath", async (_ev, target) => {
+ipcMain.handle("shell:openPath", async (ev, target) => {
+  requireLocal(ev, "opening local files");
   if (typeof target !== "string" || target === "") return "invalid path";
   return shell.openPath(target);
+});
+
+// ---------------------------------------------------------------------------
+// SSH connections: profiles + connect/disconnect (window-wide server switch)
+// ---------------------------------------------------------------------------
+
+/** Public view of the active connection (no tokens, no paths). */
+function connInfo(conn) {
+  if (!conn) return null;
+  return {
+    id: conn.profile.id,
+    name: conn.profile.name,
+    host: conn.profile.host,
+    user: conn.profile.user,
+    hostname: conn.info.hostname ?? conn.profile.host,
+    platform: conn.info.platform ?? "",
+    version: conn.info.version ?? "",
+    url: conn.url,
+  };
+}
+
+function localAppUrl() {
+  if (!localUrl) return "";
+  return localToken ? `${localUrl}/?token=${encodeURIComponent(localToken)}` : localUrl;
+}
+
+async function disconnectConnection() {
+  const conn = activeConn;
+  activeConn = null;
+  if (conn) {
+    await conn.close().catch(() => {});
+  }
+  return conn;
+}
+
+ipcMain.handle("conn:list", (ev) => {
+  const local = isLocalSender(ev);
+  return {
+    available: true,
+    local,
+    // Remote pages only learn about the connection they are already using —
+    // never the other hosts saved on the local machine.
+    connections: local ? listProfiles() : [],
+    current: connInfo(activeConn),
+  };
+});
+
+ipcMain.handle("conn:save", (ev, input) => {
+  requireLocal(ev, "saving SSH connections");
+  const profile = saveProfile(input);
+  return { ok: true, profile, connections: listProfiles() };
+});
+
+ipcMain.handle("conn:delete", async (ev, id) => {
+  requireLocal(ev, "deleting SSH connections");
+  if (activeConn && activeConn.profile.id === id) await disconnectConnection();
+  return { ok: deleteProfile(String(id ?? "")), connections: listProfiles() };
+});
+
+ipcMain.handle("conn:test", async (ev, input) => {
+  requireLocal(ev, "testing SSH connections");
+  const profile = typeof input === "string" ? getProfile(input) : sanitizeProfile(input, input);
+  if (!profile) throw new Error("connection profile not found");
+  const started = Date.now();
+  const conn = new SshConnection(profile);
+  try {
+    await conn.connect();
+    return {
+      ok: true,
+      hostname: conn.info.hostname,
+      platform: conn.info.platform,
+      home: conn.info.home,
+      version: conn.info.version,
+      latencyMs: Date.now() - started,
+    };
+  } finally {
+    await conn.close().catch(() => {});
+  }
+});
+
+ipcMain.handle("conn:connect", async (ev, input) => {
+  requireLocal(ev, "opening SSH connections");
+  const id = String(input?.id ?? "");
+  const profile = getProfile(id);
+  if (!profile) throw new Error("connection profile not found");
+  if (activeConn) await disconnectConnection();
+  const conn = new SshConnection(profile);
+  try {
+    await conn.connect();
+  } catch (err) {
+    await conn.close().catch(() => {});
+    throw err;
+  }
+  activeConn = conn;
+  conn.onLost((reason) => {
+    if (activeConn !== conn) return;
+    sendConnStatus({
+      state: "lost",
+      reason,
+      host: conn.info.hostname || profile.host,
+    });
+  });
+  const params = new URLSearchParams({
+    token: conn.token,
+    remote: "1",
+    conn: profile.id,
+    host: conn.info.hostname || profile.host,
+  });
+  if (input?.newSession) {
+    params.set("new", "1");
+    const cwd = String(input?.cwd ?? "").trim() || conn.info.home || "";
+    if (cwd) params.set("cwd", cwd);
+  }
+  loadApp(`${conn.url}/?${params.toString()}`);
+  sendConnStatus({ state: "connected", host: conn.info.hostname || profile.host });
+  return { ok: true, current: connInfo(conn) };
+});
+
+ipcMain.handle("conn:disconnect", async (ev) => {
+  // Allowed from the remote page too: it is the way back home. It only ever
+  // disconnects the connection this window is already using.
+  if (!isLocalSender(ev) && !activeConn) {
+    throw new Error("not connected");
+  }
+  await disconnectConnection();
+  loadApp(localAppUrl());
+  sendConnStatus({ state: "local" });
+  return { ok: true };
 });
 
 // Desktop notifications requested by the web UI (turn finished, approval
@@ -347,10 +545,18 @@ function createWindow(url) {
     if (/^https?:\/\//i.test(target)) void shell.openExternal(target);
     return { action: "deny" };
   });
-  // The renderer never navigates away from the local UI.
+  // The renderer only ever stays on the app it was given (local or one SSH
+  // host). A redirect/navigation to any other origin would inherit our
+  // preload bridge, so block it and hand http(s) links to the browser.
   mainWindow.webContents.on("will-navigate", (ev, target) => {
-    if (!/^https?:\/\//i.test(target)) ev.preventDefault();
+    if (originOf(target) === currentOrigin) return;
+    ev.preventDefault();
+    if (/^https?:\/\//i.test(target)) void shell.openExternal(target);
   });
+  mainWindow.webContents.on("will-redirect", (ev, target) => {
+    if (originOf(target) !== currentOrigin) ev.preventDefault();
+  });
+  currentOrigin = originOf(url);
   void mainWindow.loadURL(url);
   mainWindow.on("closed", () => {
     mainWindow = null;
@@ -380,7 +586,9 @@ if (!gotLock) {
       app.quit();
       return;
     }
-    createWindow(server.token ? `${server.url}/?token=${encodeURIComponent(server.token)}` : server.url);
+    localUrl = server.url;
+    localToken = server.token;
+    createWindow(localAppUrl());
     // auto-check for updates once the window is up, then every 6h — only when
     // the install layout is updatable (dev checkouts update via git pull)
     if (installRoot() !== null || process.platform === "win32") {
@@ -392,11 +600,17 @@ if (!gotLock) {
   app.on("window-all-closed", () => {
     if (child) child.kill();
     child = null;
+    if (activeConn) void activeConn.close();
+    activeConn = null;
     app.quit();
   });
 
   app.on("before-quit", () => {
     if (child) child.kill();
     child = null;
+    // close() kills both ssh children synchronously before its first await;
+    // quitting immediately afterwards is fine (the remote serve gets SIGHUP).
+    if (activeConn) void activeConn.close();
+    activeConn = null;
   });
 }

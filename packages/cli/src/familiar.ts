@@ -49,6 +49,7 @@ Usage:
              [--cwd DIR] [-y]
              # TTY opens the full-screen TUI; --line keeps the classic REPL
   familiar serve [--port N] [--bind ADDR] [--config PATH]
+              [--token-file PATH] [--print-ready]
   familiar update [--check] [--forgejo URL] [--repo SLUG]
                         # self-update from release assets (install.sh installs)
   familiar token [--write] [--clear]   # M2 bearer token for familiar serve
@@ -90,6 +91,7 @@ const STRING_FLAGS = new Set([
   "--max-steps",
   "--port",
   "--bind",
+  "--token-file",
   "--profile",
   "--title",
   "--server",
@@ -111,6 +113,7 @@ const BOOL_FLAGS = new Set([
   "--messages",
   "--plan",
   "--local",
+  "--print-ready",
   "--check",
   "--force",
   "--consolidate",
@@ -1303,7 +1306,11 @@ async function cmdServe(flags: Record<string, string | boolean>): Promise<void> 
   const port = toNumber(flag(flags, "port")) ?? cfg.server.port;
   const bind = typeof flag(flags, "bind") === "string" ? (flag(flags, "bind") as string) : cfg.server.bind;
   // M2: fail closed — a configured-but-unreadable token file aborts startup.
-  const authTokenFile = cfg.server.auth_token_file;
+  // `--token-file` lets a desktop client hand the remote server a per-tunnel
+  // token file (never passed as an argument value that shows up in argv).
+  const tokenFileFlag = typeof flag(flags, "token-file") === "string" ? (flag(flags, "token-file") as string) : undefined;
+  const authTokenFile = tokenFileFlag ?? cfg.server.auth_token_file;
+  const printReady = flagBool(flags, "print-ready");
   const authToken = resolveServerAuthToken(authTokenFile);
   const server = new AgentServer({ config: cfg, rpcApprovals: true });
   const transport = await startHttpTransport(server, {
@@ -1313,26 +1320,36 @@ async function cmdServe(flags: Record<string, string | boolean>): Promise<void> 
     authToken,
     authTokenFile: authTokenFile ? path.resolve(authTokenFile.replace(/^~(?=$|[\\/])/, os.homedir())) : undefined,
   });
+  if (printReady) {
+    // One machine-readable line for remote launchers (desktop SSH connect):
+    // the actual bound port is essential with --port 0.
+    const boundPort = Number.parseInt(new URL(transport.url).port, 10) || port;
+    process.stdout.write(
+      `FAMILIAR_READY ${JSON.stringify({ url: transport.url, port: boundPort, tokenFile: authTokenFile })}\n`,
+    );
+  }
   await server.mcpReady();
   server.startCuratorScheduler();
   server.startCronScheduler();
-  process.stdout.write(cyan(`familiar server listening on ${transport.url}\n`));
-  process.stdout.write(dim(`  rpc:   POST ${transport.url}/rpc\n  events: WS ${transport.url}/ws\n  ui:    GET ${transport.url}/\n`));
-  if (authToken) {
-    process.stdout.write(dim(`  auth:  bearer token required (file: ${authTokenFile})\n`));
-  } else {
-    process.stdout.write(dim(`  auth:  off — only bind to a trusted network or set server.auth_token_file\n`));
+  if (!printReady) {
+    process.stdout.write(cyan(`familiar server listening on ${transport.url}\n`));
+    process.stdout.write(dim(`  rpc:   POST ${transport.url}/rpc\n  events: WS ${transport.url}/ws\n  ui:    GET ${transport.url}/\n`));
+    if (authToken) {
+      process.stdout.write(dim(`  auth:  bearer token required (file: ${authTokenFile})\n`));
+    } else {
+      process.stdout.write(dim(`  auth:  off — only bind to a trusted network or set server.auth_token_file\n`));
+    }
   }
-  const mcpServers = server.mcp?.status() ?? [];
+  const mcpServers = printReady ? [] : (server.mcp?.status() ?? []);
   if (mcpServers.length > 0) {
     const ready = mcpServers.filter((s) => s.state === "ok").length;
     process.stdout.write(dim(`  mcp:   ${ready}/${mcpServers.length} server(s) up, ${mcpServers.reduce((n, s) => n + s.tools.length, 0)} tool(s)\n`));
   }
-  const cronJobs = server.cronScheduler?.status().jobs.length ?? 0;
+  const cronJobs = printReady ? 0 : (server.cronScheduler?.status().jobs.length ?? 0);
   if (cronJobs > 0) {
     process.stdout.write(dim(`  cron:  ${cronJobs} job(s) scheduled\n`));
   }
-  process.stdout.write(dim("  press Ctrl+C to stop\n"));
+  if (!printReady) process.stdout.write(dim("  press Ctrl+C to stop\n"));
   const shutdown = (): void => {
     server.dispose();
     void transport.close().then(() => process.exit(0));

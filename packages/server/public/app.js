@@ -12,6 +12,18 @@
 // ---------------------------------------------------------------------------
 const $ = (sel) => document.querySelector(sel);
 
+/** Desktop SSH handoff: the shell loads this page as
+ *   /?token=…&remote=1&conn=<id>&host=<hostname>[&new=1&cwd=…]
+ * Read the launch flags *before* the token handler strips the query string. */
+const bootQuery = new URLSearchParams(location.search);
+const remoteBoot = {
+  isRemote: bootQuery.get("remote") === "1",
+  connId: bootQuery.get("conn") ?? "",
+  host: bootQuery.get("host") ?? "",
+  wantNewSession: bootQuery.get("new") === "1",
+  cwd: bootQuery.get("cwd") ?? "",
+};
+
 /** M2 server auth: the token arrives once via ?token= and is kept in
  * sessionStorage so the address bar/history never carries it. */
 let serverToken = "";
@@ -94,6 +106,7 @@ const STR = {
     "update.uptodate": "最新です (v{0})",
     "update.failed": "アップデートに失敗しました: {0}",
     "update.cliHint": "ブラウザ版の更新は `familiar update` で実行できます",
+    "update.remoteHint": "SSH 接続中はリモート側で `familiar update` を実行してください",
     "menu.updateCheck": "アップデートを確認",
     "top.pane": "サイドペイン",
     "pane.inbox": "承認",
@@ -179,6 +192,16 @@ const STR = {
     "ns.noMatch": "一致するフォルダーがありません",
     "ns.sessions": "{0} セッション",
     "ns.errNoFolder": "作業フォルダーを選択するか入力してください",
+    "ns.target": "実行先",
+    "ns.localMachine": "このマシン",
+    "ns.localHint": "このコンピューターで実行",
+    "ns.addSsh": "SSH サーバを追加…",
+    "ns.addSshHint": "設定 → 接続 でホストを登録",
+    "ns.connect": "接続",
+    "ns.connecting": "接続中…",
+    "ns.connectFailed": "接続できませんでした: {0}",
+    "ns.remoteCwd": "リモートの作業フォルダー (任意)",
+    "ns.remoteHint": "接続後、リモート側のフォルダーを選べます。空欄ならホームディレクトリから始まります。",
     "top.search": "トランスクリプト内検索 (Ctrl+F)",
     "top.sessionActions": "セッション操作",
     "top.sessions": "セッション一覧",
@@ -223,7 +246,38 @@ const STR = {
     "nav.providers": "プロバイダー",
     "nav.extensions": "拡張機能",
     "nav.connectors": "コネクタ",
+    "nav.connections": "接続",
     "nav.system": "このアプリについて",
+    "remote.back": "ローカルに戻る",
+    "remote.badge": "SSH: {0}",
+    "remote.badgeTitle": "SSH 接続中: {0} — クリックで接続設定",
+    "remote.lost": "SSH 接続が切れました: {0}",
+    "remote.current": "現在の接続",
+    "remote.readOnly": "リモート接続の設定はローカル側でのみ変更できます。",
+    "ssh.title": "SSH 接続",
+    "ssh.desc": "リモートで familiar serve を起動し、SSH トンネル経由でそのマシンのツールとフォルダーを使います。認証は鍵または ssh-agent です。",
+    "ssh.name": "表示名",
+    "ssh.host": "ホスト (例: build.example.com)",
+    "ssh.user": "ユーザー (任意)",
+    "ssh.port": "ポート",
+    "ssh.key": "秘密鍵ファイル (任意)",
+    "ssh.remoteBin": "リモートの familiar パス (任意)",
+    "ssh.save": "保存",
+    "ssh.edit": "編集",
+    "ssh.delete": "削除",
+    "ssh.connect": "接続",
+    "ssh.test": "接続テスト",
+    "ssh.testing": "テスト中…",
+    "ssh.testOk": "✓ {0} ({1} / familiar {2})",
+    "ssh.testFail": "✗ {0}",
+    "ssh.saved": "保存しました",
+    "ssh.deleted": "削除しました: {0}",
+    "ssh.deleteConfirm": "接続「{0}」を削除しますか?",
+    "ssh.none": "SSH サーバはまだ登録されていません",
+    "ssh.errHost": "ホストを入力してください",
+    "ssh.desktopOnly": "SSH 接続はデスクトップアプリでのみ利用できます。",
+    "ssh.connectFail": "接続に失敗しました: {0}",
+    "ssh.current": "接続中: {0}",
     "conn.googleTitle": "Google (Gmail / カレンダー)",
     "conn.googleClientId": "OAuth クライアント ID",
     "conn.googleClientSecret": "OAuth クライアント シークレット",
@@ -263,6 +317,7 @@ const STR = {
     "attach.added": "画像を {0} 枚添付しました",
     "toast.dropAttach": "ドロップで添付しました: {0}",
     "toast.attachFailed": "添付ファイルのパスを取得できませんでした: {0}",
+    "attach.remotePath": "SSH 接続中はローカルのファイルパスを参照できません(画像はそのまま添付できます)",
     "toast.stopRequested": "停止を要求しました…",
     "toast.effortSet": "エフォート: {0}",
     "toast.effortNext": "エフォート: {0} (次のセッションから適用)",
@@ -466,6 +521,7 @@ const STR = {
     "update.uptodate": "Up to date (v{0})",
     "update.failed": "Update failed: {0}",
     "update.cliHint": "Browser builds update via `familiar update`",
+    "update.remoteHint": "Connected over SSH — run `familiar update` on the remote host",
     "menu.updateCheck": "Check for updates",
     "top.pane": "side pane",
     "pane.inbox": "approvals",
@@ -551,6 +607,16 @@ const STR = {
     "ns.noMatch": "No matching folders",
     "ns.sessions": "{0} sessions",
     "ns.errNoFolder": "Pick or type a working folder first",
+    "ns.target": "Runs on",
+    "ns.localMachine": "This machine",
+    "ns.localHint": "run on this computer",
+    "ns.addSsh": "Add an SSH server…",
+    "ns.addSshHint": "register a host in Settings → Connections",
+    "ns.connect": "Connect",
+    "ns.connecting": "Connecting…",
+    "ns.connectFailed": "Could not connect: {0}",
+    "ns.remoteCwd": "remote working folder (optional)",
+    "ns.remoteHint": "You can pick a remote folder after connecting. Leave empty to start in the remote home directory.",
     "top.search": "search in transcript (Ctrl+F)",
     "top.sessionActions": "session actions",
     "top.sessions": "sessions",
@@ -595,7 +661,38 @@ const STR = {
     "nav.providers": "Providers",
     "nav.extensions": "Extensions",
     "nav.connectors": "Connectors",
+    "nav.connections": "Connections",
     "nav.system": "About",
+    "remote.back": "Back to local",
+    "remote.badge": "SSH: {0}",
+    "remote.badgeTitle": "Connected over SSH: {0} — click for connection settings",
+    "remote.lost": "SSH connection lost: {0}",
+    "remote.current": "Current connection",
+    "remote.readOnly": "Remote connection settings can only be changed on the local machine.",
+    "ssh.title": "SSH connections",
+    "ssh.desc": "Starts `familiar serve` on a remote machine and uses that machine's tools and folders through an SSH tunnel. Authentication uses keys or ssh-agent.",
+    "ssh.name": "Display name",
+    "ssh.host": "Host (e.g. build.example.com)",
+    "ssh.user": "User (optional)",
+    "ssh.port": "Port",
+    "ssh.key": "Identity file (optional)",
+    "ssh.remoteBin": "Remote familiar path (optional)",
+    "ssh.save": "Save",
+    "ssh.edit": "Edit",
+    "ssh.delete": "Delete",
+    "ssh.connect": "Connect",
+    "ssh.test": "Test connection",
+    "ssh.testing": "Testing…",
+    "ssh.testOk": "✓ {0} ({1} / familiar {2})",
+    "ssh.testFail": "✗ {0}",
+    "ssh.saved": "Saved",
+    "ssh.deleted": "Deleted: {0}",
+    "ssh.deleteConfirm": "Delete the connection \"{0}\"?",
+    "ssh.none": "No SSH servers registered yet",
+    "ssh.errHost": "Enter a host",
+    "ssh.desktopOnly": "SSH connections are available in the desktop app only.",
+    "ssh.connectFail": "Connection failed: {0}",
+    "ssh.current": "Connected: {0}",
     "conn.googleTitle": "Google (Gmail / Calendar)",
     "conn.googleClientId": "OAuth client ID",
     "conn.googleClientSecret": "OAuth client secret",
@@ -635,6 +732,7 @@ const STR = {
     "attach.added": "attached {0} image(s)",
     "toast.dropAttach": "attached via drop: {0}",
     "toast.attachFailed": "could not resolve a file path: {0}",
+    "attach.remotePath": "Local file paths are not available while connected over SSH (images still attach normally)",
     "toast.stopRequested": "stop requested…",
     "toast.effortSet": "effort: {0}",
     "toast.effortNext": "effort: {0} (applies from the next session)",
@@ -1732,8 +1830,9 @@ function openCwdModal() {
   const errBox = $("#cwd-overlay .form-error");
   errBox.hidden = true;
   errBox.textContent = "";
-  // native folder dialog is only available inside the Electron shell
-  $("#cwd-browse").hidden = typeof window.familiarDesktop?.pickDirectory !== "function";
+  // native folder dialog is only available inside the Electron shell and
+  // only when the local machine is the one running the tools
+  $("#cwd-browse").hidden = remoteBoot.isRemote || typeof window.familiarDesktop?.pickDirectory !== "function";
   $("#cwd-overlay").hidden = false;
   void refreshCwdSuggest();
   input.focus();
@@ -3173,8 +3272,9 @@ async function openFileViewer(filePath) {
     tree.hidden = false;
   });
 
-  // desktop: open with the OS default application
-  if (window.familiarDesktop?.openPath) {
+  // desktop: open with the OS default application (local files only — a
+  // remote file cannot be opened by an app on this machine)
+  if (window.familiarDesktop?.openPath && !remoteBoot.isRemote) {
     const extBtn = document.createElement("button");
     extBtn.type = "button";
     extBtn.className = "ghost";
@@ -3411,6 +3511,7 @@ const SETTINGS_SECTIONS = [
   { id: "providers", labelKey: "nav.providers", icon: "▣" },
   { id: "extensions", labelKey: "nav.extensions", icon: "↯" },
   { id: "connectors", labelKey: "nav.connectors", icon: "🔗" },
+  { id: "connections", labelKey: "nav.connections", icon: "🖥" },
   { id: "system", labelKey: "nav.system", icon: "◍" },
 ];
 let settingsSection = "general";
@@ -3459,6 +3560,7 @@ function renderSettingsSection(id) {
   else if (id === "providers") void renderProvidersSection(content, stale);
   else if (id === "extensions") void renderExtensionsSection(content, stale);
   else if (id === "connectors") void renderConnectorsSection(content, stale);
+  else if (id === "connections") void renderConnectionsSection(content, stale);
   else if (id === "system") void renderSystemSection(content, stale);
 }
 
@@ -4216,6 +4318,224 @@ function pairRow(k, v) {
   return row;
 }
 
+// ---------------------------------------------------------------------------
+// settings → connections (desktop SSH bridge)
+// ---------------------------------------------------------------------------
+let sshEditId = null;
+
+function sshField(label, value, placeholder = "") {
+  const wrap = document.createElement("label");
+  wrap.className = "ssh-field";
+  const span = document.createElement("span");
+  span.textContent = label;
+  const input = document.createElement("input");
+  input.type = "text";
+  input.value = value ?? "";
+  input.placeholder = placeholder;
+  wrap.append(span, input);
+  return { wrap, input };
+}
+
+function sshActionRow(buttons) {
+  const row = document.createElement("div");
+  row.className = "conn-actions";
+  for (const b of buttons) row.appendChild(b);
+  return row;
+}
+
+async function renderConnectionsSection(content, stale = () => false) {
+  const put = (node) => { if (!stale()) content.appendChild(node); };
+  const api = connApi();
+
+  if (remoteBoot.isRemote) {
+    // Read-only: the remote page may show where it is running and the way
+    // back, but never the other hosts saved on the local machine.
+    await refreshConnections(true);
+    if (stale()) return;
+    const host = connState.current;
+    const c = card(t("remote.current"), t("remote.readOnly"));
+    const label = host
+      ? `${host.user ? `${host.user}@` : ""}${host.host}`
+      : remoteBoot.host || "SSH";
+    c.appendChild(pairRow(t("ssh.host"), label));
+    if (host?.hostname) c.appendChild(pairRow("hostname", host.hostname));
+    if (host?.platform) c.appendChild(pairRow("platform", host.platform));
+    if (host?.version) c.appendChild(pairRow(t("set.version"), host.version));
+    const back = document.createElement("button");
+    back.type = "button";
+    back.textContent = t("remote.back");
+    back.addEventListener("click", () => void backToLocal());
+    c.appendChild(sshActionRow([back]));
+    put(c);
+    return;
+  }
+
+  if (!api) {
+    put(card(t("ssh.title"), t("ssh.desktopOnly")));
+    return;
+  }
+
+  await refreshConnections(true);
+  if (stale()) return;
+
+  const result = document.createElement("span");
+  result.className = "conn-result";
+  const setResult = (text, ok) => {
+    result.textContent = text;
+    result.style.color = ok === undefined ? "var(--dim)" : ok ? "var(--ok)" : "var(--err)";
+  };
+
+  if (connState.current) {
+    const cur = card(t("ssh.current", connState.current.hostname || connState.current.host));
+    const label = `${connState.current.user ? `${connState.current.user}@` : ""}${connState.current.host}`;
+    cur.appendChild(pairRow(t("ssh.host"), label));
+    const back = document.createElement("button");
+    back.type = "button";
+    back.textContent = t("remote.back");
+    back.addEventListener("click", () => void backToLocal());
+    cur.appendChild(sshActionRow([back]));
+    put(cur);
+  }
+
+  const list = card(t("ssh.title"), t("ssh.desc"));
+  if (connState.connections.length === 0) {
+    const note = document.createElement("div");
+    note.className = "files-note";
+    note.textContent = t("ssh.none");
+    list.appendChild(note);
+  }
+  for (const pr of connState.connections) {
+    const row = document.createElement("div");
+    row.className = "ssh-row";
+    row.innerHTML = `<div class="ssh-main"><b>${esc(pr.name)}</b><small>${esc(sshProfileLabel(pr))}</small></div>`;
+    const test = document.createElement("button");
+    test.type = "button";
+    test.className = "ghost";
+    test.textContent = t("ssh.test");
+    test.addEventListener("click", async () => {
+      setResult(t("ssh.testing"), undefined);
+      try {
+        const r = await api.testConnection(pr.id);
+        setResult(t("ssh.testOk", r.hostname, r.platform, r.version || "?"), true);
+      } catch (err) {
+        setResult(t("ssh.testFail", err?.message ?? err), false);
+      }
+    });
+    const connect = document.createElement("button");
+    connect.type = "button";
+    connect.textContent = t("ssh.connect");
+    connect.addEventListener("click", async () => {
+      connect.disabled = true;
+      try {
+        await api.connectProfile(pr.id, { newSession: false });
+      } catch (err) {
+        connect.disabled = false;
+        toast(t("ssh.connectFail", err?.message ?? err), "err");
+      }
+    });
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "ghost";
+    edit.textContent = t("ssh.edit");
+    edit.addEventListener("click", () => {
+      sshEditId = pr.id;
+      renderSettingsSection("connections");
+    });
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "ghost";
+    del.textContent = t("ssh.delete");
+    del.addEventListener("click", async () => {
+      if (!window.confirm(t("ssh.deleteConfirm", pr.name))) return;
+      try {
+        await api.deleteConnection(pr.id);
+        if (sshEditId === pr.id) sshEditId = null;
+        toast(t("ssh.deleted", pr.name), "ok");
+        renderSettingsSection("connections");
+      } catch (err) {
+        toast(String(err?.message ?? err), "err");
+      }
+    });
+    row.appendChild(sshActionRow([connect, test, edit, del]));
+    list.appendChild(row);
+  }
+  list.appendChild(result);
+  put(list);
+
+  const editing = sshEditId ? connState.connections.find((x) => x.id === sshEditId) : null;
+  const form = card(editing ? `${t("ssh.edit")}: ${editing.name}` : t("ssh.addSsh"));
+  const name = sshField(t("ssh.name"), editing?.name ?? "");
+  const host = sshField(t("ssh.host"), editing?.host ?? "", "build.example.com");
+  const user = sshField(t("ssh.user"), editing?.user ?? "");
+  const port = sshField(t("ssh.port"), editing?.port ?? 22);
+  const key = sshField(t("ssh.key"), editing?.identityFile ?? "", "~/.ssh/id_ed25519");
+  const bin = sshField(t("ssh.remoteBin"), editing?.remoteBin ?? "", "familiar");
+  form.append(name.wrap, host.wrap, user.wrap, port.wrap, key.wrap, bin.wrap);
+
+  const fresult = document.createElement("span");
+  fresult.className = "conn-result";
+  const draft = () => ({
+    ...(editing ? { id: editing.id } : {}),
+    name: name.input.value.trim(),
+    host: host.input.value.trim(),
+    user: user.input.value.trim(),
+    port: Number.parseInt(port.input.value, 10) || 22,
+    identityFile: key.input.value.trim(),
+    remoteBin: bin.input.value.trim() || "familiar",
+  });
+  const save = document.createElement("button");
+  save.type = "button";
+  save.textContent = t("ssh.save");
+  save.addEventListener("click", async () => {
+    if (!host.input.value.trim()) {
+      fresult.textContent = t("ssh.errHost");
+      fresult.style.color = "var(--err)";
+      return;
+    }
+    try {
+      await api.saveConnection(draft());
+      sshEditId = null;
+      toast(t("ssh.saved"), "ok");
+      renderSettingsSection("connections");
+    } catch (err) {
+      fresult.textContent = String(err?.message ?? err);
+      fresult.style.color = "var(--err)";
+    }
+  });
+  const test = document.createElement("button");
+  test.type = "button";
+  test.className = "ghost";
+  test.textContent = t("ssh.test");
+  test.addEventListener("click", async () => {
+    if (!host.input.value.trim()) {
+      fresult.textContent = t("ssh.errHost");
+      fresult.style.color = "var(--err)";
+      return;
+    }
+    fresult.textContent = t("ssh.testing");
+    fresult.style.color = "var(--dim)";
+    try {
+      const r = await api.testConnection(draft());
+      fresult.textContent = t("ssh.testOk", r.hostname, r.platform, r.version || "?");
+      fresult.style.color = "var(--ok)";
+    } catch (err) {
+      fresult.textContent = t("ssh.testFail", err?.message ?? err);
+      fresult.style.color = "var(--err)";
+    }
+  });
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "ghost";
+  cancel.textContent = t("skills.cancel");
+  cancel.hidden = !editing;
+  cancel.addEventListener("click", () => {
+    sshEditId = null;
+    renderSettingsSection("connections");
+  });
+  form.appendChild(sshActionRow([save, test, cancel, fresult]));
+  put(form);
+}
+
 async function renderConnectorsSection(content, stale = () => false) {
   // every append goes through here: a section the user navigated away
   // from while an RPC was in flight must not land in the new tab
@@ -4733,6 +5053,7 @@ function renderUpdateBtn(st) {
 function initUpdateUi() {
   const od = window.familiarDesktop;
   if (!od?.onUpdateStatus) return; // plain browser — updates via `familiar update`
+  if (remoteBoot.isRemote) return; // updates apply to the local install only
   let prev = null;
   od.onUpdateStatus((st) => {
     prev = updateState;
@@ -4756,6 +5077,10 @@ function initUpdateUi() {
 
 async function manualUpdateCheck() {
   const od = window.familiarDesktop;
+  if (remoteBoot.isRemote) {
+    toast(t("update.remoteHint"), "info");
+    return;
+  }
   if (!od?.checkForUpdate) {
     toast(t("update.cliHint"), "info");
     return;
@@ -4771,22 +5096,202 @@ async function manualUpdateCheck() {
  * creates the session with that cwd. */
 let nsSuggestTimer = null;
 let nsSelectedFolder = "";
+let nsTarget = "local";
 
-function openNewSessionModal() {
-  nsSelectedFolder = state.currentSession?.cwd || "";
+// ---------------------------------------------------------------------------
+// SSH connections (desktop bridge; swiches the whole window to a remote
+// `familiar serve` through an SSH tunnel)
+// ---------------------------------------------------------------------------
+const connState = {
+  loaded: false,
+  local: true,
+  connections: [],
+  current: null,
+  loading: null,
+  error: "",
+};
+
+/** The preload bridge when we run inside the desktop shell. */
+function connApi() {
+  return window.familiarDesktop && typeof window.familiarDesktop.connections === "function"
+    ? window.familiarDesktop
+    : null;
+}
+
+async function refreshConnections(force = false) {
+  const api = connApi();
+  if (!api) return connState;
+  if (connState.loading && !force) return connState.loading;
+  connState.loading = api.connections()
+    .then((res) => {
+      connState.loaded = true;
+      connState.local = res?.local !== false;
+      connState.connections = Array.isArray(res?.connections) ? res.connections : [];
+      connState.current = res?.current ?? null;
+      connState.error = "";
+    })
+    .catch((err) => {
+      connState.loaded = true;
+      connState.error = String(err?.message ?? err);
+    })
+    .finally(() => {
+      connState.loading = null;
+    });
+  return connState.loading;
+}
+
+function sshProfileLabel(p) {
+  if (!p) return "";
+  const user = p.user ? `${p.user}@` : "";
+  const port = p.port && p.port !== 22 ? `:${p.port}` : "";
+  return `${user}${p.host}${port}`;
+}
+
+function showConnBanner(text) {
+  $("#conn-banner-text").textContent = text;
+  $("#conn-banner").hidden = false;
+}
+
+function hideConnBanner() {
+  $("#conn-banner").hidden = true;
+}
+
+/** Ask the shell to tear the tunnel down; it then reloads the local UI. */
+async function backToLocal() {
+  const api = connApi();
+  if (!api || typeof api.disconnectConnection !== "function") return;
+  try {
+    await api.disconnectConnection();
+  } catch (err) {
+    toast(String(err?.message ?? err), "err");
+  }
+}
+
+function maybeOpenBootNewSession() {
+  if (!remoteBoot.wantNewSession) return;
+  remoteBoot.wantNewSession = false;
+  openNewSessionModal(remoteBoot.cwd);
+}
+
+/** One-time wiring: remote badge/banner, or the local connection list. */
+function setupConnectionUi() {
+  const badge = $("#remote-badge");
+  if (remoteBoot.isRemote) {
+    document.body.classList.add("remote-mode");
+    const host = remoteBoot.host || "SSH";
+    badge.hidden = false;
+    badge.textContent = t("remote.badge", host);
+    badge.title = t("remote.badgeTitle", host);
+    badge.addEventListener("click", () => openSettingsModal("connections"));
+    // remote paths cannot come from the local native picker
+    $("#cwd-browse").hidden = true;
+  } else {
+    document.body.classList.add("local-mode");
+    void refreshConnections();
+  }
+  $("#conn-banner-back").addEventListener("click", () => void backToLocal());
+  $("#conn-banner-close").addEventListener("click", hideConnBanner);
+  $("#ns-remote-back").addEventListener("click", () => void backToLocal());
+  const api = connApi();
+  if (api && typeof api.onConnectionStatus === "function") {
+    api.onConnectionStatus((status) => {
+      if (!status) return;
+      if (status.state === "lost") {
+        showConnBanner(t("remote.lost", status.host || remoteBoot.host || "SSH"));
+      } else if (status.state === "local") {
+        hideConnBanner();
+      }
+    });
+  }
+}
+
+function openNewSessionModal(initialCwd = "") {
   const input = $("#ns-folder-input");
-  input.value = "";
+  input.value = initialCwd || "";
+  nsSelectedFolder = initialCwd || "";
   const errBox = $("#new-session-overlay .form-error");
   errBox.hidden = true;
   errBox.textContent = "";
-  $("#ns-browse").hidden = typeof window.familiarDesktop?.pickDirectory !== "function";
+  $("#ns-browse").hidden = remoteBoot.isRemote || typeof window.familiarDesktop?.pickDirectory !== "function";
   $("#new-session-overlay").hidden = false;
+  if (remoteBoot.isRemote) {
+    // This page is served by the SSH host: sessions are always remote, and
+    // other hosts cannot be reached from here.
+    $("#ns-target-wrap").hidden = true;
+    $("#ns-remote-bar").hidden = false;
+    $("#ns-remote-bar-host").textContent = remoteBoot.host || t("remote.current");
+    $("#ns-local-picker").hidden = false;
+    $("#ns-remote-picker").hidden = true;
+    renderNsRecent();
+    input.focus();
+    return;
+  }
+  $("#ns-target-wrap").hidden = false;
+  $("#ns-remote-bar").hidden = true;
+  renderNsTargets();
+  selectNsTarget("local", { silent: true });
   renderNsRecent();
   input.focus();
+  void refreshConnections().then(() => {
+    if ($("#new-session-overlay").hidden) return;
+    renderNsTargets();
+    selectNsTarget(nsTarget, { silent: true });
+  });
 }
 
 function closeNewSessionModal() {
   $("#new-session-overlay").hidden = true;
+}
+
+/** "Runs on" rows: this machine + each saved SSH profile (+ add shortcut). */
+function renderNsTargets() {
+  const box = $("#ns-targets");
+  box.innerHTML = "";
+  const row = (id, icon, name, sub) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "ns-target-row";
+    b.dataset.target = id;
+    b.innerHTML =
+      `<span class="ns-target-ic">${icon}</span>` +
+      `<span class="ns-target-text"><span class="ns-target-name">${esc(name)}</span>` +
+      `<span class="ns-target-sub">${esc(sub)}</span></span>`;
+    b.addEventListener("click", () => selectNsTarget(id));
+    box.appendChild(b);
+    return b;
+  };
+  row("local", "💻", t("ns.localMachine"), t("ns.localHint"));
+  for (const p of connState.connections) {
+    row(p.id, "🖥", p.name, sshProfileLabel(p));
+  }
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "ns-target-row ns-target-add";
+  add.innerHTML =
+    `<span class="ns-target-ic">＋</span>` +
+    `<span class="ns-target-text"><span class="ns-target-name">${esc(t("ns.addSsh"))}</span>` +
+    `<span class="ns-target-sub">${esc(t("ns.addSshHint"))}</span></span>`;
+  add.addEventListener("click", () => {
+    closeNewSessionModal();
+    openSettingsModal("connections");
+  });
+  box.appendChild(add);
+}
+
+/** Pick "local" or one SSH profile in the new-session dialog. */
+function selectNsTarget(id, opts = {}) {
+  if (id !== "local" && !connState.connections.some((p) => p.id === id)) id = "local";
+  nsTarget = id;
+  const remote = id !== "local";
+  $("#ns-local-picker").hidden = remote;
+  $("#ns-remote-picker").hidden = !remote;
+  const profile = connState.connections.find((p) => p.id === id);
+  $("#ns-remote-name").textContent = profile ? sshProfileLabel(profile) : "";
+  $("#ns-create").textContent = t(remote ? "ns.connect" : "ns.create");
+  for (const el of $("#ns-targets").querySelectorAll("[data-target]")) {
+    el.classList.toggle("selected", el.dataset.target === id);
+  }
+  if (!opts.silent) (remote ? $("#ns-remote-cwd") : $("#ns-folder-input")).focus();
 }
 
 /** Recent working folders from the session history (deduped, newest first). */
@@ -4879,6 +5384,28 @@ async function createSessionFromModal() {
     errBox.textContent = msg;
     errBox.hidden = false;
   };
+  if (nsTarget !== "local") {
+    // SSH target: hand the profile to the shell, which opens the tunnel and
+    // loads the remote UI; the remote dialog opens pre-filled with the cwd.
+    const api = connApi();
+    if (!api || typeof api.connectProfile !== "function") {
+      showErr(t("ssh.desktopOnly"));
+      return;
+    }
+    const connectBtn = $("#ns-create");
+    errBox.hidden = true;
+    connectBtn.disabled = true;
+    connectBtn.textContent = t("ns.connecting");
+    try {
+      await api.connectProfile(nsTarget, { newSession: true, cwd: $("#ns-remote-cwd").value.trim() });
+      // the window navigates to the remote UI; keep the button disabled
+    } catch (err) {
+      showErr(t("ns.connectFailed", err?.message ?? err));
+      connectBtn.disabled = false;
+      connectBtn.textContent = t("ns.connect");
+    }
+    return;
+  }
   // accept the typed path as-is when nothing is picked from the list
   const typed = $("#ns-folder-input").value.trim();
   const folder = nsSelectedFolder || typed;
@@ -5056,6 +5583,11 @@ async function attachFiles(fileList) {
       toast(t("toast.attachFailed", f.name), "err");
       continue;
     }
+    if (remoteBoot.isRemote) {
+      // the tools run on the SSH host — a local path would not resolve there
+      toast(t("attach.remotePath"), "info");
+      continue;
+    }
     insertIntoComposer(`@${ref} `);
     refs.push(ref);
   }
@@ -5108,6 +5640,7 @@ function boot() {
   applyTheme();
   applyUiPrefs();
   applyI18n();
+  setupConnectionUi();
   // notifications default on: secure the browser permission early (Electron
   // grants it automatically; browsers may show a one-time prompt)
   if (prefs.notify && typeof Notification !== "undefined" && Notification.permission === "default") {
@@ -5144,6 +5677,12 @@ function boot() {
     nsSuggestTimer = setTimeout(() => void renderNsList(), 200);
   });
   $("#ns-folder-input").addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      void createSessionFromModal();
+    }
+  });
+  $("#ns-remote-cwd").addEventListener("keydown", (ev) => {
     if (ev.key === "Enter") {
       ev.preventDefault();
       void createSessionFromModal();
@@ -5450,7 +5989,10 @@ function boot() {
   renderModelChip();
   renderEffortChip();
   updateContextGauge();
-  void refreshSessions();
+  void refreshSessions().then(
+    () => maybeOpenBootNewSession(),
+    () => maybeOpenBootNewSession(),
+  );
   void loadInbox();
   autoSize(input);
   input.focus();

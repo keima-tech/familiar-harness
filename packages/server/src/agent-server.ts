@@ -1134,7 +1134,10 @@ export class AgentServer {
         `"model" is required for provider "${provider}" (set default_model or default_model in config)`,
       );
     }
-    const cwd = path.resolve(str(params, "cwd") ?? process.cwd());
+    // `~`-prefixed cwds (typed in the new-session/cwd dialogs) resolve to the
+    // server's home — important in remote mode, where "~" means the SSH host.
+    const rawCwd = str(params, "cwd");
+    const cwd = rawCwd ? this.resolveFsPath(rawCwd) : process.cwd();
     const effortParam = str(params, "effort") ?? "";
     const effort = normalizeEffort(effortParam);
     if (effortParam !== "" && !effort) {

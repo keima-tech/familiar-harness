@@ -37,6 +37,7 @@
           <div class="title-col">
             <div class="title-row">
               <div id="session-title" class="title">no session</div>
+              <button id="remote-badge" class="remote-badge" type="button" hidden>🖥 SSH</button>
               <div class="menu-wrap">
                 <button id="session-menu-btn" class="iconbtn" title="セッション操作" data-i18n-title="top.sessionActions">⋯</button>
                 <div id="session-menu-pop" class="pop" hidden>
@@ -70,6 +71,13 @@
           <button id="pane-toggle" class="iconbtn" title="サイドペイン" data-i18n-title="top.pane">▤</button>
         </div>
       </header>
+
+      <div id="conn-banner" class="conn-banner" hidden>
+        <span class="conn-banner-ic">⚡</span>
+        <span id="conn-banner-text"></span>
+        <button id="conn-banner-back" type="button" class="ghost" data-i18n="remote.back">ローカルに戻る</button>
+        <button id="conn-banner-close" type="button" class="ghost" title="✕">✕</button>
+      </div>
 
       <div id="search-bar" hidden>
         <input id="transcript-search" type="search" placeholder="トランスクリプトを検索…" data-i18n-ph="search.ph" autocomplete="off" spellcheck="false" />
@@ -176,14 +184,30 @@
           <b data-i18n="ns.title">新規セッション</b>
           <button id="ns-close" class="ghost">✕</button>
         </div>
+        <div id="ns-remote-bar" class="ns-remote-bar" hidden>
+          <span class="ns-remote-head"><span class="ns-remote-ic">🖥</span><b id="ns-remote-bar-host"></b></span>
+          <button id="ns-remote-back" type="button" class="ghost" data-i18n="remote.back">ローカルに戻る</button>
+        </div>
         <div class="ns-body">
-          <div class="ns-search">
-            <input id="ns-folder-input" type="text" spellcheck="false" autocomplete="off"
-              placeholder="フォルダーを検索・入力… (例: ~/work)" data-i18n-ph="ns.search" />
+          <div id="ns-target-wrap" class="ns-target">
+            <div class="ns-label ns-target-label" data-i18n="ns.target">実行先</div>
+            <div id="ns-targets" class="ns-targets"></div>
           </div>
-          <div class="ns-center">
-            <div class="ns-label" data-i18n="ns.pickFolder">作業フォルダーを選択</div>
-            <div id="ns-list" class="ns-folders"></div>
+          <div id="ns-local-picker">
+            <div class="ns-search">
+              <input id="ns-folder-input" type="text" spellcheck="false" autocomplete="off"
+                placeholder="フォルダーを検索・入力… (例: ~/work)" data-i18n-ph="ns.search" />
+            </div>
+            <div class="ns-center">
+              <div class="ns-label" data-i18n="ns.pickFolder">作業フォルダーを選択</div>
+              <div id="ns-list" class="ns-folders"></div>
+            </div>
+          </div>
+          <div id="ns-remote-picker" class="ns-remote-picker" hidden>
+            <div class="ns-remote-head"><span class="ns-remote-ic">🖥</span><b id="ns-remote-name"></b></div>
+            <div class="ns-label" data-i18n="ns.remoteCwd">リモートの作業フォルダー (任意)</div>
+            <input id="ns-remote-cwd" type="text" spellcheck="false" autocomplete="off" placeholder="~/work" />
+            <div class="ns-remote-hint" data-i18n="ns.remoteHint">接続後、リモート側のフォルダーを選べます。空欄ならホームディレクトリから始まります。</div>
           </div>
         </div>
         <div class="form-error" hidden></div>

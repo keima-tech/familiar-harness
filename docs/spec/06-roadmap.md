@@ -817,3 +817,29 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   `lsp_diagnostics` が MOCK001 を返すこと、ローカルセッションは当該 MCP を
   広告しないこと、セッション削除でリモート添付が消えることを検証。
   typecheck / smoke 通過。
+
+## v0.1.0 の実装メモ㊴(2026-10-26、WebUI からの SSH 接続(サーバ側でプロファイル/トンネル管理))
+
+- **サーバ側モジュール** `packages/server/src/ssh-connections.ts`: プロファイル
+  (`~/.familiar/desktop.json` を**デスクトップと共有**、0600・秘密情報なし)、
+  軽量プローブ(`$HOME`/hostname/platform/`familiar --version` の有無)、
+  リモート serve + トンネル + トークン受け渡し(desktop/ssh.js の同等実装)。
+  トンネルの待ち受けは `server.bind` に追従(`0.0.0.0` は LAN からも到達可能)。
+- **RPC**: `conn.list`(connections + current)/ `conn.save` / `conn.delete` /
+  `conn.test`(id か profile。proxy は familiar 不要のプローブ)/ `conn.connect`
+  (url/token/stop/host/hostname を返す)/ `conn.disconnect` / `conn.status`。
+- **capability stop**: `GET /tunnel/stop?stop=<32hex>` を認証不要・CORS 可で追加し、
+  リモート UI からトンネルを閉じられるように(ローカルのベアラトークンは
+  リモート側へ渡さない)。閉じ忘れは 12 時間 TTL(`FAMILIAR_TUNNEL_TTL_MS` で上書き可)で
+  自動切断。ローカル UI は `conn.status` で接続中トンネルを表示・手動切断できる。
+- **WebUI**: 接続 API を `connApi()` に集約し、preload が無ければ RPC 実装
+  (`rpcConnApi`)にフォールバック。ブラウザからプロファイル管理・プロキシセッション
+  作成・familiar サーバ方式のトンネル遷移(`?token…&remote=1&stop=…&local=…`)が可能。
+  リモート UI の「ローカルに戻る」は stop エンドポイント→ローカルへ遷移。
+  デスクトップの proxy プロファイルの「接続テスト」はサーバのプローブへ委譲
+  (リモートに familiar が無くても検証できる)。
+- **テスト**: ssh-e2e を **58 項目**に拡張 — デスクトップ保存プロファイルをサーバ RPC が
+  読めること、RPC での保存/プローブ、サーバ側トンネルの healthz 到達・conn.status・
+  capability stop での切断、ブラウザ用トンネル URL(remote/stop/local 付き)が
+  リモート UI を返すこと、`connApiOverride` で preload 無し経路(実行先リスト→
+  プロキシセッション作成)を通すこと。typecheck / smoke 通過。

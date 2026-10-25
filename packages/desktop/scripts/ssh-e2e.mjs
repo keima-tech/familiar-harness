@@ -612,6 +612,116 @@ try {
   await waitFor(() => !fs.existsSync(uploadBucket), "remote upload cleanup", 20_000);
   check(!fs.existsSync(uploadBucket), "deleting a session removes its remote uploads");
 
+  // ---- WebUI path: the same features through server RPCs (no desktop shell)
+  const sharedStore = await evalOnce(`(async () => {
+    const list = await rpcConnApi.connections();
+    return { count: list.connections.length, hosts: list.connections.map((p) => p.host) };
+  })()`);
+  check(
+    sharedStore?.hosts?.includes("remote1") && sharedStore?.hosts?.includes("proxy1"),
+    "server RPCs read the profiles the desktop saved",
+    JSON.stringify(sharedStore),
+  );
+
+  const webSaved = await evalOnce(`(async () => {
+    const res = await rpcConnApi.saveConnection({ host: "web1", user: "tester", mode: "proxy", name: "Web proxy" });
+    return { id: res.profile.id, mode: res.profile.mode, count: res.connections.length };
+  })()`);
+  check(webSaved?.mode === "proxy" && webSaved?.count >= 3, "RPC saves a profile from the WebUI", JSON.stringify(webSaved));
+  const webProxyId = webSaved?.id ?? "";
+
+  const probeResult = await evalOnce(`rpcConnApi.testConnection(${JSON.stringify(webProxyId)})`);
+  check(
+    probeResult?.ok === true && probeResult?.home === remoteHome && typeof probeResult?.familiar === "string" && probeResult?.hostname === os.hostname(),
+    "RPC connection test probes the host",
+    JSON.stringify(probeResult),
+  );
+
+  const desktopProxyTest = await evalOnce(`window.familiarDesktop.testConnection(${JSON.stringify(webProxyId)})`);
+  check(
+    desktopProxyTest?.ok === true && desktopProxyTest?.home === remoteHome,
+    "the desktop shell tests proxy profiles via the server probe",
+    JSON.stringify(desktopProxyTest),
+  );
+
+  const serveProfileId = await evalOnce(`(async () => {
+    const list = await rpcConnApi.connections();
+    return list.connections.find((p) => p.host === "remote1")?.id ?? "";
+  })()`);
+  const tunnel = await evalOnce(`rpcConnApi.connectProfile(${JSON.stringify(serveProfileId)}, { newSession: false })`);
+  check(
+    /^http:\/\/127\.0\.0\.1:\d+$/.test(String(tunnel?.url)) && /^[0-9a-f]{64}$/.test(String(tunnel?.token)) && /^[0-9a-f]{32}$/.test(String(tunnel?.stop)),
+    "RPC connect opens a server-side tunnel",
+    JSON.stringify({ url: tunnel?.url, stop: tunnel?.stop }),
+  );
+  const tunnelHealth = await fetch(`${tunnel.url}/healthz`, { headers: { Authorization: `Bearer ${tunnel.token}` } })
+    .then((r) => r.json())
+    .catch(() => null);
+  check(tunnelHealth?.ok === true && tunnelHealth?.home === remoteHome, "the server tunnel reaches the remote server", JSON.stringify(tunnelHealth));
+  const statusWhileUp = await evalOnce(`rpc("conn.status").then((r) => r.current)`);
+  check(statusWhileUp?.id === serveProfileId && !!statusWhileUp?.hostname, "conn.status reports the active tunnel", JSON.stringify(statusWhileUp));
+
+  const stopped = await fetch(`http://127.0.0.1:${LOCAL_PORTS[0]}/tunnel/stop?stop=${encodeURIComponent(String(tunnel.stop))}`, {
+    headers: { Origin: `http://127.0.0.1:${LOCAL_PORTS[0]}` },
+  })
+    .then((r) => r.json())
+    .catch(() => null);
+  check(stopped?.ok === true, "the capability stop endpoint closes the tunnel", JSON.stringify(stopped));
+  let tunnelGone = false;
+  for (let i = 0; i < 30 && !tunnelGone; i++) {
+    await new Promise((r) => setTimeout(r, 200));
+    tunnelGone = await fetch(`${tunnel.url}/healthz`).then(() => false).catch(() => true);
+  }
+  check(tunnelGone, "the tunnel port is closed after the stop");
+  const statusAfter = await evalOnce(`rpc("conn.status").then((r) => r.current)`);
+  check(statusAfter === null, "conn.status is empty after the stop", JSON.stringify(statusAfter));
+
+  // the remote URL a browser would navigate to is served end to end
+  const secondTunnel = await evalOnce(`rpcConnApi.connectProfile(${JSON.stringify(serveProfileId)}, { newSession: true, cwd: ${JSON.stringify(remoteWork)} })`);
+  const browserUrl = await evalOnce(`buildTunnelUrl(${JSON.stringify(secondTunnel)}, { newSession: true, cwd: ${JSON.stringify(remoteWork)} })`);
+  const browserPage = await fetch(browserUrl).then((r) => ({ ok: r.ok, body: null, status: r.status })).catch(() => null);
+  const browserHtml = browserPage?.ok ? await fetch(browserUrl).then((r) => r.text()) : "";
+  check(
+    browserPage?.ok === true && browserHtml.includes("new-session-overlay") && /stop=[0-9a-f]{32}/.test(browserUrl) && /local=http/.test(browserUrl),
+    "the browser tunnel URL serves the remote UI with stop/local params",
+    `${browserUrl.slice(0, 120)} status=${browserPage?.status}`,
+  );
+  await fetch(`http://127.0.0.1:${LOCAL_PORTS[0]}/tunnel/stop?stop=${encodeURIComponent(String(secondTunnel.stop))}`).catch(() => null);
+
+  // the WebUI connection layer works without the desktop bridge
+  const overrideWorked = await evalOnce(`(async () => {
+    connApiOverride = rpcConnApi;
+    try {
+      openNewSessionModal();
+      await new Promise((r) => setTimeout(r, 600));
+      const rows = document.querySelectorAll("#ns-targets .ns-target-row").length;
+      selectNsTarget(${JSON.stringify(webProxyId)});
+      for (let i = 0; i < 50; i++) {
+        await new Promise((r) => setTimeout(r, 200));
+        if (document.querySelectorAll("#ns-remote-list .ns-row").length > 0) break;
+      }
+      const remoteRows = document.querySelectorAll("#ns-remote-list .ns-row").length;
+      document.querySelector("#ns-remote-cwd").value = ${JSON.stringify(remoteWork)};
+      await createSessionFromModal();
+      const out = {
+        rows,
+        remoteRows,
+        host: state.currentSession?.remote?.host ?? "",
+        port: location.port,
+      };
+      if (state.sessionId) await rpc("session.delete", { id: state.sessionId });
+      return out;
+    } finally {
+      connApiOverride = null;
+      if (!document.querySelector("#new-session-overlay").hidden) closeNewSessionModal();
+    }
+  })()`);
+  check(
+    overrideWorked?.rows >= 4 && overrideWorked?.remoteRows > 0 && overrideWorked?.host === "web1" && overrideWorked?.port === String(LOCAL_PORTS[0]),
+    "the WebUI connection layer creates proxy sessions without the desktop bridge",
+    JSON.stringify(overrideWorked),
+  );
+
   // ---- EN mode: every new string is translated (no CJK fallback) -----------
   const cjk = await evalOnce(`(() => {
     setLang("en");

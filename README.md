@@ -165,6 +165,8 @@ For LAN-only exposure use `familiar serve --bind 0.0.0.0` **together with** toke
 - *familiar server* — the app starts `familiar serve` on that machine over SSH (keys/ssh-agent only, strict host-key checking), forwards a free local port, and switches the window to that host. Needs the same Familiar version and a `known_hosts` entry; *Back to local* returns.
 - *SSH proxy* — nothing is installed remotely: the session stays local while `bash/read/write/edit/glob/grep` execute on the host over ssh (ControlMaster-multiplexed on Linux/macOS). Remote folders are browsed from the dialog, and dragged non-image files are uploaded to the remote host and referenced as `@path` (deleted with the session; leftovers auto-prune after `uploads.retention_days`). MCP servers and language servers are spawned on the host over ssh — set a per-server `remote: { command, args }` override when the host needs a different binary.
 
+The WebUI works without the desktop shell too: the same profiles appear under *Settings → Connections* (server RPCs), proxy sessions run straight from the browser, and familiar-server hosts are tunneled by the server itself — the browser tab switches to the remote UI and returns through a capability stop endpoint (tunnels also expire after 12h; the listening address follows `server.bind`).
+
 ### Architecture
 
 ```

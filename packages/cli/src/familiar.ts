@@ -1319,6 +1319,7 @@ async function cmdServe(flags: Record<string, string | boolean>): Promise<void> 
     version: readVersion(),
     authToken,
     authTokenFile: authTokenFile ? path.resolve(authTokenFile.replace(/^~(?=$|[\\/])/, os.homedir())) : undefined,
+    onTunnelStop: (stopId) => server.stopTunnel(stopId),
   });
   if (printReady) {
     // One machine-readable line for remote launchers (desktop SSH connect):

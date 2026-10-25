@@ -64,6 +64,7 @@ import {
 import { log } from "@familiar/core";
 import { SessionTodoStore } from "./todo-store.js";
 import { RpcApprovalAdapter } from "./rpc-approvals.js";
+import { SshConnectionManager, sanitizeProfile as sanitizeSshProfile } from "./ssh-connections.js";
 
 /**
  * M5: every AgentServer with configured MCP servers registers here so child
@@ -150,6 +151,11 @@ export class AgentServer {
         installMcpExitCleanup(this.mcp);
       }
     }
+    // Tunnel host mirrors the server bind: a 0.0.0.0 server hands LAN clients
+    // a tunnel they can actually reach, loopback stays loopback-only.
+    const bind = this.cfg.server?.bind ?? "127.0.0.1";
+    const tunnelHost = bind === "0.0.0.0" ? "0.0.0.0" : bind === "" || bind === "localhost" ? "127.0.0.1" : bind;
+    this.sshConnections = new SshConnectionManager(tunnelHost);
     this.curator = new CuratorRunner(this.cfg, this.providers, this.selfImprove);
     this.runner = new AgentRunner(this.cfg, this.providers, this.store, {
       tools: opts.tools,
@@ -182,6 +188,8 @@ export class AgentServer {
   private mcpDiscover?: Promise<void>;
   /** MCP hubs bound to SSH hosts (proxy sessions), one per target */
   private readonly remoteMcpHubs = new Map<string, McpHub>();
+  /** SSH profiles + remote-serve tunnels, shared with the desktop shell */
+  readonly sshConnections: SshConnectionManager;
   /** M5: lifecycle hooks */
   readonly hooks?: HookRunner;
   /** M5: scheduled prompts (public for CLI/serve display) */
@@ -221,8 +229,14 @@ export class AgentServer {
     this.cronScheduler?.stop();
     if (this.uploadPruner) clearInterval(this.uploadPruner);
     this.uploadPruner = undefined;
+    this.sshConnections.dispose();
     disposeLspHub();
     disposeSshLspHubs();
+  }
+
+  /** Capability stop for `/tunnel/stop` (called by remote browser UIs). */
+  stopTunnel(stopId: string): boolean {
+    return this.sshConnections.stopById(stopId);
   }
 
   /** Uploaded attachments for a deleted session (proxy and serve modes). */
@@ -546,6 +560,47 @@ export class AgentServer {
           : undefined;
         return { phase1, consolidation: outcome };
       }
+      case "conn.list":
+        return { connections: this.sshConnections.listProfiles(), current: this.sshConnections.status() };
+      case "conn.save": {
+        const profile = this.sshConnections.saveProfile(params);
+        return { ok: true, profile, connections: this.sshConnections.listProfiles() };
+      }
+      case "conn.delete":
+        return {
+          ok: this.sshConnections.deleteProfile(str(params, "id") ?? ""),
+          connections: this.sshConnections.listProfiles(),
+        };
+      case "conn.test": {
+        const id = str(params, "id");
+        let profile = id ? this.sshConnections.getProfile(id) : null;
+        if (!profile && params["profile"] !== undefined) {
+          profile = sanitizeSshProfile(params["profile"], null);
+        }
+        if (!profile) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "connection profile not found");
+        return await this.sshConnections.probe(profile);
+      }
+      case "conn.connect": {
+        const profile = this.sshConnections.getProfile(str(params, "id") ?? "");
+        if (!profile) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "connection profile not found");
+        const { tunnel, token } = await this.sshConnections.connect(profile);
+        return {
+          ok: true,
+          url: tunnel.url,
+          token,
+          stop: tunnel.stop,
+          id: tunnel.id,
+          name: tunnel.name,
+          host: tunnel.host,
+          hostname: tunnel.hostname,
+          platform: tunnel.platform,
+          version: tunnel.version,
+        };
+      }
+      case "conn.disconnect":
+        return { ok: await this.sshConnections.disconnect() };
+      case "conn.status":
+        return { current: this.sshConnections.status() };
       case "mcp.status": {
         // with a session: proxy sessions report the ssh host's servers instead
         const sessionId = str(params, "session");

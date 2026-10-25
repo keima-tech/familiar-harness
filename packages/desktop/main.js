@@ -295,6 +295,47 @@ function connInfo(conn) {
   };
 }
 
+/** One JSON-RPC call against the local server (used for proxy tests). */
+function callLocalServer(method, params) {
+  return new Promise((resolve, reject) => {
+    if (!localUrl) return reject(new Error("local familiar server is not ready"));
+    const payload = JSON.stringify({ jsonrpc: "2.0", id: 1, method, params: params ?? {} });
+    const req = http.request(
+      {
+        host: "127.0.0.1",
+        port: Number(new URL(localUrl).port),
+        path: "/rpc",
+        method: "POST",
+        timeout: 60_000,
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(payload),
+          ...(localToken ? { Authorization: `Bearer ${localToken}` } : {}),
+        },
+      },
+      (res) => {
+        let body = "";
+        res.on("data", (c) => (body += c));
+        res.on("end", () => {
+          try {
+            const parsed = JSON.parse(body);
+            if (parsed.error) reject(new Error(parsed.error.message ?? "rpc error"));
+            else resolve(parsed.result);
+          } catch (err) {
+            reject(new Error(`bad rpc response: ${err?.message ?? err}`));
+          }
+        });
+      },
+    );
+    req.on("error", reject);
+    req.on("timeout", () => {
+      req.destroy();
+      reject(new Error("local server RPC timed out"));
+    });
+    req.end(payload);
+  });
+}
+
 function localAppUrl() {
   if (!localUrl) return "";
   return localToken ? `${localUrl}/?token=${encodeURIComponent(localToken)}` : localUrl;
@@ -337,6 +378,10 @@ ipcMain.handle("conn:test", async (ev, input) => {
   requireLocal(ev, "testing SSH connections");
   const profile = typeof input === "string" ? getProfile(input) : sanitizeProfile(input, input);
   if (!profile) throw new Error("connection profile not found");
+  if (profile.mode === "proxy") {
+    // proxy profiles need no remote familiar: use the server's connectivity probe
+    return await callLocalServer("conn.test", { profile });
+  }
   const started = Date.now();
   const conn = new SshConnection(profile);
   try {

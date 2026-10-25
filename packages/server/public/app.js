@@ -22,6 +22,10 @@ const remoteBoot = {
   host: bootQuery.get("host") ?? "",
   wantNewSession: bootQuery.get("new") === "1",
   cwd: bootQuery.get("cwd") ?? "",
+  /** browser-initiated tunnel (WebUI, no desktop shell): capability stop id */
+  stop: bootQuery.get("stop") ?? "",
+  /** …and the local UI origin to return to */
+  local: bootQuery.get("local") ?? "",
 };
 
 /** M2 server auth: the token arrives once via ?token= and is kept in
@@ -4487,7 +4491,10 @@ async function renderConnectionsSection(content, stale = () => false) {
     connect.addEventListener("click", async () => {
       connect.disabled = true;
       try {
-        await api.connectProfile(pr.id, { newSession: false });
+        const res = await api.connectProfile(pr.id, { newSession: false });
+        if (res && res.url && res.token) {
+          location.href = buildTunnelUrl(res, {});
+        }
       } catch (err) {
         connect.disabled = false;
         toast(t("ssh.connectFail", err?.message ?? err), "err");
@@ -5178,11 +5185,47 @@ const connState = {
   error: "",
 };
 
-/** The preload bridge when we run inside the desktop shell. */
+/** Server-side equivalents of the desktop preload bridge, so the browser
+ * WebUI can manage hosts and open remote serve tunnels too. */
+const rpcConnApi = {
+  connections: () => rpc("conn.list"),
+  saveConnection: (profile) => rpc("conn.save", profile),
+  deleteConnection: (id) => rpc("conn.delete", id),
+  testConnection: (profile) =>
+    rpc("conn.test", typeof profile === "string" ? { id: profile } : { profile }),
+  connectProfile: (id, opts) => rpc("conn.connect", { id, ...(opts ?? {}) }),
+  disconnectConnection: () => rpc("conn.disconnect"),
+  /** no push channel: browser UIs poll `conn.status` on demand */
+  onConnectionStatus: () => () => {},
+};
+
+/** Tests force the RPC path inside the desktop shell (`connApiOverride`). */
+let connApiOverride = null;
+
+/** The desktop preload bridge inside the shell, else the server RPC layer. */
 function connApi() {
+  if (connApiOverride) return connApiOverride;
   return window.familiarDesktop && typeof window.familiarDesktop.connections === "function"
     ? window.familiarDesktop
-    : null;
+    : rpcConnApi;
+}
+
+/** Remote-UI URL for a server-side tunnel (`conn.connect` response). */
+function buildTunnelUrl(res, opts = {}) {
+  const params = new URLSearchParams({
+    token: res.token,
+    remote: "1",
+    host: res.hostname || res.host || "SSH",
+  });
+  if (res.id) params.set("conn", res.id);
+  if (res.stop) params.set("stop", res.stop);
+  params.set("local", location.origin);
+  if (opts.newSession) {
+    params.set("new", "1");
+    const cwd = (opts.cwd ?? "").trim();
+    if (cwd) params.set("cwd", cwd);
+  }
+  return `${res.url}/?${params.toString()}`;
 }
 
 async function refreshConnections(force = false) {
@@ -5247,8 +5290,29 @@ function hideConnBanner() {
   $("#conn-banner").hidden = true;
 }
 
-/** Ask the shell to tear the tunnel down; it then reloads the local UI. */
+/** Return from a remote host: close the tunnel and restore the local UI. */
 async function backToLocal() {
+  if (remoteBoot.stop) {
+    // Browser-initiated tunnel: the remote page is served by the *remote*
+    // server, so stop the local tunnel through the capability endpoint and
+    // navigate back (sessionStorage keeps the local token for this tab).
+    const base = remoteBoot.local || "";
+    if (base) {
+      try {
+        await fetch(`${base}/tunnel/stop?stop=${encodeURIComponent(remoteBoot.stop)}`, {
+          mode: "cors",
+          keepalive: true,
+        });
+      } catch {
+        /* TTL on the server cleans up if this never lands */
+      }
+      location.href = base;
+      return;
+    }
+    history.back();
+    return;
+  }
+  // Desktop shell (or the local browser UI stopping a server-side tunnel).
   const api = connApi();
   if (!api || typeof api.disconnectConnection !== "function") return;
   try {
@@ -5571,8 +5635,14 @@ async function createSessionFromModal() {
         return;
       }
       connectBtn.textContent = t("ns.connecting");
-      await api.connectProfile(nsTarget, { newSession: true, cwd: $("#ns-remote-cwd").value.trim() });
-      // the window navigates to the remote UI; keep the button disabled
+      const cwdHint = $("#ns-remote-cwd").value.trim();
+      const res = await api.connectProfile(nsTarget, { newSession: true, cwd: cwdHint });
+      if (res && res.url && res.token) {
+        // server-managed tunnel (browser WebUI): navigate to the remote UI
+        location.href = buildTunnelUrl(res, { newSession: true, cwd: cwdHint });
+        return;
+      }
+      // the desktop shell navigates its window; keep the button disabled
     } catch (err) {
       showErr(t("ns.connectFailed", err?.message ?? err));
       connectBtn.disabled = false;

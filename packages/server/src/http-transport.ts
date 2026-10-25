@@ -30,6 +30,8 @@ export interface HttpTransportOptions {
   authTokenFile?: string;
   /** server build version, surfaced by /healthz for the GUI about card */
   version?: string;
+  /** capability stop for remote browser UIs (`GET /tunnel/stop?stop=…`). */
+  onTunnelStop?: (stopId: string) => boolean;
 }
 
 export interface HttpTransport {
@@ -199,6 +201,24 @@ export function startHttpTransport(
             (ok ? `<p style="color:#8b8b96">このタブを閉じて Familiar Harness に戻ってください。 / Close this tab and return to Familiar Harness.</p>` : `<p style="color:#ff6b6b">${msg.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c] ?? c)}</p>`) +
             `</div></body>`,
         );
+        return;
+      }
+      if (url === "/tunnel/stop") {
+        // Remote UIs (browser, no desktop shell) close their tunnel with an
+        // unguessable capability id; no bearer token crosses to the host.
+        const stop = new URL(req.url ?? "/", "http://localhost").searchParams.get("stop") ?? "";
+        let ok = false;
+        try {
+          ok = opts.onTunnelStop ? opts.onTunnelStop(stop) : false;
+        } catch {
+          ok = false;
+        }
+        res.writeHead(200, {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "no-store",
+        });
+        res.end(JSON.stringify({ ok }));
         return;
       }
       if (url === "/healthz") {

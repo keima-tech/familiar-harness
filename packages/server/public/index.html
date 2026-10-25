@@ -82,6 +82,7 @@
       <div id="approval-dock"></div>
 
       <form id="composer" autocomplete="off">
+        <div id="attach-strip" class="attach-strip" hidden></div>
         <textarea id="input" rows="1" placeholder="何でも聞いてください (Enter で送信 / Shift+Enter で改行)"></textarea>
         <div class="composer-foot">
           <button id="retry" type="button" title="直前の操作を再実行" data-i18n-title="composer.retry">↻</button>
@@ -233,7 +234,8 @@
     <hr />
     <button data-act="delete" class="danger" data-i18n="menu.deleteShort">削除…</button>
   </div>
-  <input id="file-attach" type="file" hidden />
+  <input id="file-attach" type="file" multiple hidden />
+  <div id="img-overlay" hidden><img id="img-overlay-img" alt="" /></div>
   <div id="toasts"></div>
   <script src="/app.js"></script>
 </body>

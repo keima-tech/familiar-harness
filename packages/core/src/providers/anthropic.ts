@@ -1,4 +1,4 @@
-import type { ChatMessage, ModelInfo } from "@familiar/protocol";
+import { messageAttachments, type ChatMessage, type ModelInfo } from "@familiar/protocol";
 import type { ProviderConfig } from "../config.js";
 import { log } from "../logger.js";
 import {
@@ -187,6 +187,11 @@ function toAnthropicMessages(messages: ChatMessage[]): AnthropicWireMessage[] {
   for (const msg of messages) {
     if (msg.role === "user" || msg.role === "assistant") {
       const content: AnthropicBlock[] = [];
+      if (msg.role === "user") {
+        for (const a of messageAttachments(msg)) {
+          content.push({ type: "image", source: { type: "base64", media_type: a.media_type, data: a.data } });
+        }
+      }
       if (msg.content) content.push({ type: "text", text: msg.content });
       if (msg.role === "assistant" && msg.toolCalls) {
         for (const tc of msg.toolCalls) {
@@ -238,6 +243,7 @@ function mapStop(s: string | undefined): string {
 }
 
 type AnthropicBlock =
+  | { type: "image"; source: { type: "base64"; media_type: string; data: string } }
   | { type: "text"; text: string }
   | { type: "tool_use"; id: string; name: string; input: unknown }
   | {

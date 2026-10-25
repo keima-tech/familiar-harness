@@ -117,7 +117,6 @@ const STR = {
     "conn.email": "メールアドレス",
     "conn.token": "API トークン",
     "conn.apiKey": "API キー",
-    "conn.project": "プロジェクト (キー / ID)",
     "conn.save": "保存",
     "conn.test": "接続テスト",
     "conn.saved": "保存しました",
@@ -257,6 +256,10 @@ const STR = {
     "toast.createFailed": "セッション作成に失敗しました: {0}",
     "toast.sendFailed": "送信に失敗しました: {0}",
     "toast.attached": "添付しました: {0}",
+    "attach.remove": "添付を削除",
+    "attach.limit": "添付できる画像は最大 {0} 枚です",
+    "attach.tooLarge": "画像が大きすぎます(最大 5MB): {0}",
+    "attach.added": "画像を {0} 枚添付しました",
     "toast.dropAttach": "ドロップで添付しました: {0}",
     "toast.attachFailed": "添付ファイルのパスを取得できませんでした: {0}",
     "toast.stopRequested": "停止を要求しました…",
@@ -485,7 +488,6 @@ const STR = {
     "conn.email": "email",
     "conn.token": "API token",
     "conn.apiKey": "API key",
-    "conn.project": "project (key / id)",
     "conn.save": "save",
     "conn.test": "test connection",
     "conn.saved": "saved",
@@ -625,6 +627,10 @@ const STR = {
     "toast.createFailed": "session.create failed: {0}",
     "toast.sendFailed": "send failed: {0}",
     "toast.attached": "attached: {0}",
+    "attach.remove": "remove attachment",
+    "attach.limit": "at most {0} images per message",
+    "attach.tooLarge": "image too large (max 5MB): {0}",
+    "attach.added": "attached {0} image(s)",
     "toast.dropAttach": "attached via drop: {0}",
     "toast.attachFailed": "could not resolve a file path: {0}",
     "toast.stopRequested": "stop requested…",
@@ -1103,6 +1109,7 @@ const state = {
   busy: false,
   pendingEvents: new Map(), // sessionId -> partial assistant render state
   pendingToolCards: [], // live tool.call cards awaiting their result
+  pendingAttachments: [], // images waiting in the composer (multimodal send)
   turnStartedAt: null,
   turnTimer: null,
   lastElapsed: null,
@@ -1835,7 +1842,8 @@ function renderTranscript(messages) {
   const modelBits = [cur?.provider, cur?.model].filter(Boolean).join("/");
   for (const m of visible) {
     if (m.role === "user") {
-      appendMessage("user", m.content, null);
+      const atts = Array.isArray(m.meta?.attachments) ? m.meta.attachments : [];
+      appendMessage("user", m.content, null, { attachments: atts });
     } else if (m.role === "assistant") {
       const footBits = modelBits ? [modelBits] : [];
       const clock = m.createdAt ? fmtClock(m.createdAt) : "";
@@ -1895,12 +1903,45 @@ function appendMessage(role, content, toolCalls, opts = {}) {
     if (opts.foot !== false) addMsgFooter(bubble, String(content ?? ""), opts.footBits);
     wireCodeButtons(div);
   } else {
-    bubble.textContent = content ?? "";
+    const imgs = Array.isArray(opts.attachments) ? opts.attachments : [];
+    if (imgs.length > 0) {
+      const grid = document.createElement("div");
+      grid.className = "msg-images";
+      for (const a of imgs) {
+        grid.appendChild(imageThumb(a));
+      }
+      bubble.appendChild(grid);
+      if (content) {
+        const txt = document.createElement("div");
+        txt.className = "msg-text";
+        txt.textContent = content;
+        bubble.appendChild(txt);
+      }
+    } else {
+      bubble.textContent = content ?? "";
+    }
   }
   void toolCalls;
   tr.appendChild(div);
   scrollBottom();
   return bubble;
+}
+
+/** A clickable attachment thumbnail (opens the lightbox). */
+function imageThumb(a) {
+  const img = document.createElement("img");
+  img.className = "msg-img";
+  img.src = `data:${a.media_type};base64,${a.data}`;
+  img.alt = a.name ?? "attachment";
+  img.title = a.name ?? "";
+  img.addEventListener("click", () => {
+    const overlay = $("#img-overlay");
+    const big = $("#img-overlay-img");
+    if (!overlay || !big) return;
+    big.src = img.src;
+    overlay.hidden = false;
+  });
+  return img;
 }
 
 function fmtClock(ts) {
@@ -4283,9 +4324,9 @@ async function renderConnectorsSection(content, stale = () => false) {
     { id: "slack", label: "Slack", fields: [["token", "Bot / User Token (xox…) ", true]] },
     { id: "teams", label: "Microsoft Teams", fields: [["token", t("conn.teamsToken"), true]] },
     { id: "discord", label: "Discord", fields: [["token", "Bot Token", true]] },
-    { id: "jira", label: "Jira", fields: [["base_url", t("conn.baseUrl")], ["email", t("conn.email")], ["token", t("conn.token"), true], ["project", t("conn.project")]] },
+    { id: "jira", label: "Jira", fields: [["base_url", t("conn.baseUrl")], ["email", t("conn.email")], ["token", t("conn.token"), true]] },
     { id: "confluence", label: "Confluence", fields: [["base_url", t("conn.baseUrl")], ["email", t("conn.email")], ["token", t("conn.token"), true]] },
-    { id: "redmine", label: "Redmine", fields: [["base_url", t("conn.baseUrl")], ["api_key", t("conn.apiKey"), true], ["project", t("conn.project")]] },
+    { id: "redmine", label: "Redmine", fields: [["base_url", t("conn.baseUrl")], ["api_key", t("conn.apiKey"), true]] },
   ];
   for (const k of KINDS) {
     const saved = stored[k.id] ?? {};
@@ -4847,7 +4888,10 @@ async function send() {
     await refreshSessions();
   }
   setBusy(true);
-  appendMessage("user", text, null);
+  const atts = state.pendingAttachments.slice();
+  appendMessage("user", text, null, { attachments: atts });
+  state.pendingAttachments = [];
+  renderAttachStrip();
   input.value = "";
   autoSize(input);
   try {
@@ -4867,6 +4911,9 @@ async function send() {
     }
     state.lastUserText = text;
     const sparams = { id, text, plan: state.mode === "plan" };
+    if (atts.length > 0) {
+      sparams.attachments = atts.map((a) => ({ media_type: a.media_type, data: a.data, ...(a.name ? { name: a.name } : {}) }));
+    }
     if (overrides?.provider) sparams.provider = overrides.provider;
     if (overrides?.model) sparams.model = overrides.model;
     if (state.draft.effort) sparams.effort = state.draft.effort;
@@ -4903,12 +4950,54 @@ function resolveFilePath(f) {
   return f.path || f.name;
 }
 
-/** Insert @path tokens for attachments (picker + drag & drop). */
+const ATTACH_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+const ATTACH_MAX = 4;             // images per message (mirrors the server cap)
+const ATTACH_MAX_BYTES = 5 * 1024 * 1024;
+
+/** Read one image file into a { media_type, data, name } attachment. */
+function fileToAttachment(f) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("read failed"));
+    reader.onload = () => {
+      const url = String(reader.result ?? "");
+      const m = url.match(/^data:([^;]+);base64,(.*)$/);
+      if (!m) {
+        reject(new Error("unsupported data"));
+        return;
+      }
+      resolve({ media_type: m[1], data: m[2], name: f.name });
+    };
+    reader.readAsDataURL(f);
+  });
+}
+
+/** Picker + drag & drop: raster images become multimodal attachments,
+ * everything else keeps the classic @path insertion. */
 async function attachFiles(fileList) {
   const files = [...fileList].slice(0, 8);
   if (files.length === 0) return;
   const refs = [];
+  let added = 0;
   for (const f of files) {
+    const isImage = ATTACH_TYPES.has(f.type);
+    if (isImage && f.size > ATTACH_MAX_BYTES) {
+      toast(t("attach.tooLarge", f.name), "err");
+      continue;
+    }
+    if (isImage) {
+      if (state.pendingAttachments.length >= ATTACH_MAX) {
+        toast(t("attach.limit", String(ATTACH_MAX)), "err");
+        break;
+      }
+      try {
+        state.pendingAttachments.push(await fileToAttachment(f));
+        added += 1;
+      } catch {
+        toast(t("toast.attachFailed", f.name), "err");
+      }
+      continue;
+    }
     const ref = resolveFilePath(f);
     if (!ref) {
       toast(t("toast.attachFailed", f.name), "err");
@@ -4917,7 +5006,34 @@ async function attachFiles(fileList) {
     insertIntoComposer(`@${ref} `);
     refs.push(ref);
   }
+  renderAttachStrip();
+  if (added > 0) toast(t("attach.added", String(added)), "ok");
   if (refs.length > 0) toast(t("toast.dropAttach", refs.join(" ")), "ok");
+}
+
+/** Composer strip: one thumbnail per pending image with a ✕ remove button. */
+function renderAttachStrip() {
+  const strip = $("#attach-strip");
+  if (!strip) return;
+  strip.innerHTML = "";
+  strip.hidden = state.pendingAttachments.length === 0;
+  state.pendingAttachments.forEach((a, idx) => {
+    const wrap = document.createElement("div");
+    wrap.className = "attach-thumb";
+    const img = imageThumb(a);
+    img.classList.add("attach-img");
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "attach-del";
+    del.textContent = "✕";
+    del.title = t("attach.remove");
+    del.addEventListener("click", () => {
+      state.pendingAttachments.splice(idx, 1);
+      renderAttachStrip();
+    });
+    wrap.append(img, del);
+    strip.appendChild(wrap);
+  });
 }
 
 /** Hermes-style /retry: re-send the last user message. */
@@ -5077,6 +5193,23 @@ function boot() {
       ev.preventDefault();
       void attachFiles(files);
     }
+  });
+
+  // Ctrl+V of a clipboard image (screenshots) becomes an attachment
+  $("#input").addEventListener("paste", (ev) => {
+    const items = [...(ev.clipboardData?.items ?? [])];
+    const imgs = items
+      .filter((it) => it.kind === "file" && ATTACH_TYPES.has(it.type))
+      .map((it) => it.getAsFile())
+      .filter((f) => f !== null);
+    if (imgs.length > 0) {
+      ev.preventDefault();
+      void attachFiles(imgs);
+    }
+  });
+  $("#img-overlay").addEventListener("click", () => {
+    $("#img-overlay").hidden = true;
+    $("#img-overlay-img").src = "";
   });
 
   $("#session-filter").addEventListener("input", applySessionFilter);

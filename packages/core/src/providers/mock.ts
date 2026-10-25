@@ -1,4 +1,4 @@
-import type { ModelInfo } from "@familiar/protocol";
+import { messageAttachments, type ModelInfo } from "@familiar/protocol";
 import type { ProviderConfig } from "../config.js";
 import {
   type ChatParams,
@@ -242,8 +242,9 @@ export class MockProvider implements Provider {
 
     // Default reply: emit a deterministic reasoning chunk first so the UI's
     // "thinking" block is exercised end-to-end without a real reasoning model.
+    const images = last ? messageAttachments(last).length : 0;
     onChunk({ type: "reasoning", text: `mock-thinking: ${userText.slice(0, 40)}` });
-    streamText(`mock: ${userText}`, onChunk);
+    streamText(`mock: ${userText}${images > 0 ? ` (images: ${images})` : ""}`, onChunk);
     return { stopReason: "end_turn", usage: { promptTokens: 1, completionTokens: 2 } };
   }
 

@@ -1,4 +1,4 @@
-import type { ChatMessage, ModelInfo } from "@familiar/protocol";
+import { messageAttachments, type ChatMessage, type ModelInfo } from "@familiar/protocol";
 import type { ProviderConfig } from "../config.js";
 import { log } from "../logger.js";
 import {
@@ -136,7 +136,22 @@ export class OpenAiCompatibleProvider implements Provider {
       if (msg.role === "system") {
         messages.push({ role: "system", content: msg.content });
       } else if (msg.role === "user") {
-        messages.push({ role: "user", content: msg.content });
+        const images = messageAttachments(msg);
+        if (images.length === 0) {
+          messages.push({ role: "user", content: msg.content });
+        } else {
+          // multimodal: text + data-URL images (OpenAI-compatible content parts)
+          messages.push({
+            role: "user",
+            content: [
+              { type: "text", text: msg.content },
+              ...images.map((a) => ({
+                type: "image_url",
+                image_url: { url: `data:${a.media_type};base64,${a.data}` },
+              })),
+            ],
+          });
+        }
       } else if (msg.role === "assistant") {
         const wire: OpenAiMessage = { role: "assistant", content: msg.content || null };
         if (msg.toolCalls && msg.toolCalls.length > 0) {
@@ -252,7 +267,7 @@ function mapStopReason(finish: string | undefined): string {
 
 interface OpenAiMessage {
   role: "system" | "user" | "assistant" | "tool";
-  content: string | null;
+  content: string | null | Array<Record<string, unknown>>;
   name?: string;
   tool_calls?: { id: string; type: "function"; function: { name: string; arguments: string } }[];
   tool_call_id?: string;

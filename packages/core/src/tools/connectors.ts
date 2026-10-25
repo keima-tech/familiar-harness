@@ -524,7 +524,7 @@ export function createConnectorTools(): Tool[] {
     {
       name: "jira_issues",
       description:
-        "Search Jira issues via the configured Jira connector (JQL). Defaults to the connector's project (or the most recently updated issues). Returns key, summary, status, assignee and updated date.",
+        "Search Jira issues via the configured Jira connector (JQL). Without a query, lists the most recently updated issues. Returns key, summary, status, assignee and updated date.",
       read_only: true,
       parameters: {
         type: "object",
@@ -539,9 +539,7 @@ export function createConnectorTools(): Tool[] {
         if (!c?.base_url || !c.token) return notConfigured("jira");
         const limit = Math.min(50, Math.max(1, Number(args.limit) || 10));
         let jql = typeof args.jql === "string" ? args.jql.trim() : "";
-        if (!jql) {
-          jql = c.project ? `project = "${c.project.replace(/"/g, '\\"')}" ORDER BY updated DESC` : "ORDER BY updated DESC";
-        }
+        if (!jql) jql = "ORDER BY updated DESC";
         const qs = new URLSearchParams({ jql, maxResults: String(limit), fields: "summary,status,assignee,updated" });
         const res = await fetch(`${c.base_url.replace(/\/+$/, "")}/rest/api/3/search?${qs}`, {
           headers: { Authorization: `Basic ${Buffer.from(`${c.email ?? ""}:${c.token}`).toString("base64")}`, Accept: "application/json" },

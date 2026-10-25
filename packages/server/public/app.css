@@ -1142,6 +1142,35 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
 }
 .skill-editor-actions .ghost { background: var(--panel2); color: var(--text); }
 
+/* ---- composer attachments (multimodal images) ---- */
+.attach-strip {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  padding: 6px 2px 8px;
+}
+.attach-thumb { position: relative; }
+.attach-img {
+  height: 64px; width: auto; max-width: 140px; object-fit: cover;
+  border-radius: 8px; border: 1px solid var(--border); cursor: zoom-in; display: block;
+}
+.attach-del {
+  position: absolute; top: -7px; right: -7px; width: 20px; height: 20px;
+  border-radius: 50%; border: 1px solid var(--border); background: var(--panel2);
+  color: var(--text); font-size: 10px; line-height: 1; cursor: pointer; padding: 0;
+}
+.attach-del:hover { color: var(--err); border-color: var(--err); }
+.msg-images { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.msg-img {
+  max-height: 220px; max-width: 100%; border-radius: 8px;
+  border: 1px solid var(--border); cursor: zoom-in; display: block;
+}
+.msg-text { white-space: pre-wrap; }
+#img-overlay {
+  position: fixed; inset: 0; z-index: 200; background: rgba(0, 0, 0, 0.82);
+  display: flex; align-items: center; justify-content: center; cursor: zoom-out;
+}
+#img-overlay[hidden] { display: none; }
+#img-overlay img { max-width: 92vw; max-height: 92vh; border-radius: 8px; }
+
 /* ---- settings: about card ---- */
 .about-brand { display: flex; align-items: center; gap: 14px; }
 .about-icon { width: 56px; height: 56px; border-radius: 12px; }

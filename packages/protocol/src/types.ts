@@ -46,6 +46,16 @@ export interface Usage {
  * Normalized conversation message. Persisted in the session store.
  * The system prompt is regenerated per turn and NOT persisted.
  */
+/** A multimodal attachment carried on a user message (base64, no data: prefix). */
+export interface MessageAttachment {
+  /** image/png | image/jpeg | image/webp | image/gif */
+  media_type: string;
+  /** base64-encoded payload */
+  data: string;
+  /** original filename (display only) */
+  name?: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: Role;
@@ -57,7 +67,18 @@ export interface ChatMessage {
   /** assistant role: tool calls requested by the assistant */
   toolCalls?: ToolCall[];
   createdAt: number;
+  /** user role: image attachments live under meta.attachments (MessageAttachment[]) */
   meta?: Record<string, unknown>;
+}
+
+/** Read the image attachments stored on a user message (meta.attachments). */
+export function messageAttachments(msg: ChatMessage): MessageAttachment[] {
+  const raw = msg.meta?.attachments;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (a): a is MessageAttachment =>
+      !!a && typeof (a as MessageAttachment).media_type === "string" && typeof (a as MessageAttachment).data === "string",
+  );
 }
 
 export interface SessionRecord {

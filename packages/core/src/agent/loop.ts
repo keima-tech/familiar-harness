@@ -9,7 +9,7 @@ import type { ResolvedConfig } from "../config.js";
 import { normalizeEffort } from "../config.js";
 import { log } from "../logger.js";
 import type { SessionStore } from "../session/store.js";
-import type { SessionRecord } from "@familiar/protocol";
+import type { MessageAttachment, SessionRecord } from "@familiar/protocol";
 import type { ProviderRegistry } from "../providers/index.js";
 import { ProviderError } from "../providers/base.js";
 import {
@@ -29,6 +29,8 @@ import { SELF_IMPROVE_TOOLS } from "../tools/index.js";
 export interface RunTurnOptions {
   sessionId: string;
   userText: string;
+  /** images attached to this user message (multimodal models) */
+  attachments?: MessageAttachment[];
   provider?: string;
   model?: string;
   profile?: string;
@@ -132,7 +134,10 @@ export class AgentRunner {
       role: "user",
       content: opts.userText,
       createdAt: Date.now(),
-      meta: { source: "user" },
+      meta: {
+        source: "user",
+        ...(opts.attachments && opts.attachments.length > 0 ? { attachments: opts.attachments } : {}),
+      },
     });
     // Auto-title from first user message.
     if (!session.title) {

@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import type {
   ChatMessage,
+  MessageAttachment,
   ModelInfo,
   RpcContext,
   SessionRecord,
@@ -1226,6 +1227,7 @@ export class AgentServer {
     if (!sessionId || text === undefined || text === null || text === "") {
       throw new RpcError(RPC_ERROR_INVALID_PARAMS, "params 'id' and 'text' are required");
     }
+    const attachments = this.parseAttachments(params);
     const session = this.requireSession(sessionId);
     const events = (event: unknown): void => ctx.onEvent?.(sessionId, event);
     const msgCountBefore = this.store.getMessages(sessionId).length;
@@ -1238,6 +1240,7 @@ export class AgentServer {
       const res = await this.runner.runTurn({
         sessionId,
         userText: text,
+        attachments: attachments.length > 0 ? attachments : undefined,
         provider: str(params, "provider"),
         model: str(params, "model"),
         profile: str(params, "profile") ?? undefined,
@@ -1266,6 +1269,40 @@ export class AgentServer {
     } finally {
       this.activeTurns.delete(sessionId);
     }
+  }
+
+  /** Validate image attachments for session.send (multimodal input). */
+  private parseAttachments(params: Record<string, unknown>): MessageAttachment[] {
+    const raw = params["attachments"];
+    if (raw === undefined || raw === null) return [];
+    if (!Array.isArray(raw)) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, "attachments must be an array");
+    }
+    const allowed = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+    const MAX_IMAGES = 4;
+    const MAX_BASE64 = 7_000_000; // ~5MB binary per image
+    if (raw.length > MAX_IMAGES) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, `at most ${MAX_IMAGES} images per message`);
+    }
+    const out: MessageAttachment[] = [];
+    for (const item of raw) {
+      const a = item as Partial<MessageAttachment> | null;
+      if (!a || typeof a.media_type !== "string" || typeof a.data !== "string") {
+        throw new RpcError(RPC_ERROR_INVALID_PARAMS, "each attachment needs media_type and base64 data");
+      }
+      if (!allowed.has(a.media_type)) {
+        throw new RpcError(RPC_ERROR_INVALID_PARAMS, `unsupported image type: ${a.media_type}`);
+      }
+      if (a.data.length > MAX_BASE64) {
+        throw new RpcError(RPC_ERROR_INVALID_PARAMS, `image too large (max ~5MB): ${a.name ?? a.media_type}`);
+      }
+      out.push({
+        media_type: a.media_type,
+        data: a.data,
+        ...(typeof a.name === "string" && a.name !== "" ? { name: a.name } : {}),
+      });
+    }
+    return out;
   }
 
   /** Kill the running turn of a session (GUI stop button / CLI). */

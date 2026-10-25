@@ -202,42 +202,47 @@ export class AgentRunner {
         let stepToolCalls: ToolCall[] = [];
 
         const provider = this.providers.get(providerId);
-        const result = await provider.chat(
-          {
-            model,
-            messages: history,
-            system,
-            tools: effectiveTools.map((t) => ({
-              name: t.name,
-              description: t.description,
-              parameters: t.parameters,
-            })),
-            signal: opts.signal,
-            effort,
-          },
-          (chunk) => {
-            if (chunk.type === "text") {
-              textParts.push(chunk.text);
-              opts.onEvent({ type: "text.delta", messageId: assistantId, text: chunk.text });
-            } else if (chunk.type === "usage") {
-              usage.promptTokens = (usage.promptTokens ?? 0) + (chunk.usage.promptTokens ?? 0);
-              usage.completionTokens =
-                (usage.completionTokens ?? 0) + (chunk.usage.completionTokens ?? 0);
-            } else if (chunk.type === "stop") {
-              stepStopReason = chunk.finishReason;
-            } else if (chunk.type === "tool_call_start" || chunk.type === "tool_call_delta") {
-              observeProviderChunk(assistantId, chunk);
-            } else if (chunk.type === "reasoning") {
-              reasoningParts.push(chunk.text);
-              opts.onEvent({ type: "reasoning.delta", messageId: assistantId, text: chunk.text });
-            }
-          },
-        );
-
-        // Accumulator is fed in parallel; simplest correct approach: re-run a
-        // lightweight listener by wrapping onChunk — see registerToolObserver.
-        stepToolCalls = takeObservedToolCalls(assistantId);
-        stepStopReason = result.stopReason ?? stepStopReason;
+        let result!: Awaited<ReturnType<typeof provider.chat>>;
+        try {
+          result = await provider.chat(
+            {
+              model,
+              messages: history,
+              system,
+              tools: effectiveTools.map((t) => ({
+                name: t.name,
+                description: t.description,
+                parameters: t.parameters,
+              })),
+              signal: opts.signal,
+              effort,
+            },
+            (chunk) => {
+              if (chunk.type === "text") {
+                textParts.push(chunk.text);
+                opts.onEvent({ type: "text.delta", messageId: assistantId, text: chunk.text });
+              } else if (chunk.type === "usage") {
+                usage.promptTokens = (usage.promptTokens ?? 0) + (chunk.usage.promptTokens ?? 0);
+                usage.completionTokens =
+                  (usage.completionTokens ?? 0) + (chunk.usage.completionTokens ?? 0);
+              } else if (chunk.type === "stop") {
+                stepStopReason = chunk.finishReason;
+              } else if (chunk.type === "tool_call_start" || chunk.type === "tool_call_delta") {
+                observeProviderChunk(assistantId, chunk);
+              } else if (chunk.type === "reasoning") {
+                reasoningParts.push(chunk.text);
+                opts.onEvent({ type: "reasoning.delta", messageId: assistantId, text: chunk.text });
+              }
+            },
+          );
+          // Collect here (before finally runs): the buffer must be drained
+          // while the try body still owns it.
+          stepToolCalls = takeObservedToolCalls(assistantId);
+          stepStopReason = result.stopReason ?? stepStopReason;
+        } finally {
+          // never leak the observation buffer when a provider errors mid-stream
+          callBuffers.delete(assistantId);
+        }
 
         const assistantText = textParts.join("");
 
@@ -426,7 +431,18 @@ export class AgentRunner {
   ): Promise<ChatMessage[]> {
     const limitChars = this.cfg.context.token_soft_limit * 4;
     let total = 0;
-    for (const m of history) total += m.content.length + (m.toolCalls?.length ?? 0) * 128;
+    for (const m of history) {
+      total += m.content.length + (m.toolCalls?.length ?? 0) * 128;
+      // image attachments ride along on every step, so they count too
+      const atts = m.meta?.["attachments"];
+      if (Array.isArray(atts)) {
+        for (const a of atts) {
+          if (a && typeof a === "object" && typeof (a as { data?: unknown }).data === "string") {
+            total += ((a as { data: string }).data.length * 3) / 4;
+          }
+        }
+      }
+    }
 
     if (total <= limitChars) return history;
     const keepLast = Math.max(2, this.cfg.context.keep_last);
@@ -456,7 +472,12 @@ export class AgentRunner {
       createdAt: Date.now(),
       meta: { ephemeral: true },
     });
-    compacted.push(...history.slice(history.length - keepLast));
+    // Never start the kept tail on a tool result: its owning assistant
+    // tool_calls message was just dropped and providers reject an orphan
+    // `tool` message with a 400 (both OpenAI-style and Anthropic).
+    let tailStart = history.length - keepLast;
+    while (tailStart < history.length && history[tailStart]!.role === "tool") tailStart += 1;
+    compacted.push(...history.slice(tailStart));
 
     let kept = 0;
     for (const m of compacted) kept += m.content.length;

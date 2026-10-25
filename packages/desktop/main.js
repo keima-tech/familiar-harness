@@ -341,9 +341,15 @@ function createWindow(url) {
     },
   });
   // External links (docs etc.) open in the default browser, not the shell.
+  // Only http(s): anything else (file:, smb:, custom app protocols) would be
+  // handed straight to the OS handler — the classic Electron openExternal hole.
   mainWindow.webContents.setWindowOpenHandler(({ url: target }) => {
-    void shell.openExternal(target);
+    if (/^https?:\/\//i.test(target)) void shell.openExternal(target);
     return { action: "deny" };
+  });
+  // The renderer never navigates away from the local UI.
+  mainWindow.webContents.on("will-navigate", (ev, target) => {
+    if (!/^https?:\/\//i.test(target)) ev.preventDefault();
   });
   void mainWindow.loadURL(url);
   mainWindow.on("closed", () => {

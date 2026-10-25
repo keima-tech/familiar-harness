@@ -35,18 +35,37 @@ export function createWebFetchTool(): Tool {
       } catch {
         return { content: `invalid URL: ${url}`, isError: true };
       }
-      const policy = decideDomain(host, ctx.config.permissions.webfetch);
+      const webCfg = ctx.config.permissions.webfetch;
+      const policy = decideDomain(host, webCfg);
       if (!policy.allowed) {
         return { content: `webfetch denied by policy: ${policy.reason}`, isError: true };
       }
 
-      let res: Response;
+      // Follow redirects manually: every hop is re-checked against the domain
+      // policy, otherwise a public host could redirect us into the LAN.
+      let current = url;
+      let res: Response | undefined;
       try {
-        res = await fetch(url, {
-          redirect: "follow",
-          headers: { "user-agent": "familiar-harness/0.2 (+local agent)" },
-          signal: AbortSignal.timeout(30_000),
-        });
+        for (let hop = 0; hop <= 5; hop++) {
+          const hopHost = new URL(current).hostname;
+          const hopPolicy = decideDomain(hopHost, webCfg);
+          if (!hopPolicy.allowed) {
+            return { content: `webfetch denied by policy: ${hopPolicy.reason}`, isError: true };
+          }
+          res = await fetch(current, {
+            redirect: "manual",
+            headers: { "user-agent": "familiar-harness/0.2 (+local agent)" },
+            signal: AbortSignal.timeout(30_000),
+          });
+          const loc = res.headers.get("location");
+          if (res.status >= 300 && res.status < 400 && loc) {
+            res.body?.cancel().catch(() => undefined);
+            current = new URL(loc, current).toString();
+            continue;
+          }
+          break;
+        }
+        if (!res) return { content: "too many redirects", isError: true };
       } catch (err) {
         return { content: `fetch failed: ${err instanceof Error ? err.message : String(err)}`, isError: true };
       }
@@ -79,10 +98,12 @@ export function decideDomain(
 }
 
 function matchesDomain(host: string, patterns: string[]): boolean {
-  const normalized = host.toLowerCase().replace(/\.+$/, "");
+  // URL.hostname keeps the brackets around IPv6 literals ("[::1]")
+  const normalized = host.toLowerCase().replace(/[\[\]]/g, "").replace(/\.+$/, "");
   for (const rawPattern of patterns) {
     const pattern = rawPattern.toLowerCase().replace(/\./g, "\\.").replace(/\*/g, "[a-z0-9.-]*");
-    if (new RegExp(`^(.?${pattern})$`, "i").test(normalized) || normalized === rawPattern.toLowerCase()) {
+    // subdomains match, one extra prepended character does not
+    if (new RegExp(`^(.+\\.)?${pattern}$`, "i").test(normalized) || normalized === rawPattern.toLowerCase()) {
       return true;
     }
   }

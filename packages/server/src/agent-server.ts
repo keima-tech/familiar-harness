@@ -711,12 +711,28 @@ export class AgentServer {
     delete connectors[kind];
     this.cfg.connectors = connectors;
     writeConnectorsToDisk(connectors, { configFile: this.cfg.configFile });
-    return { ok: true, connectors };
+    return { ok: true, connectors: this.maskConnectors(connectors) };
   }
 
 
+  /** Mask secret-looking connector fields: API responses never carry them. */
+  private maskConnectors(
+    connectors: Record<string, Record<string, unknown> | undefined>,
+  ): Record<string, unknown> {
+    const secret = /secret|token|password|api_?key|credential|signature/i;
+    const out: Record<string, unknown> = {};
+    for (const [kind, cfg] of Object.entries(connectors)) {
+      const masked: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(cfg ?? {})) {
+        masked[k] = secret.test(k) && typeof v === "string" && v !== "" ? "***" : v;
+      }
+      out[kind] = masked;
+    }
+    return out;
+  }
+
   private connectorsGet(): Record<string, unknown> {
-    return { connectors: this.cfg.connectors ?? {} };
+    return { connectors: this.maskConnectors(this.cfg.connectors ?? {}) };
   }
 
   private connectorsSet(params: Record<string, unknown>): Record<string, unknown> {
@@ -737,7 +753,7 @@ export class AgentServer {
     connectors[kind] = incoming;
     this.cfg.connectors = connectors;
     writeConnectorsToDisk(connectors, { configFile: this.cfg.configFile });
-    return { ok: true, connectors };
+    return { ok: true, connectors: this.maskConnectors(connectors) };
   }
 
   private async connectorsTest(params: Record<string, unknown>): Promise<{
@@ -1031,12 +1047,16 @@ export class AgentServer {
       throw new RpcError(RPC_ERROR_INVALID_PARAMS, `invalid skill name: ${name}`);
     }
     const body = String(params.body ?? "");
-    const dir = path.join(this.cfg.homeDir, "skills", name);
-    fs.mkdirSync(dir, { recursive: true });
-    const file = path.join(dir, "SKILL.md");
-    const existed = fs.existsSync(file);
-    fs.writeFileSync(file, body.endsWith("\n") ? body : `${body}\n`, { mode: 0o644 });
-    return { ok: true, path: file, created: !existed };
+    // Round-trip through the store: skills.view hands the GUI a body that has
+    // its frontmatter stripped, so writing it verbatim would drop the
+    // description on every save.
+    const existing = this.selfImprove.skills.get(name);
+    const description = existing
+      ? existing.description
+      : String(params.description ?? "").trim();
+    const { warnings } = this.selfImprove.skills.write(name, description, body);
+    const file = path.join(this.cfg.homeDir, "skills", name, "SKILL.md");
+    return { ok: true, path: file, created: !existing, warnings };
   }
 
   private fsDirs(params: Record<string, unknown>): { dirs: string[]; home: string } {
@@ -1251,9 +1271,11 @@ export class AgentServer {
         signal: controller.signal,
         onEvent: events,
       });
-      // M3: background self-review of this turn (stage-only; never blocks long)
+      // M3: background self-review of this turn (stage-only). It must not
+      // hold the per-session turn lock — a review can take up to a minute and
+      // would reject the user's next message the whole time.
       if (!this.disableReview && !controller.signal.aborted) {
-        await this.reviewTurn({ sessionId, session, msgCountBefore, ctx });
+        void this.reviewTurn({ sessionId, session, msgCountBefore, ctx });
       }
       // M4: idle feed for the curator scheduler
       this.lastTurnAt = Date.now();

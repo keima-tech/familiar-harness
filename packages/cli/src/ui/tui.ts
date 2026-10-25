@@ -261,7 +261,7 @@ type Block =
   | { kind: "user"; text: string; mode?: string }
   | { kind: "assistant"; src: string; lines: string[] | null; done: boolean; lastRender: number }
   | { kind: "reasoning"; text: string; done?: boolean; expanded?: boolean }
-  | { kind: "tool"; name: string; detail: string; status: "run" | "ok" | "err"; ms?: number; extra?: string[] }
+  | { kind: "tool"; name: string; detail: string; status: "run" | "ok" | "err"; ms?: number; extra?: string[]; toolCallId?: string }
   | { kind: "info"; text: string };
 
 function blockLines(b: Block, width: number): string[] {
@@ -732,14 +732,23 @@ export class FullScreenTui {
           name: event.toolCall.name,
           detail: toolCallDetail(event.toolCall.name, event.toolCall.arguments),
           status: "run",
+          toolCallId: event.toolCall.id,
         });
         this.frameSoon();
         break;
       }
       case "tool.result": {
-        const tb = [...this.blocks].reverse().find(
-          (b): b is Block & { kind: "tool" } => b.kind === "tool",
+        // match by id first: parallel task calls are all still "run" when the
+        // first result lands and the newest-running rule paints the wrong card
+        const byId = [...this.blocks].reverse().find(
+          (b): b is Block & { kind: "tool" } =>
+            b.kind === "tool" && b.status === "run" && b.toolCallId === event.toolCallId,
         );
+        const tb =
+          byId ??
+          [...this.blocks].reverse().find(
+            (b): b is Block & { kind: "tool" } => b.kind === "tool" && b.status === "run",
+          );
         if (tb && tb.status === "run") {
           if (event.isError) {
             tb.status = "err";

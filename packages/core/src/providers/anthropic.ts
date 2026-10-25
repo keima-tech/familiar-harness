@@ -85,6 +85,7 @@ export class AnthropicProvider implements Provider {
           const u = event.message?.usage;
           if (u?.input_tokens !== undefined) {
             usage = { ...usage, promptTokens: u.input_tokens };
+            onChunk({ type: "usage", usage: { promptTokens: u.input_tokens, completionTokens: 0 } });
           }
           break;
         }
@@ -125,6 +126,10 @@ export class AnthropicProvider implements Provider {
         case "message_delta": {
           if (event.usage?.output_tokens !== undefined) {
             usage = { ...usage, completionTokens: event.usage.output_tokens };
+            onChunk({
+              type: "usage",
+              usage: { promptTokens: 0, completionTokens: event.usage.output_tokens },
+            });
           }
           if (event.delta?.stop_reason) {
             stopReason = event.delta.stop_reason;

@@ -256,6 +256,7 @@ const STR = {
     "toast.createFailed": "セッション作成に失敗しました: {0}",
     "toast.sendFailed": "送信に失敗しました: {0}",
     "toast.attached": "添付しました: {0}",
+    "sessions.noMatch": "一致するセッションがありません",
     "attach.remove": "添付を削除",
     "attach.limit": "添付できる画像は最大 {0} 枚です",
     "attach.tooLarge": "画像が大きすぎます(最大 5MB): {0}",
@@ -627,6 +628,7 @@ const STR = {
     "toast.createFailed": "session.create failed: {0}",
     "toast.sendFailed": "send failed: {0}",
     "toast.attached": "attached: {0}",
+    "sessions.noMatch": "no matching sessions",
     "attach.remove": "remove attachment",
     "attach.limit": "at most {0} images per message",
     "attach.tooLarge": "image too large (max 5MB): {0}",
@@ -1110,6 +1112,7 @@ const state = {
   pendingEvents: new Map(), // sessionId -> partial assistant render state
   pendingToolCards: [], // live tool.call cards awaiting their result
   pendingAttachments: [], // images waiting in the composer (multimodal send)
+  busySessionId: null, // session whose turn is running (busy is global, turns are not)
   turnStartedAt: null,
   turnTimer: null,
   lastElapsed: null,
@@ -1403,11 +1406,11 @@ function applySessionFilter() {
     }
   }
   let none = document.querySelector("#sessions .filter-none");
-  if (visible === 0 && state.sessions.length > 0) {
+  if (query !== "" && visible === 0 && state.sessions.length > 0) {
     if (!none) {
       none = document.createElement("li");
       none.className = "filter-none";
-      none.textContent = "no matching sessions";
+      none.textContent = t("sessions.noMatch");
       $("#sessions").appendChild(none);
     }
   } else {
@@ -1681,6 +1684,8 @@ async function openSession(id) {
   }
   try { localStorage.setItem("familiar.lastSession", id); } catch { /* ignore */ }
   const data = await rpc("session.get", { id });
+  // a slower response must not overwrite the session the user picked next
+  if (state.sessionId !== id) return;
   const s = data.session;
   state.currentSession = s;
   $("#session-title").textContent = s.title || s.id.slice(0, 8);
@@ -1697,6 +1702,11 @@ async function openSession(id) {
   closeAllPops();
   renderTranscript(data.messages ?? []);
   applyTranscriptFilter();
+  // the Files pane is keyed by session — drop the stale tree when visible
+  if (activePaneTab() === "files") {
+    filesSessionKey = null;
+    void renderFilesTab();
+  }
 }
 
 /** Header chip showing the session's working folder (click to change). */
@@ -2408,10 +2418,11 @@ function refreshSendButton() {
 
 /** Abort the running turn of the current session. */
 async function stopTurn() {
-  if (!state.busy || !state.sessionId) return;
+  const target = state.busySessionId ?? state.sessionId;
+  if (!state.busy || !target) return;
   try {
     toast(t("toast.stopRequested"), "info");
-    await rpc("session.abort", { id: state.sessionId });
+    await rpc("session.abort", { id: target });
   } catch (err) {
     toast(t("toast.sendFailed", err.message), "err");
   }
@@ -2419,6 +2430,7 @@ async function stopTurn() {
 
 function setBusy(busy) {
   state.busy = busy;
+  if (!busy) state.busySessionId = null;
   $("#send").disabled = false; // the send button doubles as the stop button
   $("#input").disabled = busy;
   $("#turn-spinner").hidden = !busy;
@@ -2464,7 +2476,14 @@ function connectEvents() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const suffix = serverToken ? `?token=${encodeURIComponent(serverToken)}` : "";
   const ws = new WebSocket(`${proto}://${location.host}/ws${suffix}`);
-  const retry = () => setTimeout(connectEvents, 1500);
+  // error + close both fire for one failed socket — retry exactly once or the
+  // reconnects double with every failure (and every event is handled N times)
+  let retried = false;
+  const retry = () => {
+    if (retried) return;
+    retried = true;
+    setTimeout(connectEvents, 1500);
+  };
   ws.addEventListener("close", retry);
   ws.addEventListener("error", retry);
   ws.addEventListener("message", (ev) => {
@@ -2495,12 +2514,23 @@ function onEvent(sessionId, e) {
     }
     return;
   }
+  // busy is global but turns are per session: release it even when the turn
+  // belongs to a session we are no longer looking at (otherwise wedged forever)
+  if (
+    state.busySessionId === sessionId &&
+    (e.type === "turn.end" || e.type === "turn.error" || e.type === "turn.aborted")
+  ) {
+    setBusy(false);
+  }
+  // (never fall through to a blanket setBusy(false): a turn.end for a session
+  // we merely happen to be viewing must not release someone else's turn)
   if (sessionId !== state.sessionId) return;
 
   switch (e.type) {
     case "turn.start":
       state.turnBubbles = [];
       setBusy(true);
+      state.busySessionId = sessionId;
       break;
     case "message.start":
       state.pendingEvents.delete(sessionId);
@@ -2567,7 +2597,6 @@ function onEvent(sessionId, e) {
         state.lastPromptTokensBySession[sessionId] = u.promptTokens;
         delete state.ctxEstimated[sessionId]; // real value — drop the ≈ marker
       }
-      setBusy(false);
       const secs = parseFloat(state.lastElapsed ?? "") || 0;
       const hasUsage = u.promptTokens !== undefined;
       let completion = u.completionTokens ?? 0;
@@ -2617,14 +2646,12 @@ function onEvent(sessionId, e) {
       break;
     }
     case "turn.error":
-      setBusy(false);
       for (const b of state.turnBubbles) if (b.caret) b.caret.remove();
       state.turnBubbles = [];
       appendMessage("assistant", `⚠ ${e.error}`, null);
       void notifyDesktop(t("notify.turnFailed"), String(e.error ?? "").slice(0, 140), { urgent: true });
       break;
     case "turn.aborted":
-      setBusy(false);
       for (const b of state.turnBubbles) if (b.caret) b.caret.remove();
       state.turnBubbles = [];
       setTurnEndLabel(t("turn.stopped"));
@@ -3561,7 +3588,7 @@ function themeDropdown(current, onChange) {
     const row = document.createElement("button");
     row.type = "button";
     row.className = `theme-dd-row${name === current ? " selected" : ""}`;
-    row.title = THEMES[name]?.desc ?? "";
+    row.title = THEME_DESC[name]?.[lang] ?? "";
     row.innerHTML =
       `<span class="theme-dd-sw" style="background:${pal.bg}">` +
       `<i style="background:${pal.accent}"></i><i style="background:${pal.ok}"></i><i style="background:${pal.err}"></i>` +
@@ -3579,9 +3606,13 @@ function themeDropdown(current, onChange) {
     ev.stopPropagation();
     list.hidden = !list.hidden;
   });
-  document.addEventListener("click", (e) => {
-    if (!wrap.contains(e.target)) list.hidden = true;
-  });
+  if (!wrap.dataset.closer) {
+    wrap.dataset.closer = "1";
+    document.addEventListener("click", (e) => {
+      const dd = wrap.querySelector(".theme-dd-list");
+      if (dd && !wrap.contains(e.target)) dd.hidden = true;
+    });
+  }
   return wrap;
 }
 
@@ -3876,6 +3907,9 @@ function providerForm(name, pc, isNew) {
  * built-in catalog + unconfigured entries as "Candidates", each with a
  * ＋接続 button that opens the form prefilled. */
 async function renderProvidersSection(content, stale = () => false) {
+  // every append goes through here: a section the user navigated away
+  // from while an RPC was in flight must not land in the new tab
+  const put = (node) => { if (!stale()) content.appendChild(node); };
   if (!(await ensureNsConfig())) return;
     if (stale()) return;
   const names = Object.keys(ns.providers).sort((a, b) =>
@@ -3890,23 +3924,23 @@ async function renderProvidersSection(content, stale = () => false) {
   const connHead = document.createElement("div");
   connHead.className = "provsec";
   connHead.innerHTML = `<b>${esc(t("prov.connected"))}</b><span>${connected.length}</span>`;
-  content.appendChild(connHead);
+  put(connHead);
   if (connected.length === 0) {
     const empty = document.createElement("div");
     empty.className = "proempty dim";
     empty.textContent = t("prov.noneConnected");
-    content.appendChild(empty);
+    put(empty);
   }
   for (const name of connected) {
     const pc = ns.providers[name] ?? {};
-    content.appendChild(providerCard(name, pc));
+    put(providerCard(name, pc));
   }
 
   // ---- section 2: candidates ----
   const candHead = document.createElement("div");
   candHead.className = "provsec";
   candHead.innerHTML = `<b>${esc(t("prov.candidates"))}</b><span>${candidates.length}</span>`;
-  content.appendChild(candHead);
+  put(candHead);
   const candRows = new Map(); // openKey → form prefill
   // (a) configured providers whose key does not resolve yet
   for (const name of candidates) {
@@ -3952,7 +3986,7 @@ async function renderProvidersSection(content, stale = () => false) {
       body.appendChild(providerForm(name, pc, true));
       row.appendChild(body);
     }
-    content.appendChild(row);
+    put(row);
   }
 
   // ---- custom provider (free form) ----
@@ -3961,7 +3995,7 @@ async function renderProvidersSection(content, stale = () => false) {
     wrap.className = "provcard open";
     wrap.innerHTML = `<div class="provbody"></div>`;
     wrap.querySelector(".provbody").appendChild(providerForm("", null, true));
-    content.appendChild(wrap);
+    put(wrap);
   } else {
     const add = document.createElement("button");
     add.type = "button";
@@ -3971,7 +4005,7 @@ async function renderProvidersSection(content, stale = () => false) {
       providerOpen = "__new__";
       renderSettingsSection("providers");
     });
-    content.appendChild(add);
+    put(add);
   }
 }
 
@@ -3998,9 +4032,12 @@ function providerCard(name, pc) {
 }
 
 async function renderExtensionsSection(content, stale = () => false) {
+  // every append goes through here: a section the user navigated away
+  // from while an RPC was in flight must not land in the new tab
+  const put = (node) => { if (!stale()) content.appendChild(node); };
   // Skills (M3 self-improvement catalog)
   const skillCard = card(t("ext.skills"), t("ext.skillsDesc"));
-  content.appendChild(skillCard);
+  put(skillCard);
 
   // collapsible list (open by default so inline editors are usable)
   const details = document.createElement("details");
@@ -4131,7 +4168,7 @@ async function renderExtensionsSection(content, stale = () => false) {
   }
   // MCP servers
   const mcpCard = card(t("ext.mcp"), t("ext.mcpDesc"));
-  content.appendChild(mcpCard);
+  put(mcpCard);
   try {
     const res = await rpc("mcp.status");
     const servers = res.servers ?? [];
@@ -4149,7 +4186,7 @@ async function renderExtensionsSection(content, stale = () => false) {
   }
   // LSP servers (config.yaml lsp.servers)
   const lspCard = card(t("ext.lsp"), t("ext.lspDesc"));
-  content.appendChild(lspCard);
+  put(lspCard);
   try {
     const cfg = await rpc("config.get");
     const lsp = cfg.lsp?.servers;
@@ -4180,13 +4217,16 @@ function pairRow(k, v) {
 }
 
 async function renderConnectorsSection(content, stale = () => false) {
+  // every append goes through here: a section the user navigated away
+  // from while an RPC was in flight must not land in the new tab
+  const put = (node) => { if (!stale()) content.appendChild(node); };
   if (!(await ensureNsConfig())) return;
     if (stale()) return;
   let stored = {};
   try {
     stored = (await rpc("connectors.get")).connectors ?? {};
   } catch (err) {
-    content.appendChild(sectionError(t("conn.title"), err));
+    put(sectionError(t("conn.title"), err));
     return;
   }
   // ---- Google (OAuth: Gmail / カレンダー) ----
@@ -4305,7 +4345,7 @@ async function renderConnectorsSection(content, stale = () => false) {
   gCal.addEventListener("click", () => void loadList("calendar"));
   gDel.addEventListener("click", async () => {
     await rpc("connectors.delete", { kind: "google" });
-    renderConnectorsSection(content);
+    renderSettingsSection("connectors");
   });
   gActions.append(gSave, gAuth, gTest, gMail, gCal, gResult, gDel);
   googleCard.appendChild(gActions);
@@ -4314,7 +4354,7 @@ async function renderConnectorsSection(content, stale = () => false) {
     gCal.hidden = false;
   }
   googleCard.appendChild(gList);
-  content.appendChild(googleCard);
+  put(googleCard);
 
   const KINDS = [
     { id: "github", label: "GitHub", fields: [["token", t("conn.token"), true]] },
@@ -4390,15 +4430,18 @@ async function renderConnectorsSection(content, stale = () => false) {
     del.textContent = t("conn.delete");
     del.addEventListener("click", async () => {
       await rpc("connectors.delete", { kind: k.id });
-      renderConnectorsSection(content);
+      renderSettingsSection("connectors");
     });
     actions.append(save, test, del, result);
     cardEl.appendChild(actions);
-    content.appendChild(cardEl);
+    put(cardEl);
   }
 }
 
 async function renderSystemSection(content, stale = () => false) {
+  // every append goes through here: a section the user navigated away
+  // from while an RPC was in flight must not land in the new tab
+  const put = (node) => { if (!stale()) content.appendChild(node); };
   // ---- about card (version / developer / links) ----
   const about = card(t("set.about"), "");
   about.querySelector("h4")?.remove();
@@ -4417,14 +4460,14 @@ async function renderSystemSection(content, stale = () => false) {
     const vEl = about.querySelector("#about-version");
     if (vEl && hz?.version) vEl.textContent = `${t("set.version")}: v${hz.version}`;
   } catch { /* keep placeholder */ }
-  content.appendChild(about);
+  put(about);
 
   const hint = card(t("set.systemStats"), t("sys.desc"));
-  content.appendChild(hint);
+  put(hint);
   try {
     const res = await rpc("curator.status");
     const c = res.curator ?? {};
-    content.appendChild(sectionCard("curator", [
+    put(sectionCard("curator", [
       [t("stat.state"), `${c.enabled ? t("stat.enabled") : t("stat.disabled")}${c.paused ? " · " + t("stat.paused") : ""}`],
       [t("stat.lastRun"), `${fmtTime(c.lastRunAt)}${c.lastRunAt ? ` (${relTime(c.lastRunAt)})` : ""}`],
       [t("stat.nextDue"), fmtTime(c.nextDueAt)],
@@ -4433,18 +4476,18 @@ async function renderSystemSection(content, stale = () => false) {
       [t("stat.consolidation"), c.consolidate ? t("stat.enabled") : t("stat.disabled")],
     ]));
   } catch (err) {
-    content.appendChild(sectionError("curator", err));
+    put(sectionError("curator", err));
   }
   try {
     const res = await rpc("cron.status");
     const jobs = res.jobs ?? [];
-    content.appendChild(sectionCard(
+    put(sectionCard(
       "cron scheduler",
       jobs.length > 0 ? jobs.map((j) => [j.name ?? "(unnamed)", j.enabled === false ? t("stat.disabled") : t("stat.everyMinutes", j.every_minutes)]) : [["—", t("stat.noJobs")]],
       res.started ? t("stat.running") : t("stat.stopped"),
     ));
   } catch (err) {
-    content.appendChild(sectionError("cron scheduler", err));
+    put(sectionError("cron scheduler", err));
   }
 }
 
@@ -4875,26 +4918,30 @@ async function send() {
   const input = $("#input");
   const text = input.value.trim();
   if (text === "" || state.busy) return;
-  let id = state.sessionId;
-  if (!id) {
-    const createParams = {};
-    if (state.draft.provider) createParams.provider = state.draft.provider;
-    if (state.draft.model) createParams.model = state.draft.model;
-    if (state.draft.effort) createParams.effort = state.draft.effort;
-    const s = await rpc("session.create", createParams);
-    id = s.id;
-    state.sessionId = id;
-    state.draft = { provider: "", model: "", effort: "" };
-    await refreshSessions();
-  }
-  setBusy(true);
   const atts = state.pendingAttachments.slice();
-  appendMessage("user", text, null, { attachments: atts });
-  state.pendingAttachments = [];
-  renderAttachStrip();
-  input.value = "";
-  autoSize(input);
+  let id = state.sessionId;
+  setBusy(true);
   try {
+    if (!id) {
+      const createParams = {};
+      if (state.draft.provider) createParams.provider = state.draft.provider;
+      if (state.draft.model) createParams.model = state.draft.model;
+      if (state.draft.effort) createParams.effort = state.draft.effort;
+      const s = await rpc("session.create", createParams);
+      id = s.id;
+      state.sessionId = id;
+      state.draft = { provider: "", model: "", effort: "" };
+      await refreshSessions();
+      // refreshSessions only auto-opens while no session is active
+      if (state.currentSession?.id !== id) await openSession(id);
+    }
+    state.busySessionId = id;
+    const bubble = appendMessage("user", text, null, { attachments: atts });
+    bubble.closest(".msg")?.setAttribute("data-opt", "1");
+    state.pendingAttachments = [];
+    renderAttachStrip();
+    input.value = "";
+    autoSize(input);
     // a pending model-chip change is persisted first; on failure fall back to
     // per-turn overrides passed straight into session.send
     let overrides = null;
@@ -4919,6 +4966,12 @@ async function send() {
     if (state.draft.effort) sparams.effort = state.draft.effort;
     await rpc("session.send", sparams);
   } catch (err) {
+    // nothing was sent: drop the optimistic bubble and give the images back
+    document.querySelector('#transcript .msg[data-opt="1"]')?.remove();
+    if (atts.length > 0) {
+      state.pendingAttachments = atts;
+      renderAttachStrip();
+    }
     toast(t("toast.sendFailed", err.message), "err");
     setBusy(false);
   }
@@ -5165,10 +5218,10 @@ function boot() {
     }
   });
   $("#file-attach").addEventListener("change", () => {
-    const f = $("#file-attach").files?.[0];
+    const files = [...($("#file-attach").files ?? [])];
     $("#file-attach").value = "";
-    if (!f) return;
-    void attachFiles([f]);
+    if (files.length === 0) return;
+    void attachFiles(files);
   });
 
   // ---- drag & drop attachments into the composer --------------------------
@@ -5372,6 +5425,15 @@ function boot() {
       }
       if (!$("#cwd-overlay").hidden) {
         closeCwdModal();
+        return;
+      }
+      if (!$("#new-session-overlay").hidden) {
+        closeNewSessionModal();
+        return;
+      }
+      if (!$("#img-overlay").hidden) {
+        $("#img-overlay").hidden = true;
+        $("#img-overlay-img").src = "";
         return;
       }
       hideCtxMenu();

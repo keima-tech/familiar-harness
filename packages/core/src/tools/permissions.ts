@@ -44,14 +44,15 @@ function buildRegex(pattern: string): RegExp | null {
   }
 }
 
+const REGEX_META = /[\\^$.*+?()[\]{}|]/;
+
 function matchesAny(command: string, patterns: string[]): boolean {
   for (const p of patterns) {
-    const isRegex = p.startsWith("^");
-    if (isRegex) {
+    // documented as "prefix match OR regular expression"
+    if (command.startsWith(p)) return true;
+    if (REGEX_META.test(p)) {
       const re = buildRegex(p);
       if (re && re.test(command)) return true;
-    } else if (command.startsWith(p)) {
-      return true;
     }
   }
   return false;

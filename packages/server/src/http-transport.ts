@@ -195,7 +195,7 @@ export function startHttpTransport(
         res.end(
           `<!doctype html><html lang="ja"><meta charset="utf-8"><body style="font-family:system-ui;background:#0f1117;color:#e6e6ea;display:grid;place-items:center;height:100vh">` +
             `<div style="text-align:center"><h2>${ok ? "✓ Google 連携が完了しました / Google linking complete" : "✗ 連携に失敗しました / linking failed"}</h2>` +
-            (ok ? `<p style="color:#8b8b96">このタブを閉じて Familiar Harness に戻ってください。 / Close this tab and return to Familiar Harness.</p>` : `<p style="color:#ff6b6b">${msg.replace(/</g, "<")}</p>`) +
+            (ok ? `<p style="color:#8b8b96">このタブを閉じて Familiar Harness に戻ってください。 / Close this tab and return to Familiar Harness.</p>` : `<p style="color:#ff6b6b">${msg.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c] ?? c)}</p>`) +
             `</div></body>`,
         );
         return;

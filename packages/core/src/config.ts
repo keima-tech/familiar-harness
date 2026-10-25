@@ -292,16 +292,27 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+/** Deep-copy plain objects/arrays so live configs never alias the defaults. */
+function deepClone<T>(v: T): T {
+  if (Array.isArray(v)) return v.map((x) => deepClone(x)) as T;
+  if (isPlainObject(v)) {
+    const out: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(v)) out[k] = deepClone(val);
+    return out as T;
+  }
+  return v;
+}
+
 /** Recursive merge: scalars/arrays win from `over`, objects merge. */
 function deepMerge<T>(base: T, over: unknown): T {
   if (!isPlainObject(base) || !isPlainObject(over)) {
-    if (over === undefined) return base;
-    return over as T;
+    if (over === undefined) return deepClone(base);
+    return deepClone(over) as T;
   }
-  const out: Record<string, unknown> = { ...base };
+  const out: Record<string, unknown> = deepClone(base);
   for (const [k, v] of Object.entries(over)) {
     if (v === undefined) continue;
-    out[k] = isPlainObject(v) && isPlainObject(out[k]) ? deepMerge(out[k], v) : v;
+    out[k] = isPlainObject(v) && isPlainObject(out[k]) ? deepMerge(out[k], v) : deepClone(v);
   }
   return out as T;
 }

@@ -357,6 +357,8 @@ try {
   }, "desktop page");
   await waitFor(() => probe(`typeof window.familiarDesktop?.connections === "function"`), "preload bridge");
   check(true, "desktop shell exposes the connection bridge");
+  // the app persists the interface language; pin it for label-based checks
+  await evalOnce(`typeof setLang === "function" ? (setLang("ja"), applyI18n(), 1) : 1`);
 
   const localFs = await evalOnce(`rpc("fs.list", { path: ${JSON.stringify(repoRoot)} }).then((r) => r.entries.length)`);
   check(typeof localFs === "number" && localFs > 0, "local fs.list still works", String(localFs));
@@ -818,7 +820,7 @@ try {
       inputs[0].value = "Key test";
       inputs[1].value = "keyscan-ui";
       [...document.querySelectorAll("#settings-content .conn-actions button")]
-        .find((b) => b.textContent.includes("ホスト鍵"))
+        .find((b) => /ホスト鍵|host key/i.test(b.textContent))
         .click();
       for (let i = 0; i < 50; i++) {
         await new Promise((r) => setTimeout(r, 200));
@@ -826,7 +828,7 @@ try {
       }
       const rows = document.querySelectorAll("#settings-content .ssh-hostkey-row").length;
       const box = document.querySelector("#settings-content .ssh-hostkey");
-      [...box.querySelectorAll("button")].find((b) => b.textContent.includes("登録")).click();
+      [...box.querySelectorAll("button")].find((b) => /登録|trust/i.test(b.textContent)).click();
       return { rows };
     } finally {
       connApiOverride = null;

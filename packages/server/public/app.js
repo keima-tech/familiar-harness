@@ -293,6 +293,7 @@ const STR = {
     "ssh.hostKeyRegister": "この鍵を登録",
     "ssh.hostKeyAdded": "known_hosts に登録しました (新規 {0} / 既存 {1})",
     "ssh.authHint": "公開鍵認証が拒否されました。このマシンに鍵が無い場合は ssh-keygen -t ed25519 で作成し、ssh-copy-id <user>@<host> で配置してください (ssh-agent でも可)。",
+    "ssh.netHint": "接続がリセット/拒否されました。サーバ側のレート制限(fail2ban 等)や一時的な負荷の可能性があります。数分おいて再試行してください。",
     "ssh.desktopOnly": "SSH 接続はデスクトップアプリでのみ利用できます。",
     "ssh.connectFail": "接続に失敗しました: {0}",
     "ssh.current": "接続中: {0}",
@@ -727,6 +728,7 @@ const STR = {
     "ssh.hostKeyRegister": "Trust these keys",
     "ssh.hostKeyAdded": "Added to known_hosts (new {0} / already present {1})",
     "ssh.authHint": "Public-key auth was refused. If this machine has no key, create one with ssh-keygen -t ed25519 and copy it with ssh-copy-id <user>@<host> (ssh-agent works too).",
+    "ssh.netHint": "The connection was reset/refused — the server may be rate-limiting (fail2ban etc.) or briefly overloaded. Retry in a few minutes.",
     "ssh.desktopOnly": "SSH connections are available in the desktop app only.",
     "ssh.connectFail": "Connection failed: {0}",
     "ssh.current": "Connected: {0}",
@@ -4679,6 +4681,8 @@ async function renderConnectionsSection(content, stale = () => false) {
         void showHostKeyPanel(draftTarget(), hostKeyBox, fresult);
       } else if (/Permission denied|publickey/i.test(msg)) {
         fresult.textContent = `${t("ssh.testFail", msg)} — ${t("ssh.authHint")}`;
+      } else if (/kex_exchange_identification|Connection reset by peer|Connection refused|No route to host|Connection timed out/i.test(msg)) {
+        fresult.textContent = `${t("ssh.testFail", msg)} — ${t("ssh.netHint")}`;
       }
     }
   });

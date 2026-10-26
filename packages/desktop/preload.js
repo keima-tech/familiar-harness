@@ -30,6 +30,10 @@ contextBridge.exposeInMainWorld("familiarDesktop", {
   saveConnection: (profile) => ipcRenderer.invoke("conn:save", profile),
   deleteConnection: (id) => ipcRenderer.invoke("conn:delete", id),
   testConnection: (profile) => ipcRenderer.invoke("conn:test", profile),
+  /** Fingerprints via ssh-keyscan (server-side; shared known_hosts). */
+  hostKeyScan: (params) => ipcRenderer.invoke("conn:hostkey", params),
+  /** Append verified keys to ~/.ssh/known_hosts. */
+  trustHostKey: (params) => ipcRenderer.invoke("conn:trusthost", params),
   connectProfile: (id, opts) => ipcRenderer.invoke("conn:connect", { id, ...(opts ?? {}) }),
   disconnectConnection: () => ipcRenderer.invoke("conn:disconnect"),
   onConnectionStatus: (cb) => {

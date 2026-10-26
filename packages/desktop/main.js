@@ -442,6 +442,17 @@ ipcMain.handle("conn:connect", async (ev, input) => {
   return { ok: true, current: connInfo(conn) };
 });
 
+ipcMain.handle("conn:hostkey", async (ev, params) => {
+  requireLocal(ev, "checking host keys");
+  // scans and known_hosts writes live on the server (shared with the WebUI)
+  return await callLocalServer("conn.hostkey", params);
+});
+
+ipcMain.handle("conn:trusthost", async (ev, params) => {
+  requireLocal(ev, "trusting host keys");
+  return await callLocalServer("conn.trusthost", params);
+});
+
 ipcMain.handle("conn:disconnect", async (ev) => {
   // Allowed from the remote page too: it is the way back home. It only ever
   // disconnects the connection this window is already using.

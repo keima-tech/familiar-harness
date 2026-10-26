@@ -32,7 +32,19 @@ function profilesFile() {
 }
 
 function sshBin() {
-  return process.env.FAMILIAR_SSH_BIN || "ssh";
+  // resolve through fs (a stale FUSE mount in PATH fails exec with ENOTCONN)
+  if (process.env.FAMILIAR_SSH_BIN) return process.env.FAMILIAR_SSH_BIN;
+  const dirs = (process.env.PATH || "/usr/bin:/bin").split(path.delimiter);
+  for (const dir of dirs) {
+    if (!dir) continue;
+    try {
+      const full = path.join(dir, process.platform === "win32" ? "ssh.exe" : "ssh");
+      if (fs.existsSync(full)) return full;
+    } catch {
+      /* unreadable PATH entry */
+    }
+  }
+  return "ssh";
 }
 
 // ---------------------------------------------------------------------------

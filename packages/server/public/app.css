@@ -945,6 +945,14 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
   border-radius: 8px; padding: 7px 10px; font: inherit; font-size: 12.5px; outline: none;
 }
 .ssh-field select:focus { border-color: var(--accent); }
+.ssh-hostkey {
+  display: flex; flex-direction: column; gap: 4px;
+  margin-top: 8px; padding: 8px 10px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--panel2);
+}
+.ssh-hostkey-row { display: flex; gap: 8px; align-items: baseline; font-size: 11.5px; }
+.ssh-hostkey-row .ssh-hostkey-type { color: var(--accent); flex: none; }
+.ssh-hostkey-row code { color: var(--dim); word-break: break-all; font-size: 11px; }
 .ns-remote-hint { color: var(--dim); font-size: 11px; line-height: 1.5; text-align: center; }
 .ns-remote-bar {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;

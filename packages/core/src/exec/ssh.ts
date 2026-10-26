@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import nodePath, { type PlatformPath } from "node:path";
 import type { SessionRemote } from "@familiar/protocol";
+import { resolveExecutable } from "./resolve.js";
 import {
   OutputCollector,
   SKIP_DIR_NAMES,
@@ -20,7 +21,7 @@ const BATCH_TIMEOUT_MS = 120_000;
 const STDOUT_CAP = 48 * 1024 * 1024;
 
 function sshBin(): string {
-  return process.env["FAMILIAR_SSH_BIN"] || "ssh";
+  return process.env["FAMILIAR_SSH_BIN"] || resolveExecutable("ssh");
 }
 
 function shellQuote(value: string): string {

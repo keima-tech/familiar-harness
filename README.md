@@ -167,6 +167,8 @@ For LAN-only exposure use `familiar serve --bind 0.0.0.0` **together with** toke
 
 The WebUI works without the desktop shell too: the same profiles appear under *Settings → Connections* (server RPCs), proxy sessions run straight from the browser, and familiar-server hosts are tunneled by the server itself — the browser tab switches to the remote UI and returns through a capability stop endpoint (tunnels also expire after 12h; the listening address follows `server.bind`).
 
+Host keys are strict; on first contact use *Check host key…* in the connection form to review the `ssh-keyscan` fingerprints and add them to `known_hosts` (a changed key is never auto-trusted). Auth is key/ssh-agent only — e.g. `ssh-keygen -t ed25519` plus `ssh-copy-id you@host`.
+
 ### Architecture
 
 ```

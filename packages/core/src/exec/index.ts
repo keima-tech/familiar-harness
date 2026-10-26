@@ -1,5 +1,6 @@
 import type { SessionRemote } from "@familiar/protocol";
 import { LocalBackend } from "./local.js";
+export { resolveExecutable } from "./resolve.js";
 import { SshBackend } from "./ssh.js";
 
 export type {

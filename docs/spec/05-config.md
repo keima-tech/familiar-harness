@@ -278,6 +278,15 @@ ssh -L 46210:127.0.0.1:46210 <user>@<server-host>
 - **添付の後始末**: アップロードはセッション削除時に `<ホーム>/.familiar/uploads/<session>` を
   丸ごと削除します。ローカル側に残った古いファイルは `uploads.retention_days`(既定 30、
   0 で無効)で serve 起動時+6 時間ごとに自動削除されます。
+- **ホスト鍵**: 接続は `StrictHostKeyChecking=yes` のため、初回はホスト鍵の登録が必要です。
+  「設定 → 接続」の「🔑 ホスト鍵を確認…」が `ssh-keyscan` で鍵を取得して SHA256
+  フィンガープリントを表示し、「この鍵を登録」で `~/.ssh/known_hosts` に追記します。
+  **既存エントリと異なる鍵が返った場合は自動登録を拒否**します(侵害・再構築の検知)。
+  ホスト名で接続する場合はその名前で登録してください(known_hosts は名前単位)。
+  手動なら `ssh <host>` を一度実行して yes、または
+  `ssh-keyscan <host> >> ~/.ssh/known_hosts` でも同じです。
+- 認証は鍵/ssh-agent のみ(`BatchMode`)。パスワード認証は使えません。鍵が無いマシンでは
+  `ssh-keygen -t ed25519` で作成し `ssh-copy-id <user>@<host>` で配置してください。
 - 制約: リモートに POSIX シェルが必要です(`find` / `stat` / `base64` / `wc` を使用)。
   作業フォルダーは絶対パスで指定してください(`~` はリモートのホームに展開されます)。
 

@@ -843,3 +843,23 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   capability stop での切断、ブラウザ用トンネル URL(remote/stop/local 付き)が
   リモート UI を返すこと、`connApiOverride` で preload 無し経路(実行先リスト→
   プロキシセッション作成)を通すこと。typecheck / smoke 通過。
+
+## v0.1.0 の実装メモ㊵(2026-10-27、ホスト鍵の確認・登録 UI と PATH 堅牢化)
+
+- **ホスト鍵の確認と登録**: 初回接続が `StrictHostKeyChecking=yes` で失敗する問題に対し、
+  `conn.hostkey`(`ssh-keyscan` → SHA256 フィンガープリント、`FAMILIAR_SSH_KEYSCAN_BIN` で
+  差し替え可)と `conn.trusthost`(検証済み行を `~/.ssh/known_hosts` へ追記、
+  `FAMILIAR_SSH_KNOWN_HOSTS` で上書き可)を追加。**既存と異なる鍵は自動登録を拒否**し、
+  同一鍵はスキップ。デスクトップは `conn:hostkey`/`conn:trusthost` としてサーバ RPC に
+  委譲。接続フォームに「🔑 ホスト鍵を確認…」→ fingerprint 一覧 → 「この鍵を登録」を追加し、
+  接続テストがホスト鍵エラーなら自動でパネルを開く。パスワード認証は対象外である旨と
+  `ssh-keygen`/`ssh-copy-id` の案内もエラー時に表示。
+- **exec の PATH 堅牢化**: 停止した AppImage の FUSE マウント(`/tmp/.mount_*`)が PATH に
+  残ると exec が ENOTCONN を返し、node の spawn が PATH 探索の途中で例外になる
+  (ssh が見つからない・ビルドが silent に死ぬ等)。`resolveExecutable()`
+  (packages/core/src/exec/resolve.ts)で `fs.existsSync` による探索に切り替え、
+  core/server/desktop の ssh・ssh-keyscan 起動を全て絶対パス化。
+- **テスト**: ssh-e2e を **67 項目**に拡張 — 偽 `ssh-keyscan` でスキャン/SHA256/0600 追記/
+  再登録スキップ/鍵変更の拒否/`[host]:port` 表記/デスクトップ委譲/設定フォームからの
+  確認と登録。テストハーネスは死んだマウントを含む PATH を除去して起動。
+  typecheck / smoke 通過。

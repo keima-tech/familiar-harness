@@ -5,7 +5,7 @@ import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { log } from "@familiar/core";
+import { log, resolveExecutable } from "@familiar/core";
 
 /**
  * Server-side SSH connections, so the browser WebUI (no desktop shell) can
@@ -71,7 +71,170 @@ function profilesFile(): string {
 }
 
 function sshBin(): string {
-  return process.env["FAMILIAR_SSH_BIN"] || "ssh";
+  return process.env["FAMILIAR_SSH_BIN"] || resolveExecutable("ssh");
+}
+
+function keyscanBin(): string {
+  return process.env["FAMILIAR_SSH_KEYSCAN_BIN"] || resolveExecutable("ssh-keyscan");
+}
+
+/** known_hosts location (overridable for tests / non-standard homes). */
+export function knownHostsPath(): string {
+  return process.env["FAMILIAR_SSH_KNOWN_HOSTS"] || path.join(os.homedir(), ".ssh", "known_hosts");
+}
+
+/** OpenSSH "SHA256:…" fingerprint of a base64 key blob. */
+export function sha256Fingerprint(blobB64: string): string {
+  const digest = crypto.createHash("sha256").update(Buffer.from(blobB64, "base64")).digest("base64");
+  return `SHA256:${digest.replace(/=+$/, "")}`;
+}
+
+export interface HostKeyInfo {
+  /** the verbatim `known_hosts` line (host type blob) */
+  line: string;
+  host: string;
+  type: string;
+  fingerprint: string;
+}
+
+export interface HostKeyScan {
+  host: string;
+  port: number;
+  keys: HostKeyInfo[];
+  knownHosts: string;
+}
+
+function runCommand(
+  file: string,
+  args: string[],
+  timeoutMs: number,
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(file, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const finish = (err?: Error): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (err) reject(err);
+      else resolve({ code: child.exitCode ?? 0, stdout, stderr });
+    };
+    const timer = setTimeout(() => {
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        /* already gone */
+      }
+      finish(new Error(`${file} timed out after ${Math.round(timeoutMs / 1000)}s`));
+    }, timeoutMs);
+    child.stdout?.on("data", (c: Buffer) => (stdout += c.toString("utf8")));
+    child.stderr?.on("data", (c: Buffer) => {
+      if (stderr.length < 2000) stderr += c.toString("utf8");
+    });
+    child.on("error", (err) => {
+      const msg = (err as NodeJS.ErrnoException).code === "ENOENT" ? `${file} not found` : err.message;
+      finish(new Error(msg));
+    });
+    child.on("exit", () => finish());
+  });
+}
+
+/** Fetch a host's public keys with ssh-keyscan (no connection, no auth). */
+export async function scanHostKeys(host: string, port = 22): Promise<HostKeyScan> {
+  const args = ["-T", "5", ...(port !== 22 ? ["-p", String(port)] : []), host];
+  const res = await runCommand(keyscanBin(), args, 20_000);
+  const keys: HostKeyInfo[] = [];
+  for (const raw of res.stdout.split("\n")) {
+    const line = raw.trim();
+    if (line === "" || line.startsWith("#")) continue;
+    const parts = line.split(/\s+/);
+    if (parts.length < 3) continue;
+    const [keyHost = "", type = "", blob = ""] = parts;
+    if (!/^(ssh-|ecdsa-|sk-)/.test(type) || !/^[A-Za-z0-9+/=]+$/.test(blob)) continue;
+    keys.push({ line: `${keyHost} ${type} ${blob}`, host: keyHost, type, fingerprint: sha256Fingerprint(blob) });
+  }
+  if (keys.length === 0) {
+    throw new Error(
+      `no host key received from ${host}${res.stderr.trim() ? ` (${res.stderr.trim().slice(0, 200)})` : ""}`,
+    );
+  }
+  return { host, port, keys, knownHosts: knownHostsPath() };
+}
+
+export interface HostKeyTrustResult {
+  added: number;
+  skipped: number;
+  knownHosts: string;
+}
+
+/**
+ * Append scanned keys to known_hosts after the user verified the
+ * fingerprints. Refuses when the host already has a *different* key of the
+ * same type (possible MITM / rebuilt host) — never silently replaces one.
+ */
+export function trustHostKeys(host: string, port: number, lines: string[]): HostKeyTrustResult {
+  const wanted: HostKeyInfo[] = [];
+  for (const raw of lines.slice(0, 20)) {
+    const line = String(raw).trim();
+    const parts = line.split(/\s+/);
+    if (parts.length < 3) continue;
+    const [keyHost = "", type = "", blob = ""] = parts;
+    const hostOk = keyHost === host || keyHost === `[${host}]:${port === 22 ? 22 : port}`;
+    if (!hostOk || !/^(ssh-|ecdsa-|sk-)/.test(type) || !/^[A-Za-z0-9+/=]+$/.test(blob)) {
+      throw new Error(`invalid host key line for ${host}: ${line.slice(0, 120)}`);
+    }
+    wanted.push({ line: `${keyHost} ${type} ${blob}`, host: keyHost, type, fingerprint: sha256Fingerprint(blob) });
+  }
+  if (wanted.length === 0) throw new Error("no host key given");
+
+  const file = knownHostsPath();
+  let existing = "";
+  try {
+    existing = fs.readFileSync(file, "utf8");
+  } catch {
+    existing = "";
+  }
+  const entries = existing
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l !== "" && !l.startsWith("#") && !l.startsWith("|1|"))
+    .map((l) => l.split(/\s+/))
+    .filter((p) => p.length >= 3)
+    .map((p) => ({ host: p[0] ?? "", type: p[1] ?? "", blob: p[2] ?? "" }));
+
+  let added = 0;
+  let skipped = 0;
+  const toAppend: string[] = [];
+  for (const key of wanted) {
+    const same = entries.filter((e) => e.host === key.host && e.type === key.type);
+    if (same.some((e) => e.blob === key.line.split(/\s+/)[2])) {
+      skipped += 1;
+      continue;
+    }
+    const different = same.find((e) => e.blob !== key.line.split(/\s+/)[2]);
+    if (different) {
+      throw new Error(
+        `host key CHANGED for ${key.host} (${key.type}): known_hosts has ${sha256Fingerprint(different.blob)}, ` +
+          `the host offers ${key.fingerprint}. Refusing to auto-trust — verify the server manually.`,
+      );
+    }
+    toAppend.push(key.line);
+    added += 1;
+  }
+  if (toAppend.length > 0) {
+    const dir = path.dirname(file);
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const prefix = existing === "" || existing.endsWith("\n") ? "" : "\n";
+    fs.appendFileSync(file, `${prefix}${toAppend.join("\n")}\n`, { mode: 0o600 });
+    try {
+      fs.chmodSync(file, 0o600);
+    } catch {
+      /* best effort */
+    }
+  }
+  return { added, skipped, knownHosts: file };
 }
 
 function shellQuote(value: string): string {

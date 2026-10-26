@@ -286,6 +286,13 @@ const STR = {
     "ssh.deleteConfirm": "接続「{0}」を削除しますか?",
     "ssh.none": "SSH サーバはまだ登録されていません",
     "ssh.errHost": "ホストを入力してください",
+    "ssh.hostKeyBtn": "🔑 ホスト鍵を確認…",
+    "ssh.hostKeyTitle": "ホスト鍵の確認と登録",
+    "ssh.hostKeyDesc": "フィンガープリントを確認して「この鍵を登録」を押すと {0} に追記します。",
+    "ssh.hostKeyNone": "ホスト鍵を取得できませんでした (ssh-keyscan)",
+    "ssh.hostKeyRegister": "この鍵を登録",
+    "ssh.hostKeyAdded": "known_hosts に登録しました (新規 {0} / 既存 {1})",
+    "ssh.authHint": "公開鍵認証が拒否されました。このマシンに鍵が無い場合は ssh-keygen -t ed25519 で作成し、ssh-copy-id <user>@<host> で配置してください (ssh-agent でも可)。",
     "ssh.desktopOnly": "SSH 接続はデスクトップアプリでのみ利用できます。",
     "ssh.connectFail": "接続に失敗しました: {0}",
     "ssh.current": "接続中: {0}",
@@ -713,6 +720,13 @@ const STR = {
     "ssh.deleteConfirm": "Delete the connection \"{0}\"?",
     "ssh.none": "No SSH servers registered yet",
     "ssh.errHost": "Enter a host",
+    "ssh.hostKeyBtn": "🔑 Check host key…",
+    "ssh.hostKeyTitle": "Verify and trust the host key",
+    "ssh.hostKeyDesc": "Check the fingerprints and press Trust to append them to {0}.",
+    "ssh.hostKeyNone": "No host key received (ssh-keyscan)",
+    "ssh.hostKeyRegister": "Trust these keys",
+    "ssh.hostKeyAdded": "Added to known_hosts (new {0} / already present {1})",
+    "ssh.authHint": "Public-key auth was refused. If this machine has no key, create one with ssh-keygen -t ed25519 and copy it with ssh-copy-id <user>@<host> (ssh-agent works too).",
     "ssh.desktopOnly": "SSH connections are available in the desktop app only.",
     "ssh.connectFail": "Connection failed: {0}",
     "ssh.current": "Connected: {0}",
@@ -4406,6 +4420,63 @@ function sshActionRow(buttons) {
   return row;
 }
 
+/** ssh-keyscan fingerprints + one-click trust, used by the settings form. */
+async function showHostKeyPanel(target, box, statusEl) {
+  const api = connApi();
+  if (!api || typeof api.hostKeyScan !== "function") return;
+  box.hidden = false;
+  box.innerHTML = `<div class="files-note">${esc(t("skills.loading"))}</div>`;
+  let scan;
+  try {
+    scan = await api.hostKeyScan(target);
+  } catch (err) {
+    box.innerHTML = `<div class="files-note">${esc(t("ssh.hostKeyNone"))} — ${esc(err?.message ?? err)}</div>`;
+    return;
+  }
+  const keys = scan?.keys ?? [];
+  if (keys.length === 0) {
+    box.innerHTML = `<div class="files-note">${esc(t("ssh.hostKeyNone"))}</div>`;
+    return;
+  }
+  box.innerHTML =
+    `<div class="ns-label">${esc(t("ssh.hostKeyTitle"))}</div>` +
+    `<div class="files-note">${esc(t("ssh.hostKeyDesc", scan.knownHosts ?? ""))}</div>`;
+  for (const k of keys) {
+    const row = document.createElement("div");
+    row.className = "ssh-hostkey-row";
+    row.innerHTML = `<span class="ssh-hostkey-type">${esc(k.type)}</span><code>${esc(k.fingerprint)}</code>`;
+    box.appendChild(row);
+  }
+  const reg = document.createElement("button");
+  reg.type = "button";
+  reg.textContent = t("ssh.hostKeyRegister");
+  reg.addEventListener("click", async () => {
+    reg.disabled = true;
+    try {
+      const res = await api.trustHostKey({
+        host: target.host,
+        port: target.port,
+        keys: keys.map((k) => k.line),
+      });
+      const msg = t("ssh.hostKeyAdded", String(res?.added ?? 0), String(res?.skipped ?? 0));
+      box.insertBefore(Object.assign(document.createElement("div"), { className: "files-note", textContent: msg }), box.lastChild);
+      if (statusEl) {
+        statusEl.textContent = `✓ ${msg}`;
+        statusEl.style.color = "var(--ok)";
+      }
+      toast(msg, "ok");
+    } catch (err) {
+      const msg = String(err?.message ?? err);
+      if (statusEl) {
+        statusEl.textContent = `✗ ${msg}`;
+        statusEl.style.color = "var(--err)";
+      }
+      reg.disabled = false;
+    }
+  });
+  box.appendChild(sshActionRow([reg]));
+}
+
 async function renderConnectionsSection(content, stale = () => false) {
   const put = (node) => { if (!stale()) content.appendChild(node); };
   const api = connApi();
@@ -4547,6 +4618,13 @@ async function renderConnectionsSection(content, stale = () => false) {
 
   const fresult = document.createElement("span");
   fresult.className = "conn-result";
+  const hostKeyBox = document.createElement("div");
+  hostKeyBox.className = "ssh-hostkey";
+  hostKeyBox.hidden = true;
+  const draftTarget = () => ({
+    host: host.input.value.trim(),
+    port: Number.parseInt(port.input.value, 10) || 22,
+  });
   const draft = () => ({
     ...(editing ? { id: editing.id } : {}),
     name: name.input.value.trim(),
@@ -4592,9 +4670,16 @@ async function renderConnectionsSection(content, stale = () => false) {
       const r = await api.testConnection(draft());
       fresult.textContent = t("ssh.testOk", r.hostname, r.platform, r.version || "?");
       fresult.style.color = "var(--ok)";
+      hostKeyBox.hidden = true;
     } catch (err) {
-      fresult.textContent = t("ssh.testFail", err?.message ?? err);
+      const msg = String(err?.message ?? err);
+      fresult.textContent = t("ssh.testFail", msg);
       fresult.style.color = "var(--err)";
+      if (/host key is known|Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED/i.test(msg)) {
+        void showHostKeyPanel(draftTarget(), hostKeyBox, fresult);
+      } else if (/Permission denied|publickey/i.test(msg)) {
+        fresult.textContent = `${t("ssh.testFail", msg)} — ${t("ssh.authHint")}`;
+      }
     }
   });
   const cancel = document.createElement("button");
@@ -4606,7 +4691,13 @@ async function renderConnectionsSection(content, stale = () => false) {
     sshEditId = null;
     renderSettingsSection("connections");
   });
-  form.appendChild(sshActionRow([save, test, cancel, fresult]));
+  const hostKeyBtn = document.createElement("button");
+  hostKeyBtn.type = "button";
+  hostKeyBtn.className = "ghost";
+  hostKeyBtn.textContent = t("ssh.hostKeyBtn");
+  hostKeyBtn.addEventListener("click", () => void showHostKeyPanel(draftTarget(), hostKeyBox, fresult));
+  form.appendChild(sshActionRow([save, test, cancel, hostKeyBtn, fresult]));
+  form.appendChild(hostKeyBox);
   put(form);
 }
 
@@ -5194,6 +5285,8 @@ const rpcConnApi = {
   testConnection: (profile) =>
     rpc("conn.test", typeof profile === "string" ? { id: profile } : { profile }),
   connectProfile: (id, opts) => rpc("conn.connect", { id, ...(opts ?? {}) }),
+  hostKeyScan: (params) => rpc("conn.hostkey", params),
+  trustHostKey: (params) => rpc("conn.trusthost", params),
   disconnectConnection: () => rpc("conn.disconnect"),
   /** no push channel: browser UIs poll `conn.status` on demand */
   onConnectionStatus: () => () => {},

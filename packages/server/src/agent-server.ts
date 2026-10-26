@@ -64,7 +64,12 @@ import {
 import { log } from "@familiar/core";
 import { SessionTodoStore } from "./todo-store.js";
 import { RpcApprovalAdapter } from "./rpc-approvals.js";
-import { SshConnectionManager, sanitizeProfile as sanitizeSshProfile } from "./ssh-connections.js";
+import {
+  SshConnectionManager,
+  scanHostKeys,
+  trustHostKeys,
+  sanitizeProfile as sanitizeSshProfile,
+} from "./ssh-connections.js";
 
 /**
  * M5: every AgentServer with configured MCP servers registers here so child
@@ -232,6 +237,23 @@ export class AgentServer {
     this.sshConnections.dispose();
     disposeLspHub();
     disposeSshLspHubs();
+  }
+
+  /** `{id}` or `{host, port}` for the host-key RPCs. */
+  private sshHostPort(params: Record<string, unknown>): { host: string; port: number } {
+    const id = str(params, "id");
+    if (id) {
+      const profile = this.sshConnections.getProfile(id);
+      if (!profile) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "connection profile not found");
+      return { host: profile.host, port: profile.port };
+    }
+    const host = (str(params, "host") ?? "").trim();
+    if (!host || /[\s/]/.test(host) || host.startsWith("-")) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, "host is required");
+    }
+    const portRaw = Number(params["port"] ?? 22);
+    const port = Number.isInteger(portRaw) && portRaw > 0 && portRaw < 65536 ? portRaw : 22;
+    return { host, port };
   }
 
   /** Capability stop for `/tunnel/stop` (called by remote browser UIs). */
@@ -579,6 +601,15 @@ export class AgentServer {
         }
         if (!profile) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "connection profile not found");
         return await this.sshConnections.probe(profile);
+      }
+      case "conn.hostkey": {
+        const target = this.sshHostPort(params);
+        return await scanHostKeys(target.host, target.port);
+      }
+      case "conn.trusthost": {
+        const target = this.sshHostPort(params);
+        const keys = Array.isArray(params["keys"]) ? (params["keys"] as unknown[]).map((k) => String(k)) : [];
+        return await trustHostKeys(target.host, target.port, keys);
       }
       case "conn.connect": {
         const profile = this.sshConnections.getProfile(str(params, "id") ?? "");

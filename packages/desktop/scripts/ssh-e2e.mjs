@@ -18,6 +18,12 @@ import os from "node:os";
 import path from "node:path";
 
 const repoRoot = path.resolve(new URL("../../..", import.meta.url).pathname);
+/** A stale `/tmp/.mount_*` PATH entry (terminated AppImage) makes exec fail
+ * with ENOTCONN — drop such entries for everything this test spawns. */
+const CLEAN_PATH = (process.env.PATH ?? "")
+  .split(path.delimiter)
+  .filter((p) => p !== "" && !p.startsWith("/tmp/.mount_"))
+  .join(path.delimiter);
 const electronBin = path.join(repoRoot, "node_modules", ".bin", "electron");
 if (!fs.existsSync(electronBin)) {
   console.error("electron not installed — run: npm install -w packages/desktop");
@@ -92,6 +98,27 @@ rl.on("line", (line) => {
 const mcpMock = path.join(binDir, "mcp-home-mock");
 fs.writeFileSync(mcpMock, MCP_MOCK);
 fs.chmodSync(mcpMock, 0o755);
+
+const KEYSCAN_MOCK = `#!/usr/bin/env node
+"use strict";
+const args = process.argv.slice(2);
+let port = 22;
+const rest = [];
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === "-p") { port = Number(args[++i]) || 22; continue; }
+  if (args[i] === "-T") { args[++i]; continue; }
+  if (args[i].startsWith("-")) continue;
+  rest.push(args[i]);
+}
+const host = rest[0] || "unknown";
+const field = port === 22 ? host : "[" + host + "]:" + port;
+console.log("# " + field + " SSH-2.0-fake");
+console.log(field + " ssh-ed25519 " + Buffer.from("familiar-test-ed25519").toString("base64"));
+console.log(field + " ssh-rsa " + Buffer.from("familiar-test-rsa").toString("base64"));
+`;
+const keyscanMock = path.join(binDir, "fake-keyscan");
+fs.writeFileSync(keyscanMock, KEYSCAN_MOCK);
+fs.chmodSync(keyscanMock, 0o755);
 
 const lspShim = path.join(binDir, "mock-lsp-remote");
 fs.writeFileSync(
@@ -306,12 +333,15 @@ const app = spawn(
   {
     env: {
       ...process.env,
+      PATH: CLEAN_PATH,
       FAMILIAR_HOME: localHome,
       FAMILIAR_PORTS: LOCAL_PORTS.join(","),
       FAMILIAR_SPAWN_PORT: String(LOCAL_PORTS[0]),
       FAMILIAR_SSH_BIN: fakeSsh,
       FAKE_SSH_REMOTE_HOME: remoteHome, // the "remote" shell gets its own home
       FAKE_SSH_REMOTE_PATH: binDir, //     …and its own PATH (remote-only tools)
+      FAMILIAR_SSH_KEYSCAN_BIN: keyscanMock, // fake ssh-keyscan (no sshd in tests)
+      FAMILIAR_SSH_KNOWN_HOSTS: path.join(base, "known_hosts"),
     },
     stdio: "ignore",
     detached: true, // own process group: kill the whole xvfb/electron tree
@@ -721,6 +751,90 @@ try {
     "the WebUI connection layer creates proxy sessions without the desktop bridge",
     JSON.stringify(overrideWorked),
   );
+
+  // ---- host-key verification (ssh-keyscan fingerprints → known_hosts) ------
+  const knownHostsFile = path.join(base, "known_hosts");
+  const scan = await evalOnce(`rpc("conn.hostkey", { host: "remote1", port: 22 })`);
+  check(
+    scan?.keys?.length === 2 &&
+      scan.keys.every((k) => /^SHA256:/.test(k.fingerprint)) &&
+      scan?.knownHosts === knownHostsFile,
+    "conn.hostkey scans and fingerprints keys",
+    JSON.stringify(scan).slice(0, 200),
+  );
+  const trust1 = await evalOnce(
+    `rpc("conn.trusthost", { host: "remote1", port: 22, keys: ${JSON.stringify(scan.keys.map((k) => k.line))} })`,
+  );
+  check(trust1?.added === 2 && trust1?.skipped === 0, "conn.trusthost adds scanned keys", JSON.stringify(trust1));
+  const knownHostsText = fs.readFileSync(knownHostsFile, "utf8");
+  check(
+    knownHostsText.includes(scan.keys[0].line) &&
+      knownHostsText.includes(scan.keys[1].line) &&
+      (fs.statSync(knownHostsFile).mode & 0o777) === 0o600,
+    "known_hosts gets the verified lines with mode 0600",
+    knownHostsText.slice(0, 120),
+  );
+  const trust2 = await evalOnce(
+    `rpc("conn.trusthost", { host: "remote1", port: 22, keys: ${JSON.stringify(scan.keys.map((k) => k.line))} })`,
+  );
+  check(trust2?.added === 0 && trust2?.skipped === 2, "re-trusting the same keys is a no-op", JSON.stringify(trust2));
+
+  const otherBlob = Buffer.from("familiar-other-key").toString("base64");
+  fs.writeFileSync(knownHostsFile, `remote1 ssh-ed25519 ${otherBlob}\n`);
+  const conflict = await evalOnce(`(async () => {
+    try {
+      await rpc("conn.trusthost", { host: "remote1", port: 22, keys: ${JSON.stringify([scan.keys[0].line])} });
+      return "allowed";
+    } catch (err) {
+      return String(err.message);
+    }
+  })()`);
+  check(/CHANGED/.test(String(conflict)), "a changed host key is refused", String(conflict).slice(0, 180));
+
+  const scanPort = await evalOnce(`rpc("conn.hostkey", { host: "remote1", port: 2222 })`);
+  check(
+    scanPort?.keys?.length === 2 && scanPort.keys.every((k) => k.host === "[remote1]:2222"),
+    "keyscan uses the [host]:port field for non-22 ports",
+    JSON.stringify(scanPort?.keys?.map((k) => k.host)),
+  );
+  const trustPort = await evalOnce(
+    `rpc("conn.trusthost", { host: "remote1", port: 2222, keys: ${JSON.stringify(scanPort.keys.map((k) => k.line))} })`,
+  );
+  check(trustPort?.added === 2, "non-22 keys register with the bracketed host", JSON.stringify(trustPort));
+
+  const ipcScan = await evalOnce(`window.familiarDesktop.hostKeyScan({ host: "remote1", port: 22 })`);
+  check(
+    ipcScan?.keys?.length === 2,
+    "the desktop shell delegates host-key scans to the server",
+    JSON.stringify(ipcScan?.keys?.map((k) => k.fingerprint)),
+  );
+
+  const uiRows = await evalOnce(`(async () => {
+    connApiOverride = rpcConnApi;
+    try {
+      openSettingsModal("connections");
+      await new Promise((r) => setTimeout(r, 600));
+      const inputs = [...document.querySelectorAll("#settings-content .ssh-field input")];
+      inputs[0].value = "Key test";
+      inputs[1].value = "keyscan-ui";
+      [...document.querySelectorAll("#settings-content .conn-actions button")]
+        .find((b) => b.textContent.includes("ホスト鍵"))
+        .click();
+      for (let i = 0; i < 50; i++) {
+        await new Promise((r) => setTimeout(r, 200));
+        if (document.querySelectorAll("#settings-content .ssh-hostkey-row").length > 0) break;
+      }
+      const rows = document.querySelectorAll("#settings-content .ssh-hostkey-row").length;
+      const box = document.querySelector("#settings-content .ssh-hostkey");
+      [...box.querySelectorAll("button")].find((b) => b.textContent.includes("登録")).click();
+      return { rows };
+    } finally {
+      connApiOverride = null;
+    }
+  })()`);
+  await waitFor(() => fs.readFileSync(knownHostsFile, "utf8").includes("keyscan-ui"), "UI host-key trust", 20_000);
+  check(uiRows?.rows === 2 && fs.readFileSync(knownHostsFile, "utf8").includes("keyscan-ui"), "the settings form verifies and trusts keys", JSON.stringify(uiRows));
+  await evalOnce(`closeSettingsModal(); 1`);
 
   // ---- EN mode: every new string is translated (no CJK fallback) -----------
   const cjk = await evalOnce(`(() => {

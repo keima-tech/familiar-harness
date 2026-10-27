@@ -820,6 +820,26 @@ try {
         const row = [...document.querySelectorAll("#ns-remote-list .ns-row")].find((x) => x.textContent.includes("work"));
         if (row && previewWo.includes("/wo")) { suggested = row.textContent; break; }
       }
+      // substring match: "ork" should still find "work"
+      const box = () => document.querySelector("#ns-remote-list");
+      box().innerHTML = "";
+      input.value = "ork";
+      input.dispatchEvent(new Event("input"));
+      let substringHit = false;
+      for (let i = 0; i < 40; i++) {
+        await new Promise((r) => setTimeout(r, 200));
+        if ([...box().querySelectorAll(".ns-row")].some((x) => x.textContent.includes("work"))) { substringHit = true; break; }
+      }
+      // drilling in shows a ".." row and the folder's children
+      box().innerHTML = "";
+      input.value = "work/";
+      input.dispatchEvent(new Event("input"));
+      let parentRow = false;
+      for (let i = 0; i < 40; i++) {
+        await new Promise((r) => setTimeout(r, 200));
+        if ([...box().querySelectorAll(".ns-row")].some((x) => x.textContent.includes(".."))) { parentRow = true; break; }
+      }
+      const header = box().querySelector(".ns-label")?.textContent ?? "";
       input.value = "work";
       input.dispatchEvent(new Event("input"));
       let preview = "";
@@ -833,6 +853,9 @@ try {
         suggested,
         previewWo,
         preview,
+        substringHit,
+        parentRow,
+        header,
         cwd: state.currentSession?.cwd ?? "",
         remote: state.currentSession?.remote?.host ?? "",
       };
@@ -854,6 +877,12 @@ try {
       String(barePicker?.preview ?? "").includes(path.join(remoteHome, "work")),
     "the picker previews the resolved path",
     `wo=${barePicker?.previewWo} work=${barePicker?.preview}`,
+  );
+  check(barePicker?.substringHit === true, "suggestions also match mid-name", JSON.stringify(barePicker).slice(0, 160));
+  check(
+    barePicker?.parentRow === true && /候補/.test(String(barePicker?.header ?? "")),
+    'drilling in shows ".." and a suggestion count',
+    `parent=${barePicker?.parentRow} header=${barePicker?.header}`,
   );
 
   // new profiles default to the no-install path: SSH proxy + password

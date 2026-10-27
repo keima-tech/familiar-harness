@@ -210,6 +210,8 @@ const STR = {
     "ns.proxyBadge": "SSH プロキシ",
     "ns.proxyHint": "このフォルダーでリモートのセッションを作成します。~ はホームに展開され、work のような相対名もホーム基準で解決されます(入力に合わせて候補を表示)",
     "ns.resolvedTo": "使用されるパス: {0}",
+    "ns.remoteSuggestions": "フォルダーの候補 ({0})",
+    "ns.noFolderHere": "このフォルダーにはサブフォルダーがありません",
     "ns.creating": "作成中…",
     "top.search": "トランスクリプト内検索 (Ctrl+F)",
     "top.sessionActions": "セッション操作",
@@ -657,6 +659,8 @@ const STR = {
     "ns.proxyBadge": "SSH proxy",
     "ns.proxyHint": "Create a remote session in this folder. ~ expands to the remote home and bare names like work resolve there too (folders are suggested as you type).",
     "ns.resolvedTo": "will use: {0}",
+    "ns.remoteSuggestions": "Folder suggestions ({0})",
+    "ns.noFolderHere": "this folder has no subfolders",
     "ns.creating": "Creating…",
     "top.search": "search in transcript (Ctrl+F)",
     "top.sessionActions": "session actions",
@@ -5699,13 +5703,35 @@ async function renderNsRemoteDirs() {
   if (nsTarget !== profile.id || $("#new-session-overlay").hidden) return;
   const home = typeof res.home === "string" ? res.home : "";
   const needle = prefix.toLowerCase();
-  const dirs = (res.dirs ?? []).filter((d) => baseName(d).toLowerCase().startsWith(needle)).slice(0, 60);
+  const all = res.dirs ?? [];
+  // prefix hits first, then anything containing the text (typing "ork" still
+  // finds "work" — users rarely know the exact beginning)
+  const starts = all.filter((d) => baseName(d).toLowerCase().startsWith(needle));
+  const contains =
+    needle.length >= 2
+      ? all.filter((d) => !starts.includes(d) && baseName(d).toLowerCase().includes(needle))
+      : [];
+  const items = [...starts, ...contains].slice(0, 60);
   box.innerHTML = "";
+  const head = document.createElement("div");
+  head.className = "ns-label";
+  head.textContent = t("ns.remoteSuggestions", String(items.length));
+  box.appendChild(head);
   if (home && resolveRemotePath(typed, home) !== home && baseName(home)) {
     box.appendChild(nsRemoteRow("🏠", baseName(home), home));
   }
-  for (const d of dirs) {
+  if (dir !== "") {
+    const parent = dir.replace(/[^/]+\/$/, "");
+    box.appendChild(nsRemoteRow("↩︎", "..", parent === "" ? (home || "/") : parent, true));
+  }
+  for (const d of items) {
     box.appendChild(nsRemoteRow("📁", baseName(d), d));
+  }
+  if (items.length === 0) {
+    const noMatch = document.createElement("div");
+    noMatch.className = "mp-note";
+    noMatch.textContent = prefix === "" ? t("ns.noFolderHere") : t("ns.noMatch");
+    box.appendChild(noMatch);
   }
   if (home) {
     const resolved = resolveRemotePath(typed, home);
@@ -5714,15 +5740,9 @@ async function renderNsRemoteDirs() {
     note.textContent = t("ns.resolvedTo", resolved);
     box.appendChild(note);
   }
-  if (dirs.length === 0) {
-    const noMatch = document.createElement("div");
-    noMatch.className = "mp-note";
-    noMatch.textContent = t("ns.noMatch");
-    box.insertBefore(noMatch, box.firstChild);
-  }
 }
 
-function nsRemoteRow(icon, name, value) {
+function nsRemoteRow(icon, name, value, isParent = false) {
   const row = document.createElement("button");
   row.type = "button";
   row.className = "ns-row";
@@ -5731,7 +5751,8 @@ function nsRemoteRow(icon, name, value) {
     `<span class="ns-text"><span class="ns-name">${esc(name)}</span>` +
     `<span class="ns-path">${esc(value)}</span></span>`;
   row.addEventListener("click", () => {
-    $("#ns-remote-cwd").value = value.endsWith("/") ? value : `${value}/`;
+    const next = isParent ? value : value.endsWith("/") ? value : `${value}/`;
+    $("#ns-remote-cwd").value = next;
     void renderNsRemoteDirs();
     $("#ns-remote-cwd").focus();
   });
@@ -6185,10 +6206,10 @@ function boot() {
     }
   });
   $("#ns-remote-cwd").addEventListener("input", () => {
-    // slower debounce: every list is an ssh round trip (and a failed auth
-    // counts towards the server's rate limiting)
+    // each list is one ssh round trip; 350ms feels live while the host
+    // cooldown still protects against failed-auth bursts
     clearTimeout(nsRemoteTimer);
-    nsRemoteTimer = setTimeout(() => void renderNsRemoteDirs(), 700);
+    nsRemoteTimer = setTimeout(() => void renderNsRemoteDirs(), 350);
   });
   $("#ns-browse").addEventListener("click", async () => {
     try {

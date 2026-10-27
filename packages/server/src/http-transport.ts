@@ -235,6 +235,14 @@ export function startHttpTransport(
             home: os.homedir(),
             ...(authRequired && opts.authTokenFile ? { tokenFile: opts.authTokenFile } : {}),
             ...(opts.version ? { version: opts.version } : {}),
+            // UI asset build stamp: confirms which app.js a client is running
+            uiBuild: (() => {
+              try {
+                return new Date(fs.statSync(path.join(publicDir(), "app.js")).mtimeMs).toISOString();
+              } catch {
+                return "";
+              }
+            })(),
           }),
         );
         return;
@@ -257,9 +265,25 @@ export function startHttpTransport(
         const file = path.join(publicDir(), asset.file);
         if (fs.existsSync(file)) {
           // revalidate on every load: the UI ships as plain files, so a stale
-          // cache after an update would mix old CSS with new markup
+          // cache after an update would mix old CSS with new markup — and the
+          // HTML references the JS/CSS with a build stamp so a misbehaving
+          // browser cache cannot serve yesterday's app.js either.
           const stat = fs.statSync(file);
-          const etag = `W/"${stat.size}-${Math.floor(stat.mtimeMs)}"`;
+          let body: string | Buffer = fs.readFileSync(file);
+          let etag = `W/"${stat.size}-${Math.floor(stat.mtimeMs)}"`;
+          if (asset.type.startsWith("text/html")) {
+            const appMtime = ((): number => {
+              try {
+                return Math.floor(fs.statSync(path.join(publicDir(), "app.js")).mtimeMs);
+              } catch {
+                return 0;
+              }
+            })();
+            body = String(body)
+              .replace('src="/app.js"', `src="/app.js?v=${appMtime}"`)
+              .replace('href="/app.css"', `href="/app.css?v=${appMtime}"`);
+            etag = `W/"html-${appMtime}"`;
+          }
           if (req.headers["if-none-match"] === etag) {
             res.writeHead(304, { ETag: etag, "Cache-Control": "no-cache", ...setCookie });
             res.end();
@@ -272,7 +296,7 @@ export function startHttpTransport(
             "Last-Modified": stat.mtime.toUTCString(),
             ...setCookie,
           });
-          res.end(req.method === "HEAD" ? undefined : fs.readFileSync(file));
+          res.end(req.method === "HEAD" ? undefined : body);
           return;
         }
       }

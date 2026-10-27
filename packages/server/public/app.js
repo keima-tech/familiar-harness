@@ -212,6 +212,8 @@ const STR = {
     "ns.resolvedTo": "使用されるパス: {0}",
     "ns.remoteSuggestions": "フォルダーの候補 ({0})",
     "ns.noFolderHere": "このフォルダーにはサブフォルダーがありません",
+    "ns.retry": "再試行",
+    "set.uiBuild": "UI ビルド",
     "ns.creating": "作成中…",
     "top.search": "トランスクリプト内検索 (Ctrl+F)",
     "top.sessionActions": "セッション操作",
@@ -661,6 +663,8 @@ const STR = {
     "ns.resolvedTo": "will use: {0}",
     "ns.remoteSuggestions": "Folder suggestions ({0})",
     "ns.noFolderHere": "this folder has no subfolders",
+    "ns.retry": "Retry",
+    "set.uiBuild": "UI build",
     "ns.creating": "Creating…",
     "top.search": "search in transcript (Ctrl+F)",
     "top.sessionActions": "session actions",
@@ -5043,6 +5047,12 @@ async function renderSystemSection(content, stale = () => false) {
     const hz = await fetch("/healthz").then((r) => r.json());
     const vEl = about.querySelector("#about-version");
     if (vEl && hz?.version) vEl.textContent = `${t("set.version")}: v${hz.version}`;
+    if (hz?.uiBuild) {
+      const uEl = document.createElement("span");
+      const d = new Date(hz.uiBuild);
+      uEl.textContent = `${t("set.uiBuild")}: ${Number.isNaN(d.getTime()) ? hz.uiBuild : d.toLocaleString()}`;
+      vEl?.after(uEl);
+    }
   } catch { /* keep placeholder */ }
   put(about);
 
@@ -5671,10 +5681,28 @@ function selectNsTarget(id, opts = {}) {
   if (!opts.silent) (remote ? $("#ns-remote-cwd") : $("#ns-folder-input")).focus();
   if (proxy) {
     $("#ns-remote-cwd").value = "";
+    // synchronous state so the box is never silently blank
+    $("#ns-remote-list").innerHTML = `<div class="mp-note">${esc(t("skills.loading"))}</div>`;
     void renderNsRemoteDirs();
   } else {
     $("#ns-remote-list").innerHTML = "";
   }
+}
+
+/** Note with a retry button — used when the folder listing fails. */
+function nsRemoteError(message, retryLabel = t("ns.retry")) {
+  const box = document.createElement("div");
+  box.className = "mp-note";
+  const text = document.createElement("div");
+  text.textContent = message;
+  box.appendChild(text);
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.className = "ghost";
+  retry.textContent = retryLabel;
+  retry.addEventListener("click", () => void renderNsRemoteDirs());
+  box.appendChild(retry);
+  return box;
 }
 
 /** Browse the remote host's folders for a proxy target (fs.dirs over ssh). */
@@ -5682,6 +5710,15 @@ let nsRemoteTimer = null;
 
 async function renderNsRemoteDirs() {
   const box = $("#ns-remote-list");
+  try {
+    await renderNsRemoteDirsInner(box);
+  } catch (err) {
+    // a silent exception would leave the box blank — surface it instead
+    box.replaceChildren(nsRemoteError(String(err?.message ?? err)));
+  }
+}
+
+async function renderNsRemoteDirsInner(box) {
   const profile = connState.connections.find((p) => p.id === nsTarget);
   if (!profile || profile.mode !== "proxy" || $("#new-session-overlay").hidden) return;
   const ssh = sshParams(profile);
@@ -5697,7 +5734,7 @@ async function renderNsRemoteDirs() {
     // show the real reason (auth / host key / backoff), not "no match"
     const msg = String(err?.message ?? err);
     const hint = sshErrorHint(msg);
-    box.innerHTML = `<div class="mp-note">${esc(msg)}${hint ? ` — ${esc(hint)}` : ""}</div>`;
+    box.replaceChildren(nsRemoteError(`${msg}${hint ? ` — ${hint}` : ""}`));
     return;
   }
   if (nsTarget !== profile.id || $("#new-session-overlay").hidden) return;

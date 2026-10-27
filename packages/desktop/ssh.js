@@ -223,7 +223,12 @@ function sshBaseArgs(profile) {
   if (profile.identityFile) args.push("-i", profile.identityFile);
   if (profile.user) args.push("-l", profile.user);
   if (password) {
-    args.push("-o", "NumberOfPasswordPrompts=1", "-o", "PreferredAuthentications=publickey,password");
+    args.push(
+      "-o",
+      "NumberOfPasswordPrompts=1",
+      "-o",
+      "PreferredAuthentications=publickey,password,keyboard-interactive",
+    );
   }
   args.push(profile.host);
   return args;

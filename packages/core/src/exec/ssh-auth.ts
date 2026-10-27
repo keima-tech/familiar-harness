@@ -76,7 +76,7 @@ export function sshAuthArgs(target: SessionRemote): string[] {
     "-o",
     "NumberOfPasswordPrompts=1",
     "-o",
-    "PreferredAuthentications=publickey,password", // skip multi-question kbd-interactive
+    "PreferredAuthentications=publickey,password,keyboard-interactive", // password first, PAM fallback
   ];
 }
 

@@ -208,7 +208,8 @@ const STR = {
     "ns.remoteHint": "接続後、リモート側のフォルダーを選べます。空欄ならホームディレクトリから始まります。",
     "ns.serveBadge": "familiar サーバ",
     "ns.proxyBadge": "SSH プロキシ",
-    "ns.proxyHint": "このフォルダーでリモートのセッションを作成します(~ はリモートのホームに展開)",
+    "ns.proxyHint": "このフォルダーでリモートのセッションを作成します。~ はホームに展開され、work のような相対名もホーム基準で解決されます(入力に合わせて候補を表示)",
+    "ns.resolvedTo": "使用されるパス: {0}",
     "ns.creating": "作成中…",
     "top.search": "トランスクリプト内検索 (Ctrl+F)",
     "top.sessionActions": "セッション操作",
@@ -654,7 +655,8 @@ const STR = {
     "ns.remoteHint": "You can pick a remote folder after connecting. Leave empty to start in the remote home directory.",
     "ns.serveBadge": "familiar server",
     "ns.proxyBadge": "SSH proxy",
-    "ns.proxyHint": "create a remote session in this folder (~ expands to the remote home)",
+    "ns.proxyHint": "Create a remote session in this folder. ~ expands to the remote home and bare names like work resolve there too (folders are suggested as you type).",
+    "ns.resolvedTo": "will use: {0}",
     "ns.creating": "Creating…",
     "top.search": "search in transcript (Ctrl+F)",
     "top.sessionActions": "session actions",
@@ -1961,12 +1963,10 @@ async function confirmCwd() {
   if (!s || v === "") return;
   try {
     if (s.remote) {
-      // remote folders live on the ssh host: expand ~ there and require an
-      // absolute path (local path math must never touch it)
-      const info = await rpc("fs.dirs", { path: v, session: s.id });
-      if (v === "~") v = info.home;
-      else if (v.startsWith("~/")) v = `${info.home}${v.slice(1)}`;
-      if (!v.startsWith("/")) throw new Error(t("toast.cwdAbsolute"));
+      // remote folders live on the ssh host: ~ and relative names resolve
+      // against its home (local path math must never touch it)
+      const info = await rpc("fs.dirs", { path: "", session: s.id });
+      v = resolveRemotePath(v, info.home);
     }
     const updated = await rpc("session.update", { id: s.id, cwd: v });
     state.currentSession = updated;
@@ -4635,14 +4635,22 @@ async function renderConnectionsSection(content, stale = () => false) {
   const host = sshField(t("ssh.host"), editing?.host ?? "", "build.example.com");
   const user = sshField(t("ssh.user"), editing?.user ?? "");
   const port = sshField(t("ssh.port"), editing?.port ?? 22);
-  const mode = sshSelect(t("ssh.mode"), editing?.mode === "proxy" ? "proxy" : "serve", [
-    [t("ssh.modeServe"), "serve"],
-    [t("ssh.modeProxy"), "proxy"],
-  ]);
-  const authMode = sshSelect(t("ssh.authMode"), editing?.auth === "password" ? "password" : "key", [
-    [t("ssh.authKey"), "key"],
-    [t("ssh.authPassword"), "password"],
-  ]);
+  const mode = sshSelect(
+    t("ssh.mode"),
+    editing ? (editing.mode === "proxy" ? "proxy" : "serve") : "proxy",
+    [
+      [t("ssh.modeServe"), "serve"],
+      [t("ssh.modeProxy"), "proxy"],
+    ],
+  );
+  const authMode = sshSelect(
+    t("ssh.authMode"),
+    editing ? (editing.auth === "password" ? "password" : "key") : "password",
+    [
+      [t("ssh.authKey"), "key"],
+      [t("ssh.authPassword"), "password"],
+    ],
+  );
   const pw = sshField(t("ssh.password"), "", editing?.hasPassword ? t("ssh.passwordSaved") : "");
   pw.input.type = "password";
   pw.input.autocomplete = "new-password";
@@ -5447,6 +5455,22 @@ function sshErrorHint(msg) {
   return "";
 }
 
+/** Resolve a typed remote path: ~ and bare names are home-relative, then
+ * normalized textually (posix). Used for the preview and session creation. */
+function resolveRemotePath(value, home) {
+  let v = String(value ?? "").trim();
+  if (v === "" || v === "~") return home;
+  if (v.startsWith("~/")) v = `${home}${v.slice(1)}`;
+  else if (!v.startsWith("/")) v = `${String(home).replace(/\/+$/, "")}/${v}`;
+  const parts = [];
+  for (const seg of v.split("/")) {
+    if (seg === "" || seg === ".") continue;
+    if (seg === "..") parts.pop();
+    else parts.push(seg);
+  }
+  return `/${parts.join("/")}`;
+}
+
 /** RPC `ssh` parameter for a stored profile (no secrets in it). */
 function sshParams(p) {
   return {
@@ -5658,10 +5682,13 @@ async function renderNsRemoteDirs() {
   if (!profile || profile.mode !== "proxy" || $("#new-session-overlay").hidden) return;
   const ssh = sshParams(profile);
   const typed = $("#ns-remote-cwd").value.trim();
+  // like the local picker: list the parent and filter by the typed prefix,
+  // so "work", "~/wo" and "/srv/we" all suggest matching folders
+  const { dir, prefix } = cwdQueryParts(typed);
   box.innerHTML = `<div class="mp-note">${esc(t("skills.loading"))}</div>`;
   let res;
   try {
-    res = await rpc("fs.dirs", { path: typed, ssh });
+    res = await rpc("fs.dirs", { path: dir, ssh });
   } catch (err) {
     // show the real reason (auth / host key / backoff), not "no match"
     const msg = String(err?.message ?? err);
@@ -5671,16 +5698,27 @@ async function renderNsRemoteDirs() {
   }
   if (nsTarget !== profile.id || $("#new-session-overlay").hidden) return;
   const home = typeof res.home === "string" ? res.home : "";
-  const dirs = (res.dirs ?? []).slice(0, 60);
+  const needle = prefix.toLowerCase();
+  const dirs = (res.dirs ?? []).filter((d) => baseName(d).toLowerCase().startsWith(needle)).slice(0, 60);
   box.innerHTML = "";
-  if (home && home !== typed && baseName(home)) {
+  if (home && resolveRemotePath(typed, home) !== home && baseName(home)) {
     box.appendChild(nsRemoteRow("🏠", baseName(home), home));
   }
-  for (const dir of dirs) {
-    box.appendChild(nsRemoteRow("📁", baseName(dir), dir));
+  for (const d of dirs) {
+    box.appendChild(nsRemoteRow("📁", baseName(d), d));
   }
-  if (box.childElementCount === 0) {
-    box.innerHTML = `<div class="mp-note">${esc(t("ns.noMatch"))}</div>`;
+  if (home) {
+    const resolved = resolveRemotePath(typed, home);
+    const note = document.createElement("div");
+    note.className = "files-note";
+    note.textContent = t("ns.resolvedTo", resolved);
+    box.appendChild(note);
+  }
+  if (dirs.length === 0) {
+    const noMatch = document.createElement("div");
+    noMatch.className = "mp-note";
+    noMatch.textContent = t("ns.noMatch");
+    box.insertBefore(noMatch, box.firstChild);
   }
 }
 
@@ -5810,9 +5848,8 @@ async function createSessionFromModal() {
         connectBtn.textContent = t("ns.creating");
         const ssh = sshParams(profile);
         const info = await rpc("fs.dirs", { path: "", ssh });
-        let cwd = $("#ns-remote-cwd").value.trim();
-        if (cwd === "" || cwd === "~") cwd = info.home;
-        else if (cwd.startsWith("~/")) cwd = `${info.home}${cwd.slice(1)}`;
+        // ~, bare names and relative paths are resolved against the remote home
+        const cwd = resolveRemotePath($("#ns-remote-cwd").value, info.home);
         const created = await rpc("session.create", { cwd, ssh });
         state.sessionId = created.id;
         closeNewSessionModal();

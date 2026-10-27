@@ -104,20 +104,6 @@ function readStore() {
   }
 }
 
-function writeStore(store) {
-  const file = profilesFile();
-  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-  const tmp = `${file}.tmp-${process.pid}`;
-  fs.writeFileSync(tmp, `${JSON.stringify(store, null, 2)}\n`, { mode: 0o600 });
-  fs.chmodSync(tmp, 0o600);
-  fs.renameSync(tmp, file);
-  try {
-    fs.chmodSync(file, 0o600);
-  } catch {
-    /* best effort on filesystems without POSIX modes */
-  }
-}
-
 function clean(value, max = 200) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
@@ -136,6 +122,7 @@ function sanitizeProfile(input, existing) {
   // serve: start `familiar serve` on the host over a tunnel (needs familiar there)
   // proxy: nothing installed remotely — every tool call runs over ssh
   const mode = input.mode === "proxy" ? "proxy" : "serve";
+  const auth = input.auth === "password" ? "password" : "key";
   const name = clean(input.name, 80) || `${user ? `${user}@` : ""}${host}`;
   const id = clean(existing?.id ?? input.id, 64) || crypto.randomUUID();
   return {
@@ -145,40 +132,15 @@ function sanitizeProfile(input, existing) {
     port,
     user,
     ...(mode === "proxy" ? { mode } : {}),
+    ...(auth === "password" ? { auth } : {}),
     ...(identityFile ? { identityFile } : {}),
     remoteBin,
   };
 }
 
-function listProfiles() {
-  return readStore().connections;
-}
-
+/** Read-only lookup (writes live on the server so both UIs share one store). */
 function getProfile(id) {
-  return listProfiles().find((p) => p.id === id) ?? null;
-}
-
-/** Create or update a profile. Returns the stored (sanitized) profile. */
-function saveProfile(input) {
-  const store = readStore();
-  const existing = input?.id ? store.connections.find((p) => p.id === input.id) : null;
-  const profile = sanitizeProfile(input, existing);
-  if (!profile) throw new Error("invalid connection profile (host is required)");
-  if (existing) {
-    store.connections = store.connections.map((p) => (p.id === profile.id ? profile : p));
-  } else {
-    store.connections.push(profile);
-  }
-  writeStore(store);
-  return profile;
-}
-
-function deleteProfile(id) {
-  const store = readStore();
-  const before = store.connections.length;
-  store.connections = store.connections.filter((p) => p.id !== id);
-  if (store.connections.length !== before) writeStore(store);
-  return store.connections.length !== before;
+  return readStore().connections.find((p) => p.id === id) ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -557,10 +519,5 @@ class SshConnection {
 
 module.exports = {
   SshConnection,
-  listProfiles,
   getProfile,
-  saveProfile,
-  deleteProfile,
-  sanitizeProfile,
-  healthz,
 };

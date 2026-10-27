@@ -11,14 +11,7 @@ const path = require("node:path");
 const http = require("node:http");
 const https = require("node:https");
 const os = require("node:os");
-const {
-  SshConnection,
-  listProfiles,
-  getProfile,
-  saveProfile,
-  deleteProfile,
-  sanitizeProfile,
-} = require("./ssh");
+const { SshConnection, getProfile } = require("./ssh");
 
 /** Test/dev override: FAMILIAR_PORTS=46310,46311 + FAMILIAR_SPAWN_PORT=46310 keeps
  * automated runs off the default 46210 (they would fight a real serve). */

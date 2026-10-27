@@ -10,14 +10,12 @@ export type {
   ExecResult,
   StatInfo,
 } from "./types.js";
-export { OUTPUT_CAP, SKIP_DIR_NAMES } from "./types.js";
-export { LocalBackend, resolveShellCommand, walkLocal } from "./local.js";
-export { noteSshOutcome, sshCooldownError, sshTargetKey } from "./ssh.js";
+export { LocalBackend, resolveShellCommand } from "./local.js";
+export { noteSshOutcome, sshCooldownError } from "./ssh.js";
 export {
   askpassHelperPath,
   deleteSshSecret,
   hasSshSecret,
-  sshAuthArgs,
   sshAuthEnv,
   sshSecretPath,
   writeSshSecret,

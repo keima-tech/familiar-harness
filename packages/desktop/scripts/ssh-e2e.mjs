@@ -254,7 +254,7 @@ function openCdp(wsUrl) {
             const timer = setTimeout(() => {
               pending.delete(msgId);
               rej(new Error(`cdp ${method} timed out`));
-            }, 15_000);
+            }, 60_000);
             pending.set(msgId, {
               res: (v) => {
                 clearTimeout(timer);
@@ -403,6 +403,13 @@ try {
     inputs[1].value = "remote1";
     inputs[2].value = "tester";
     inputs[6].value = ${JSON.stringify(shim)};
+    // the form defaults to SSH proxy + password; this profile drives the
+    // familiar-server (tunnel) flow, so pick serve + key explicitly
+    const sels = [...document.querySelectorAll("#settings-content .ssh-field select")];
+    const modeSel = sels.find((x) => [...x.options].some((o) => o.value === "serve"));
+    if (modeSel) { modeSel.value = "serve"; modeSel.dispatchEvent(new Event("change")); }
+    const authSel0 = sels.find((x) => [...x.options].some((o) => o.value === "password"));
+    if (authSel0) { authSel0.value = "key"; authSel0.dispatchEvent(new Event("change")); }
     const form = document.querySelector("#settings-content > .card:last-of-type");
     form.querySelector(".conn-actions button").click();
     for (let i = 0; i < 60; i++) {
@@ -788,6 +795,86 @@ try {
     catch (err) { return String(err.message); }
   })()`);
   check(/paused connection attempts/.test(String(deniedDirs)), "proxy file RPCs obey the backoff", String(deniedDirs).slice(0, 160));
+
+  // ---- remote folder picker: bare names + suggestions -----------------------
+  const barePicker = await evalOnce(`(async () => {
+    connApiOverride = rpcConnApi;
+    try {
+      openNewSessionModal();
+      await new Promise((r) => setTimeout(r, 600));
+      selectNsTarget(${JSON.stringify(proxyId)});
+      for (let i = 0; i < 60; i++) {
+        await new Promise((r) => setTimeout(r, 200));
+        if (document.querySelectorAll("#ns-remote-list .ns-row").length > 0) break;
+      }
+      const input = document.querySelector("#ns-remote-cwd");
+      const note = () => document.querySelector("#ns-remote-list .files-note")?.textContent ?? "";
+      document.querySelector("#ns-remote-list").innerHTML = ""; // no stale rows
+      input.value = "wo";
+      input.dispatchEvent(new Event("input"));
+      let suggested = "";
+      let previewWo = "";
+      for (let i = 0; i < 60; i++) {
+        await new Promise((r) => setTimeout(r, 250));
+        previewWo = note();
+        const row = [...document.querySelectorAll("#ns-remote-list .ns-row")].find((x) => x.textContent.includes("work"));
+        if (row && previewWo.includes("/wo")) { suggested = row.textContent; break; }
+      }
+      input.value = "work";
+      input.dispatchEvent(new Event("input"));
+      let preview = "";
+      for (let i = 0; i < 40; i++) {
+        await new Promise((r) => setTimeout(r, 200));
+        preview = note();
+        if (preview.includes("/work")) break;
+      }
+      await createSessionFromModal();
+      const out = {
+        suggested,
+        previewWo,
+        preview,
+        cwd: state.currentSession?.cwd ?? "",
+        remote: state.currentSession?.remote?.host ?? "",
+      };
+      if (state.sessionId) await rpc("session.delete", { id: state.sessionId });
+      return out;
+    } finally {
+      connApiOverride = null;
+      if (!document.querySelector("#new-session-overlay").hidden) closeNewSessionModal();
+    }
+  })()`);
+  check(barePicker?.suggested?.includes("work"), "typing a bare name suggests remote folders", JSON.stringify(barePicker).slice(0, 200));
+  check(
+    barePicker?.cwd === path.join(remoteHome, "work") && barePicker?.remote === "proxy1",
+    "a bare name creates a remote-home session",
+    JSON.stringify(barePicker).slice(0, 200),
+  );
+  check(
+    String(barePicker?.previewWo ?? "").includes(path.join(remoteHome, "wo")) &&
+      String(barePicker?.preview ?? "").includes(path.join(remoteHome, "work")),
+    "the picker previews the resolved path",
+    `wo=${barePicker?.previewWo} work=${barePicker?.preview}`,
+  );
+
+  // new profiles default to the no-install path: SSH proxy + password
+  const formDefaults = await evalOnce(`(async () => {
+    connApiOverride = rpcConnApi;
+    try {
+      sshEditId = null;
+      openSettingsModal("connections");
+      await new Promise((r) => setTimeout(r, 600));
+      const form = document.querySelector("#settings-content > .card:last-of-type");
+      return [...form.querySelectorAll("select")].map((x) => x.value);
+    } finally {
+      connApiOverride = null;
+    }
+  })()`);
+  check(
+    formDefaults?.[0] === "proxy" && formDefaults?.[1] === "password",
+    "new profiles default to SSH proxy + password",
+    JSON.stringify(formDefaults),
+  );
+  await evalOnce(`closeSettingsModal(); 1`);
 
   // ---- password auth: connect without keys or changes on the host ----------
   const authMod = await import(new URL("../../../packages/core/dist/exec/ssh-auth.js", import.meta.url).href);

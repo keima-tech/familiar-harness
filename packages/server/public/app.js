@@ -294,6 +294,8 @@ const STR = {
     "ssh.hostKeyAdded": "known_hosts に登録しました (新規 {0} / 既存 {1})",
     "ssh.authHint": "公開鍵認証が拒否されました。このマシンに鍵が無い場合は ssh-keygen -t ed25519 で作成し、ssh-copy-id <user>@<host> で配置してください (ssh-agent でも可)。",
     "ssh.netHint": "接続がリセット/拒否されました。サーバ側のレート制限(fail2ban 等)や一時的な負荷の可能性があります。数分おいて再試行してください。",
+    "ssh.rateHint": "短時間に失敗が続いたため、しばらく接続を控えています(レート制限対策)。原因(鍵の登録/ホスト鍵)を直して約1分後に再試行してください。",
+    "ssh.hostKeyHint": "ホスト鍵が未登録です。「🔑 ホスト鍵を確認…」から登録してください。",
     "ssh.desktopOnly": "SSH 接続はデスクトップアプリでのみ利用できます。",
     "ssh.connectFail": "接続に失敗しました: {0}",
     "ssh.current": "接続中: {0}",
@@ -729,6 +731,8 @@ const STR = {
     "ssh.hostKeyAdded": "Added to known_hosts (new {0} / already present {1})",
     "ssh.authHint": "Public-key auth was refused. If this machine has no key, create one with ssh-keygen -t ed25519 and copy it with ssh-copy-id <user>@<host> (ssh-agent works too).",
     "ssh.netHint": "The connection was reset/refused — the server may be rate-limiting (fail2ban etc.) or briefly overloaded. Retry in a few minutes.",
+    "ssh.rateHint": "Recent failures paused connection attempts (rate-limit protection). Fix the cause (key authorization / host key) and retry in about a minute.",
+    "ssh.hostKeyHint": "Host key not registered — use “🔑 Check host key…” to add it.",
     "ssh.desktopOnly": "SSH connections are available in the desktop app only.",
     "ssh.connectFail": "Connection failed: {0}",
     "ssh.current": "Connected: {0}",
@@ -4677,12 +4681,12 @@ async function renderConnectionsSection(content, stale = () => false) {
       const msg = String(err?.message ?? err);
       fresult.textContent = t("ssh.testFail", msg);
       fresult.style.color = "var(--err)";
+      const hint = sshErrorHint(msg);
       if (/host key is known|Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED/i.test(msg)) {
+        fresult.textContent = `${t("ssh.testFail", msg)} — ${t("ssh.hostKeyHint")}`;
         void showHostKeyPanel(draftTarget(), hostKeyBox, fresult);
-      } else if (/Permission denied|publickey/i.test(msg)) {
-        fresult.textContent = `${t("ssh.testFail", msg)} — ${t("ssh.authHint")}`;
-      } else if (/kex_exchange_identification|Connection reset by peer|Connection refused|No route to host|Connection timed out/i.test(msg)) {
-        fresult.textContent = `${t("ssh.testFail", msg)} — ${t("ssh.netHint")}`;
+      } else if (hint !== "") {
+        fresult.textContent = `${t("ssh.testFail", msg)} — ${hint}`;
       }
     }
   });
@@ -5354,6 +5358,16 @@ function sshProfileLabel(p) {
   return `${user}${p.host}${port}`;
 }
 
+/** Short, actionable hints appended to raw ssh errors in the UI. */
+function sshErrorHint(msg) {
+  const text = String(msg ?? "");
+  if (/paused connection attempts|rate limit/i.test(text)) return t("ssh.rateHint");
+  if (/Permission denied|publickey/i.test(text)) return t("ssh.authHint");
+  if (/host key is known|Host key verification failed|REMOTE HOST IDENTIFICATION/i.test(text)) return t("ssh.hostKeyHint");
+  if (/kex_exchange_identification|Connection reset|Connection refused|No route to host|Connection timed out/i.test(text)) return t("ssh.netHint");
+  return "";
+}
+
 /** RPC `ssh` parameter for a stored profile (no secrets in it). */
 function sshParams(p) {
   return {
@@ -5569,8 +5583,11 @@ async function renderNsRemoteDirs() {
   let res;
   try {
     res = await rpc("fs.dirs", { path: typed, ssh });
-  } catch {
-    box.innerHTML = `<div class="mp-note">${esc(t("ns.noMatch"))}</div>`;
+  } catch (err) {
+    // show the real reason (auth / host key / backoff), not "no match"
+    const msg = String(err?.message ?? err);
+    const hint = sshErrorHint(msg);
+    box.innerHTML = `<div class="mp-note">${esc(msg)}${hint ? ` — ${esc(hint)}` : ""}</div>`;
     return;
   }
   if (nsTarget !== profile.id || $("#new-session-overlay").hidden) return;
@@ -6052,8 +6069,10 @@ function boot() {
     }
   });
   $("#ns-remote-cwd").addEventListener("input", () => {
+    // slower debounce: every list is an ssh round trip (and a failed auth
+    // counts towards the server's rate limiting)
     clearTimeout(nsRemoteTimer);
-    nsRemoteTimer = setTimeout(() => void renderNsRemoteDirs(), 250);
+    nsRemoteTimer = setTimeout(() => void renderNsRemoteDirs(), 700);
   });
   $("#ns-browse").addEventListener("click", async () => {
     try {

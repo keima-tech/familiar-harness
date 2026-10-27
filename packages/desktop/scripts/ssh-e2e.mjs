@@ -144,6 +144,10 @@ for (let i = 0; i < argv.length; i++) {
   positional.push(a);
 }
 const host = positional[0] ?? "";
+if (host.startsWith("denied")) {
+  process.stderr.write("user@" + host + ": Permission denied (publickey,password).\\n");
+  process.exit(255);
+}
 if (host === "badhost" || host.startsWith("unreachable")) {
   process.stderr.write("ssh: connect to host " + host + " port 22: Connection refused\\n");
   process.exit(255);
@@ -753,6 +757,23 @@ try {
     "the WebUI connection layer creates proxy sessions without the desktop bridge",
     JSON.stringify(overrideWorked),
   );
+
+  // ---- failure backoff: stop hammering a host after auth errors ------------
+  const denied1 = await evalOnce(`(async () => {
+    try { await rpc("conn.test", { profile: { host: "denied1", user: "tester" } }); return "allowed"; }
+    catch (err) { return String(err.message); }
+  })()`);
+  check(/Permission denied/.test(String(denied1)), "auth failures surface the ssh error", String(denied1).slice(0, 160));
+  const denied2 = await evalOnce(`(async () => {
+    try { await rpc("conn.test", { profile: { host: "denied1", user: "tester" } }); return "allowed"; }
+    catch (err) { return String(err.message); }
+  })()`);
+  check(/paused connection attempts/.test(String(denied2)), "repeated failures back off instead of hammering", String(denied2).slice(0, 160));
+  const deniedDirs = await evalOnce(`(async () => {
+    try { await rpc("fs.dirs", { path: "~", ssh: { host: "denied1", user: "tester" } }); return "allowed"; }
+    catch (err) { return String(err.message); }
+  })()`);
+  check(/paused connection attempts/.test(String(deniedDirs)), "proxy file RPCs obey the backoff", String(deniedDirs).slice(0, 160));
 
   // ---- host-key verification (ssh-keyscan fingerprints → known_hosts) ------
   const knownHostsFile = path.join(base, "known_hosts");

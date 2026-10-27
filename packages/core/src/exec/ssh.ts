@@ -24,6 +24,51 @@ function sshBin(): string {
   return process.env["FAMILIAR_SSH_BIN"] || resolveExecutable("ssh");
 }
 
+// ---------------------------------------------------------------------------
+// Failure backoff. Repeated auth/host-key failures (typing in the folder
+// picker, retried tests) trigger server-side rate limits such as fail2ban —
+// after one ssh-level failure we pause attempts to that host for a while.
+// ---------------------------------------------------------------------------
+
+const COOLDOWN_MS = 60_000;
+const cooldowns = new Map<string, { until: number; reason: string }>();
+
+export function sshTargetKey(target: SessionRemote): string {
+  return `${target.user ?? ""}@${target.host}:${target.port ?? 22}`;
+}
+
+/** Message when recent failures paused this host, else null. */
+export function sshCooldownError(target: SessionRemote): string | null {
+  const key = sshTargetKey(target);
+  const entry = cooldowns.get(key);
+  if (!entry) return null;
+  const left = Math.ceil((entry.until - Date.now()) / 1000);
+  if (left <= 0) {
+    cooldowns.delete(key);
+    return null;
+  }
+  return (
+    `ssh ${target.host}: recent failures paused connection attempts for ~${left}s ` +
+    `(protects against server-side rate limits such as fail2ban). ` +
+    `Fix the cause (host key / key authorization) and retry.`
+  );
+}
+
+/** Classify an ssh outcome and start/clear the host cooldown. */
+export function noteSshOutcome(target: SessionRemote, exitCode: number, stderr: string): void {
+  const key = sshTargetKey(target);
+  if (
+    exitCode === 255 &&
+    /Permission denied|publickey|kex_exchange_identification|Connection reset by peer|Connection refused|Host key verification failed|No .* host key is known/i.test(
+      stderr,
+    )
+  ) {
+    cooldowns.set(key, { until: Date.now() + COOLDOWN_MS, reason: stderr.split("\n")[0] ?? "" });
+    return;
+  }
+  if (exitCode !== 255) cooldowns.delete(key);
+}
+
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
@@ -129,6 +174,8 @@ export class SshBackend implements ExecBackend {
     script: string,
     opts: { input?: string | Buffer; cwd?: string; timeoutMs?: number } = {},
   ): Promise<{ exitCode: number; stdout: Buffer; stderr: string }> {
+    const paused = sshCooldownError(this.target);
+    if (paused) return Promise.resolve({ exitCode: 255, stdout: Buffer.alloc(0), stderr: paused });
     return new Promise((resolve) => {
       const child = spawn(
         sshBin(),
@@ -167,7 +214,10 @@ export class SshBackend implements ExecBackend {
         stderr += `failed to spawn ${sshBin()}: ${err.message}`;
         finalize(-1);
       });
-      child.on("close", (code) => finalize(code ?? -1));
+      child.on("close", (code) => {
+        if ((code ?? -1) !== -1) noteSshOutcome(this.target, code ?? -1, stderr);
+        finalize(code ?? -1);
+      });
       if (opts.input !== undefined) {
         try {
           child.stdin.end(opts.input);
@@ -184,6 +234,8 @@ export class SshBackend implements ExecBackend {
     script: string,
     opts: { input?: string | Buffer; cwd?: string; timeoutMs?: number } = {},
   ): Promise<Buffer> {
+    const paused = sshCooldownError(this.target);
+    if (paused) throw new Error(paused);
     const res = await this.run(script, opts);
     if (res.exitCode !== 0) {
       throw new Error(
@@ -194,6 +246,8 @@ export class SshBackend implements ExecBackend {
   }
 
   async exec(command: string, opts: ExecOptions = {}): Promise<ExecResult> {
+    const paused = sshCooldownError(this.target);
+    if (paused) return { exitCode: 255, output: paused, timedOut: false };
     return new Promise((resolve) => {
       const child = spawn(
         sshBin(),
@@ -201,12 +255,14 @@ export class SshBackend implements ExecBackend {
         { stdio: ["pipe", "pipe", "pipe"] },
       );
       const out = new OutputCollector();
+      let stderrText = "";
       let settled = false;
       const timeoutMs = opts.timeoutMs ?? 30_000;
       const finalize = (exitCode: number, timedOut: boolean) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        if (exitCode !== -1) noteSshOutcome(this.target, exitCode, stderrText);
         const text = out.text();
         resolve({
           exitCode,
@@ -225,7 +281,10 @@ export class SshBackend implements ExecBackend {
         finalize(-1, true);
       }, timeoutMs);
       child.stdout.on("data", (chunk: Buffer) => out.append(chunk));
-      child.stderr.on("data", (chunk: Buffer) => out.append(chunk));
+      child.stderr.on("data", (chunk: Buffer) => {
+        if (stderrText.length < 2000) stderrText += chunk.toString("utf8");
+        out.append(chunk);
+      });
       child.on("error", (err) => {
         out.append(Buffer.from(`failed to spawn ${sshBin()}: ${err.message}`));
         finalize(-1, false);

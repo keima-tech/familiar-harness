@@ -5,7 +5,7 @@ import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { log, resolveExecutable } from "@familiar/core";
+import { log, noteSshOutcome, resolveExecutable, sshCooldownError } from "@familiar/core";
 
 /**
  * Server-side SSH connections, so the browser WebUI (no desktop shell) can
@@ -486,6 +486,11 @@ class SshConnection {
       };
       return this;
     } catch (err) {
+      noteSshOutcome(
+        { host: this.profile.host, port: this.profile.port, ...(this.profile.user ? { user: this.profile.user } : {}) },
+        255,
+        `${this.logTail.join("\n")}\n${err instanceof Error ? err.message : err}`,
+      );
       await this.close();
       throw err;
     }
@@ -694,6 +699,9 @@ export class SshConnectionManager {
 
   /** Lightweight connectivity/identity probe (no remote serve needed). */
   async probe(profile: SshProfile): Promise<ProbeResult> {
+    const target = { host: profile.host, port: profile.port, ...(profile.user ? { user: profile.user } : {}) };
+    const paused = sshCooldownError(target);
+    if (paused) throw new Error(paused);
     const script =
       "printf '%s\\n' \"$HOME\"; hostname; uname -s; " +
       "if command -v familiar >/dev/null 2>&1; then familiar --version 2>/dev/null; else printf '%s\\n' -; fi";
@@ -712,6 +720,7 @@ export class SshConnectionManager {
 
   private runSsh(profile: SshProfile, script: string, timeoutMs: number): Promise<string> {
     return new Promise((resolve, reject) => {
+      const target = { host: profile.host, port: profile.port, ...(profile.user ? { user: profile.user } : {}) };
       const child = spawn(sshBin(), [...sshBaseArgs(profile), "--", `exec sh -c ${shellQuote(script)}`], {
         stdio: ["ignore", "pipe", "pipe"],
       });
@@ -743,6 +752,7 @@ export class SshConnectionManager {
       });
       child.on("exit", (code) => {
         if (settled) return;
+        noteSshOutcome(target, code ?? -1, stderr);
         if (code === 0) finish();
         else finish(new Error(`ssh ${profile.host}: ${stderr.trim() || `command failed (${code})`}`));
       });
@@ -754,6 +764,9 @@ export class SshConnectionManager {
     if (profile.mode === "proxy") {
       throw new Error("SSH proxy profiles create sessions from the new-session dialog (no tunnel)");
     }
+    const target = { host: profile.host, port: profile.port, ...(profile.user ? { user: profile.user } : {}) };
+    const paused = sshCooldownError(target);
+    if (paused) throw new Error(paused);
     await this.disconnect();
     const conn = new SshConnection(profile, this.tunnelHost);
     await conn.connect();

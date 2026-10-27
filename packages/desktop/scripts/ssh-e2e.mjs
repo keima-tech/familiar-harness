@@ -885,6 +885,41 @@ try {
     `parent=${barePicker?.parentRow} header=${barePicker?.header}`,
   );
 
+  // a short dialog must not squeeze the list to zero height (phone layout):
+  // the flex shrink used to collapse it to ~4px while the rows stayed "there"
+  const squeeze = await evalOnce(`(async () => {
+    connApiOverride = rpcConnApi;
+    const modal = document.querySelector("#new-session-overlay .modal");
+    const prev = modal.style.maxHeight;
+    try {
+      openNewSessionModal();
+      await new Promise((r) => setTimeout(r, 600));
+      selectNsTarget(${JSON.stringify(proxyId)});
+      modal.style.maxHeight = "420px"; // simulate a short screen
+      const input = document.querySelector("#ns-remote-cwd");
+      input.value = "work";
+      input.dispatchEvent(new Event("input"));
+      for (let i = 0; i < 40; i++) {
+        await new Promise((r) => setTimeout(r, 200));
+        if (document.querySelector("#ns-remote-list .ns-row")) break;
+      }
+      const box = document.querySelector("#ns-remote-list");
+      return {
+        listH: Math.round(box.getBoundingClientRect().height),
+        rows: box.querySelectorAll(".ns-row").length,
+      };
+    } finally {
+      modal.style.maxHeight = prev;
+      connApiOverride = null;
+      if (!document.querySelector("#new-session-overlay").hidden) closeNewSessionModal();
+    }
+  })()`);
+  check(
+    squeeze?.listH >= 40 && squeeze?.rows >= 1,
+    "the suggestion list survives short dialogs",
+    JSON.stringify(squeeze),
+  );
+
   // new profiles default to the no-install path: SSH proxy + password
   const formDefaults = await evalOnce(`(async () => {
     connApiOverride = rpcConnApi;

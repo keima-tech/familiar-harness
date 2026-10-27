@@ -876,7 +876,11 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
 
 /* ---- new-session modal: centered folder picker ---- */
 .new-session-modal { width: min(560px, 92vw); height: auto; max-height: 80vh; }
-.ns-body { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 14px 18px; gap: 10px; min-height: 260px; }
+/* The dialog scrolls; the lists keep their height. As flex items with
+ * overflow they used to shrink to ~0 on short screens (phones), which looked
+ * like "no suggestions at all". */
+.ns-body { flex: 1; display: flex; flex-direction: column; justify-content: flex-start; padding: 14px 18px; gap: 10px; min-height: 260px; overflow-y: auto; }
+.ns-target, .ns-center, .ns-remote-picker { flex: 0 0 auto; }
 .ns-search input {
   width: 100%; background: var(--panel); border: 1px solid var(--border);
   color: var(--text); border-radius: 10px; padding: 9px 12px; font: inherit;
@@ -887,6 +891,7 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
 .ns-label { color: var(--dim); font-size: 11.5px; font-weight: 600; text-align: center; }
 .ns-folders {
   display: flex; flex-direction: column; gap: 4px;
+  flex: 0 0 auto;                 /* never squeezed by a short dialog */
   max-height: 300px; overflow-y: auto; padding: 2px;
 }
 .ns-row {
@@ -929,8 +934,9 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
 .ns-target-add { flex: 0 1 180px; }
 .ns-remote-picker {
   display: flex; flex-direction: column; gap: 8px; padding: 10px 2px;
-  min-height: 150px; justify-content: center;
+  min-height: 150px; justify-content: flex-start;
 }
+.ns-remote-picker .ns-folders { min-height: 72px; }
 .ns-remote-head { display: flex; align-items: center; gap: 8px; justify-content: center; font-size: 13px; }
 .ns-remote-ic { flex: none; }
 .ns-remote-picker input {

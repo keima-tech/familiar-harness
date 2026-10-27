@@ -850,7 +850,7 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
   stroke-linecap: round; transform: rotate(-90deg); transform-origin: 50% 50%;
 }
 #ctx-btn svg text { fill: currentColor; font-size: 7.5px; font-weight: 700; }
-#ctx-pop { min-width: 260px; padding: 12px; gap: 10px; }
+#ctx-pop { min-width: 296px; padding: 12px; gap: 10px; }
 .ctx-pop .ctx-head { display: flex; align-items: center; gap: 12px; }
 .ctx-pop .ctx-head svg circle.gauge-track { fill: none; stroke: var(--border); stroke-width: 2.5; }
 .ctx-pop .ctx-head svg circle.gauge-bar {
@@ -865,13 +865,19 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
   color: var(--dim); font-size: 11px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px;
 }
-.ctx-pop .ctx-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+/* columns at least as wide as their content, then share the extra space:
+ * "≈512.4k tok" used to spill out of a fixed 1fr cell */
+.ctx-pop .ctx-grid { display: grid; grid-template-columns: repeat(3, minmax(max-content, 1fr)); gap: 8px; }
 .ctx-pop .ctx-grid > div {
   background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
   padding: 6px 8px; display: flex; flex-direction: column; gap: 2px; min-width: 0;
 }
 .ctx-pop .ctx-grid small { color: var(--dim); font-size: 10px; }
-.ctx-pop .ctx-grid span { font-size: 12.5px; font-weight: 600; word-break: break-all; }
+.ctx-pop .ctx-grid span {
+  font-size: 12.5px; font-weight: 600;
+  white-space: nowrap;                 /* "≈512.4k tok" must not split */
+  font-variant-numeric: tabular-nums;  /* digits line up between cells */
+}
 .ctx-pop .ctx-note { color: var(--dim); font-size: 11px; line-height: 1.5; }
 
 /* ---- new-session modal: centered folder picker ---- */
@@ -916,9 +922,10 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
 /* ---- new-session modal: "runs on" target list (local / SSH) ---- */
 .ns-target { display: flex; flex-direction: column; gap: 6px; }
 .ns-target-label { text-align: left; }
-.ns-targets { display: flex; flex-wrap: wrap; gap: 6px; }
+/* equal tiles: wrapping flex left rows with different widths and heights */
+.ns-targets { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 6px; align-items: stretch; }
 .ns-target-row {
-  display: flex; align-items: center; gap: 8px; flex: 1 1 220px; min-width: 0;
+  display: flex; align-items: center; gap: 8px; min-width: 0; height: 100%;
   background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
   padding: 7px 10px; cursor: pointer; color: var(--text); font: inherit; text-align: left;
 }
@@ -931,7 +938,8 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
   color: var(--dim); font-size: 11px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.ns-target-add { flex: 0 1 180px; }
+.ns-target-add { border-style: dashed; }
+.ns-target-add .ns-target-name { font-weight: 500; color: var(--dim); }
 .ns-remote-picker {
   display: flex; flex-direction: column; gap: 8px; padding: 10px 2px;
   min-height: 150px; justify-content: flex-start;

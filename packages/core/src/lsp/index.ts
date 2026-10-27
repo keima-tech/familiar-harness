@@ -183,6 +183,9 @@ export class LspClient {
         this.child = this.transport.spawnSpec
           ? spawn(this.transport.spawnSpec.file, this.transport.spawnSpec.args, {
               stdio: ["pipe", "pipe", "pipe"],
+              ...(this.transport.spawnSpec.env
+                ? { env: { ...process.env, ...this.transport.spawnSpec.env } }
+                : {}),
             })
           : spawn(this.serverConfig.command, this.serverConfig.args ?? [], {
               stdio: ["pipe", "pipe", "pipe"],

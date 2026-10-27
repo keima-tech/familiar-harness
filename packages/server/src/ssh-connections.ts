@@ -5,7 +5,17 @@ import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { log, noteSshOutcome, resolveExecutable, sshCooldownError } from "@familiar/core";
+import {
+  deleteSshSecret,
+  hasSshSecret,
+  log,
+  noteSshOutcome,
+  resolveExecutable,
+  sshArgs,
+  sshAuthEnv,
+  sshCooldownError,
+  writeSshSecret,
+} from "@familiar/core";
 
 /**
  * Server-side SSH connections, so the browser WebUI (no desktop shell) can
@@ -37,6 +47,8 @@ export interface SshProfile {
   user: string;
   /** "serve" (default): remote familiar serve over a tunnel; "proxy": tools over ssh */
   mode?: "serve" | "proxy";
+  /** "password" when the host authenticates with a stored password (no key) */
+  auth?: "password";
   identityFile?: string;
   remoteBin: string;
 }
@@ -261,6 +273,7 @@ export function sanitizeProfile(input: unknown, existing?: SshProfile | null): S
   const identityFile = clean(o["identityFile"], 4096);
   const remoteBin = clean(o["remoteBin"], 4096) || "familiar";
   const mode = o["mode"] === "proxy" ? "proxy" : "serve";
+  const auth = o["auth"] === "password" ? "password" : "key";
   const name = clean(o["name"], 80) || `${user ? `${user}@` : ""}${host}`;
   const id = clean(existing?.id ?? o["id"], 64) || crypto.randomUUID();
   return {
@@ -270,6 +283,7 @@ export function sanitizeProfile(input: unknown, existing?: SshProfile | null): S
     port,
     user,
     ...(mode === "proxy" ? { mode } : {}),
+    ...(auth === "password" ? { auth } : {}),
     ...(identityFile ? { identityFile } : {}),
     remoteBin,
   };
@@ -316,27 +330,25 @@ function freeLocalPort(host: string): Promise<number> {
   });
 }
 
+/** Core ssh argv (BatchMode for key targets, askpass args for password ones). */
 function sshBaseArgs(profile: SshProfile): string[] {
-  const args = [
-    "-T",
-    "-o",
-    "BatchMode=yes",
-    "-o",
-    "StrictHostKeyChecking=yes",
-    "-o",
-    "ConnectTimeout=10",
-    "-o",
-    "ServerAliveInterval=15",
-    "-o",
-    "ServerAliveCountMax=4",
-    "-o",
-    "LogLevel=ERROR",
-  ];
-  if (profile.port && profile.port !== 22) args.push("-p", String(profile.port));
-  if (profile.identityFile) args.push("-i", profile.identityFile);
-  if (profile.user) args.push("-l", profile.user);
-  args.push(profile.host);
-  return args;
+  return sshArgs({
+    host: profile.host,
+    port: profile.port,
+    ...(profile.user ? { user: profile.user } : {}),
+    ...(profile.identityFile ? { identityFile: profile.identityFile } : {}),
+  });
+}
+
+function sshEnv(profile: SshProfile): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    ...sshAuthEnv({
+      host: profile.host,
+      port: profile.port,
+      ...(profile.user ? { user: profile.user } : {}),
+    }),
+  };
 }
 
 /** POSIX remote bootstrap: stash the token from stdin, run serve, clean up. */
@@ -503,6 +515,7 @@ class SshConnection {
       let stdout = "";
       const child = spawn(sshBin(), [...sshBaseArgs(this.profile), remoteCommand(this.profile.remoteBin)], {
         stdio: ["pipe", "pipe", "pipe"],
+        env: sshEnv(this.profile),
       });
       this.serverChild = child;
       const finish = (err: Error | null, port = 0): void => {
@@ -574,7 +587,7 @@ class SshConnection {
         "-L",
         `${this.tunnelHost}:${localPort}:127.0.0.1:${this.remotePort}`,
       ];
-      const child = spawn(sshBin(), args, { stdio: ["ignore", "pipe", "pipe"] });
+      const child = spawn(sshBin(), args, { stdio: ["ignore", "pipe", "pipe"], env: sshEnv(this.profile) });
       this.tunnelChild = child;
       let settled = false;
       const finish = (err?: Error): void => {
@@ -672,21 +685,38 @@ export class SshConnectionManager {
     return readStore();
   }
 
+  /** Profiles plus a `hasPassword` flag (never the secret itself). */
+  listProfilesPublic(): Array<SshProfile & { hasPassword: boolean }> {
+    return readStore().map((p) => ({ ...p, hasPassword: hasSshSecret(p) }));
+  }
+
   getProfile(id: string): SshProfile | null {
     return readStore().find((p) => p.id === id) ?? null;
   }
 
   saveProfile(input: unknown): SshProfile {
     const profiles = readStore();
-    const id = (input as { id?: unknown } | null)?.id;
-    const existing = typeof id === "string" ? profiles.find((p) => p.id === id) : undefined;
+    const o = (input ?? {}) as Record<string, unknown>;
+    const id = typeof o["id"] === "string" ? o["id"] : undefined;
+    const existing = id ? profiles.find((p) => p.id === id) : undefined;
     const profile = sanitizeProfile(input, existing ?? null);
     if (!profile) throw new Error("invalid connection profile (host is required)");
     const next = existing
       ? profiles.map((p) => (p.id === profile.id ? profile : p))
       : [...profiles, profile];
     writeStore(next);
+    // password: a string stores it (0600), null clears it, absent = unchanged
+    if (typeof o["password"] === "string" && o["password"] !== "") {
+      writeSshSecret(profile, o["password"]);
+    } else if (o["password"] === null) {
+      deleteSshSecret(profile);
+    }
     return profile;
+  }
+
+  /** Drop the stored password of a profile (on delete). */
+  forgetPassword(profile: SshProfile): boolean {
+    return deleteSshSecret(profile);
   }
 
   deleteProfile(id: string): boolean {
@@ -723,6 +753,7 @@ export class SshConnectionManager {
       const target = { host: profile.host, port: profile.port, ...(profile.user ? { user: profile.user } : {}) };
       const child = spawn(sshBin(), [...sshBaseArgs(profile), "--", `exec sh -c ${shellQuote(script)}`], {
         stdio: ["ignore", "pipe", "pipe"],
+        env: sshEnv(profile),
       });
       let stdout = "";
       let stderr = "";

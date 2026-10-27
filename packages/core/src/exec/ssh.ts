@@ -4,6 +4,7 @@ import os from "node:os";
 import nodePath, { type PlatformPath } from "node:path";
 import type { SessionRemote } from "@familiar/protocol";
 import { resolveExecutable } from "./resolve.js";
+import { sshAuthArgs, sshAuthEnv, hasSshSecret } from "./ssh-auth.js";
 import {
   OutputCollector,
   SKIP_DIR_NAMES,
@@ -79,10 +80,12 @@ function shellQuote(value: string): string {
  * one TCP/auth connection; OpenSSH for Windows has no mux and connects anew.
  */
 export function sshArgs(target: SessionRemote): string[] {
+  const password = hasSshSecret(target);
   const args = [
     "-T",
-    "-o",
-    "BatchMode=yes",
+    // BatchMode would suppress the askpass prompt; password targets pin the
+    // prompt count instead (see ssh-auth.ts).
+    ...(password ? [] : ["-o", "BatchMode=yes"]),
     "-o",
     "StrictHostKeyChecking=yes",
     "-o",
@@ -113,6 +116,7 @@ export function sshArgs(target: SessionRemote): string[] {
   if (target.port && target.port !== 22) args.push("-p", String(target.port));
   if (target.identityFile) args.push("-i", target.identityFile);
   if (target.user) args.push("-l", target.user);
+  if (password) args.push(...sshAuthArgs(target));
   args.push(target.host);
   return args;
 }
@@ -121,6 +125,8 @@ export function sshArgs(target: SessionRemote): string[] {
 export interface StdioSpec {
   file: string;
   args: string[];
+  /** extra environment for the ssh child (askpass for password targets) */
+  env?: Record<string, string>;
 }
 
 /**
@@ -141,7 +147,12 @@ export function sshStdioSpec(
   }
   const line = parts.map(shellQuote).join(" ");
   const remote = opts.cwd ? `cd ${shellQuote(opts.cwd)} && exec ${line}` : `exec ${line}`;
-  return { file: sshBin(), args: [...sshArgs(target), "--", remote] };
+  const authEnv = sshAuthEnv(target);
+  return {
+    file: sshBin(),
+    args: [...sshArgs(target), "--", remote],
+    ...(Object.keys(authEnv).length > 0 ? { env: authEnv } : {}),
+  };
 }
 
 /**
@@ -180,7 +191,7 @@ export class SshBackend implements ExecBackend {
       const child = spawn(
         sshBin(),
         [...this.baseArgs(), "--", this.remoteCommand(script, opts.cwd)],
-        { stdio: ["pipe", "pipe", "pipe"] },
+        { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...sshAuthEnv(this.target) } },
       );
       const stdout: Buffer[] = [];
       let stdoutLen = 0;
@@ -252,7 +263,7 @@ export class SshBackend implements ExecBackend {
       const child = spawn(
         sshBin(),
         [...this.baseArgs(), "--", this.remoteCommand(command, opts.cwd)],
-        { stdio: ["pipe", "pipe", "pipe"] },
+        { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...sshAuthEnv(this.target) } },
       );
       const out = new OutputCollector();
       let stderrText = "";

@@ -863,3 +863,30 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   再登録スキップ/鍵変更の拒否/`[host]:port` 表記/デスクトップ委譲/設定フォームからの
   確認と登録。テストハーネスは死んだマウントを含む PATH を除去して起動。
   typecheck / smoke 通過。
+
+## v0.1.0 の実装メモ㊶(2026-10-27、パスワード認証(SSH_ASKPASS)と失敗バックオフ)
+
+- **背景**: 「リモートに何も置かず、鍵も配らずに接続したい」(Claude Code デスクトップと
+  同じ運用)。対象ホストは password 認証を提供していたが、鍵が未配布のため Permission
+  denied、さらに連打で sshd/fail2ban のレート制限(kex リセット)を誘発していた。
+- **パスワード認証**: `packages/core/src/exec/ssh-auth.ts`
+  - 秘密は `<familiar home>/secrets/ssh-<sha256(user@host:port)[0:16]>.pass`(0600)。
+  - ssh へは `SSH_ASKPASS`(0700 の一時ヘルパーが `$FAMILIAR_ASKPASS_FILE` を cat)+
+    `SSH_ASKPASS_REQUIRE=force` で渡す。パスワードは argv/環境/ログ/state.db に残らない。
+  - パスワード対象では `BatchMode=yes` を外し `NumberOfPasswordPrompts=1` +
+    `PreferredAuthentications=publickey,password` を付与(鍵優先・1 回試行)。
+  - `sshArgs`/`sshStdioSpec`(MCP・LSP の ssh 起動)に自動反映。
+- **プロファイル**: `auth: "key" | "password"` を追加。`conn.save` は `password`(文字列=保存、
+  null=削除)を受け付け、`conn.list` は `hasPassword` を返す(秘密は返さない)。
+  プロファイル削除で秘密も削除。WebUI フォームに「認証方式」+ パスワード欄 + 削除ボタン +
+  保存先の説明を追加。デスクトップは保存/削除/テスト/一覧をサーバ RPC に委譲し、
+  自前トンネルにも askpass を実装。
+- **失敗バックオフ**: 同一ホストへの ssh が認証/ホスト鍵/リセットで失敗したら 60 秒間
+  接続試行を停止(`sshCooldownError`/`noteSshOutcome`)。コアの SshBackend・サーバの
+  プローブ/トンネルで共有。UI は「paused connection attempts…」+ 対処ヒントを表示。
+  フォルダー閲覧の debounce も 700ms にし、per-keystroke の ssh を止めた。
+- **テスト**: ssh-e2e を **81 項目**に拡張 — 偽 ssh がパスワード(askpass ファイル)を検証。
+  秘密 0600・askpass ヘルパー出力・削除、RPC 保存と hasPassword、鍵なし接続、
+  秘密のハッシュ配置、**プロファイル/state.db に平文が残らない**、パスワード経由の
+  セッションで write ツール、誤パスワードのエラー、認証/リセットのバックオフ、
+  設定フォームからの保存。typecheck / smoke 通過。

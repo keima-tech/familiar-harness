@@ -31,6 +31,49 @@ function profilesFile() {
   return path.join(familiarHome(), "desktop.json");
 }
 
+// Password targets: the secret lives next to the provider keys (0600) and is
+// handed to ssh through SSH_ASKPASS (BatchMode would suppress the prompt).
+function secretPath(profile) {
+  const key = `${profile.user || ""}@${profile.host}:${profile.port || 22}`;
+  const hash = crypto.createHash("sha256").update(key).digest("hex").slice(0, 16);
+  return path.join(familiarHome(), "secrets", `ssh-${hash}.pass`);
+}
+
+function hasSecret(profile) {
+  try {
+    return fs.statSync(secretPath(profile)).size > 0;
+  } catch {
+    return false;
+  }
+}
+
+let askpassFile = "";
+function askpassHelper() {
+  if (askpassFile && fs.existsSync(askpassFile)) return askpassFile;
+  const dir = path.join(os.tmpdir(), "familiar-ssh-askpass");
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const file = path.join(dir, process.platform === "win32" ? "askpass.cmd" : "askpass.sh");
+  fs.writeFileSync(
+    file,
+    process.platform === "win32"
+      ? '@type "%FAMILIAR_ASKPASS_FILE%"\r\n'
+      : '#!/bin/sh\ncat "$FAMILIAR_ASKPASS_FILE"\n',
+    { mode: 0o700 },
+  );
+  fs.chmodSync(file, 0o700);
+  askpassFile = file;
+  return file;
+}
+
+function authEnv(profile) {
+  if (!hasSecret(profile)) return {};
+  return {
+    SSH_ASKPASS: askpassHelper(),
+    SSH_ASKPASS_REQUIRE: "force",
+    FAMILIAR_ASKPASS_FILE: secretPath(profile),
+  };
+}
+
 function sshBin() {
   // resolve through fs (a stale FUSE mount in PATH fails exec with ENOTCONN)
   if (process.env.FAMILIAR_SSH_BIN) return process.env.FAMILIAR_SSH_BIN;
@@ -160,10 +203,11 @@ function freeLocalPort() {
 }
 
 function sshBaseArgs(profile) {
+  const password = hasSecret(profile);
   const args = [
     "-T",
-    "-o",
-    "BatchMode=yes", // keys/agent only — never hang on a password prompt
+    // BatchMode suppresses askpass; password targets pin the prompt count
+    ...(password ? [] : ["-o", "BatchMode=yes"]),
     "-o",
     "StrictHostKeyChecking=yes",
     "-o",
@@ -178,6 +222,9 @@ function sshBaseArgs(profile) {
   if (profile.port && profile.port !== 22) args.push("-p", String(profile.port));
   if (profile.identityFile) args.push("-i", profile.identityFile);
   if (profile.user) args.push("-l", profile.user);
+  if (password) {
+    args.push("-o", "NumberOfPasswordPrompts=1", "-o", "PreferredAuthentications=publickey,password");
+  }
   args.push(profile.host);
   return args;
 }
@@ -344,7 +391,10 @@ class SshConnection {
       let settled = false;
       let stdout = "";
       const args = [...sshBaseArgs(this.profile), remoteCommand(this.profile.remoteBin)];
-      const child = spawn(sshBin(), args, { stdio: ["pipe", "pipe", "pipe"] });
+      const child = spawn(sshBin(), args, {
+        stdio: ["pipe", "pipe", "pipe"],
+        env: { ...process.env, ...authEnv(this.profile) },
+      });
       this.serverChild = child;
       const finish = (err, value) => {
         if (settled) return;
@@ -418,7 +468,10 @@ class SshConnection {
         "-L",
         `127.0.0.1:${localPort}:127.0.0.1:${this.remotePort}`,
       ];
-      const child = spawn(sshBin(), args, { stdio: ["ignore", "pipe", "pipe"] });
+      const child = spawn(sshBin(), args, {
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, ...authEnv(this.profile) },
+      });
       this.tunnelChild = child;
       let settled = false;
       const finish = (err) => {

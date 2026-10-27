@@ -296,6 +296,14 @@ const STR = {
     "ssh.netHint": "接続がリセット/拒否されました。サーバ側のレート制限(fail2ban 等)や一時的な負荷の可能性があります。数分おいて再試行してください。",
     "ssh.rateHint": "短時間に失敗が続いたため、しばらく接続を控えています(レート制限対策)。原因(鍵の登録/ホスト鍵)を直して約1分後に再試行してください。",
     "ssh.hostKeyHint": "ホスト鍵が未登録です。「🔑 ホスト鍵を確認…」から登録してください。",
+    "ssh.authMode": "認証方式",
+    "ssh.authKey": "鍵 / ssh-agent",
+    "ssh.authPassword": "パスワード",
+    "ssh.password": "パスワード",
+    "ssh.passwordSaved": "保存済み(変更する場合のみ入力)",
+    "ssh.passwordClear": "保存したパスワードを削除",
+    "ssh.passwordHint": "パスワードは ~/.familiar/secrets/ssh-*.pass (0600) に保存され、ssh には SSH_ASKPASS 経由で渡します。LAN 内は HTTP のため、信頼できるネットワークでのみ使用してください。",
+    "ssh.passwordFirst": "パスワードを入力して「保存」してからテストしてください。",
     "ssh.desktopOnly": "SSH 接続はデスクトップアプリでのみ利用できます。",
     "ssh.connectFail": "接続に失敗しました: {0}",
     "ssh.current": "接続中: {0}",
@@ -733,6 +741,14 @@ const STR = {
     "ssh.netHint": "The connection was reset/refused — the server may be rate-limiting (fail2ban etc.) or briefly overloaded. Retry in a few minutes.",
     "ssh.rateHint": "Recent failures paused connection attempts (rate-limit protection). Fix the cause (key authorization / host key) and retry in about a minute.",
     "ssh.hostKeyHint": "Host key not registered — use “🔑 Check host key…” to add it.",
+    "ssh.authMode": "Authentication",
+    "ssh.authKey": "Key / ssh-agent",
+    "ssh.authPassword": "Password",
+    "ssh.password": "Password",
+    "ssh.passwordSaved": "saved (type only to change)",
+    "ssh.passwordClear": "Delete the saved password",
+    "ssh.passwordHint": "The password is stored in ~/.familiar/secrets/ssh-*.pass (0600) and given to ssh through SSH_ASKPASS. The WebUI itself is plain HTTP — use it only on trusted networks.",
+    "ssh.passwordFirst": "Enter the password and press Save before testing.",
     "ssh.desktopOnly": "SSH connections are available in the desktop app only.",
     "ssh.connectFail": "Connection failed: {0}",
     "ssh.current": "Connected: {0}",
@@ -4548,7 +4564,8 @@ async function renderConnectionsSection(content, stale = () => false) {
     const row = document.createElement("div");
     row.className = "ssh-row";
     const modeBadge = pr.mode === "proxy" ? t("ns.proxyBadge") : t("ns.serveBadge");
-    row.innerHTML = `<div class="ssh-main"><b>${esc(pr.name)}</b><small>${esc(sshProfileLabel(pr))} · ${esc(modeBadge)}</small></div>`;
+    const authBadge = pr.auth === "password" ? ` · ${t("ssh.authPassword")}${pr.hasPassword ? " 🔒" : ""}` : "";
+    row.innerHTML = `<div class="ssh-main"><b>${esc(pr.name)}</b><small>${esc(sshProfileLabel(pr))} · ${esc(modeBadge)}${esc(authBadge)}</small></div>`;
     const test = document.createElement("button");
     test.type = "button";
     test.className = "ghost";
@@ -4618,9 +4635,32 @@ async function renderConnectionsSection(content, stale = () => false) {
     [t("ssh.modeServe"), "serve"],
     [t("ssh.modeProxy"), "proxy"],
   ]);
+  const authMode = sshSelect(t("ssh.authMode"), editing?.auth === "password" ? "password" : "key", [
+    [t("ssh.authKey"), "key"],
+    [t("ssh.authPassword"), "password"],
+  ]);
+  const pw = sshField(t("ssh.password"), "", editing?.hasPassword ? t("ssh.passwordSaved") : "");
+  pw.input.type = "password";
+  pw.input.autocomplete = "new-password";
+  pw.wrap.hidden = authMode.input.value !== "password";
+  let clearPassword = false;
+  const pwClear = document.createElement("button");
+  pwClear.type = "button";
+  pwClear.className = "ghost";
+  pwClear.textContent = t("ssh.passwordClear");
+  pwClear.hidden = !editing?.hasPassword;
+  pwClear.addEventListener("click", () => {
+    clearPassword = true;
+    pw.input.value = "";
+    pw.input.placeholder = t("ssh.passwordSaved");
+    pwClear.hidden = true;
+  });
+  authMode.input.addEventListener("change", () => {
+    pw.wrap.hidden = authMode.input.value !== "password";
+  });
   const key = sshField(t("ssh.key"), editing?.identityFile ?? "", "~/.ssh/id_ed25519");
   const bin = sshField(t("ssh.remoteBin"), editing?.remoteBin ?? "", "familiar");
-  form.append(name.wrap, host.wrap, user.wrap, port.wrap, mode.wrap, key.wrap, bin.wrap);
+  form.append(name.wrap, host.wrap, user.wrap, port.wrap, mode.wrap, authMode.wrap, pw.wrap, key.wrap, bin.wrap);
 
   const fresult = document.createElement("span");
   fresult.className = "conn-result";
@@ -4638,6 +4678,9 @@ async function renderConnectionsSection(content, stale = () => false) {
     user: user.input.value.trim(),
     port: Number.parseInt(port.input.value, 10) || 22,
     mode: mode.input.value,
+    auth: authMode.input.value,
+    ...(pw.input.value !== "" ? { password: pw.input.value } : {}),
+    ...(clearPassword ? { password: null } : {}),
     identityFile: key.input.value.trim(),
     remoteBin: bin.input.value.trim() || "familiar",
   });
@@ -4674,14 +4717,17 @@ async function renderConnectionsSection(content, stale = () => false) {
     fresult.style.color = "var(--dim)";
     try {
       const r = await api.testConnection(draft());
-      fresult.textContent = t("ssh.testOk", r.hostname, r.platform, r.version || "?");
+      fresult.textContent = t("ssh.testOk", r.hostname, r.platform, r.version || r.familiar || "?");
       fresult.style.color = "var(--ok)";
       hostKeyBox.hidden = true;
     } catch (err) {
       const msg = String(err?.message ?? err);
       fresult.textContent = t("ssh.testFail", msg);
       fresult.style.color = "var(--err)";
-      const hint = sshErrorHint(msg);
+      let hint = sshErrorHint(msg);
+      if (/Permission denied|publickey/i.test(msg) && authMode.input.value === "password" && pw.input.value === "" && !editing?.hasPassword) {
+        hint = t("ssh.passwordFirst");
+      }
       if (/host key is known|Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED/i.test(msg)) {
         fresult.textContent = `${t("ssh.testFail", msg)} — ${t("ssh.hostKeyHint")}`;
         void showHostKeyPanel(draftTarget(), hostKeyBox, fresult);
@@ -4704,7 +4750,13 @@ async function renderConnectionsSection(content, stale = () => false) {
   hostKeyBtn.className = "ghost";
   hostKeyBtn.textContent = t("ssh.hostKeyBtn");
   hostKeyBtn.addEventListener("click", () => void showHostKeyPanel(draftTarget(), hostKeyBox, fresult));
-  form.appendChild(sshActionRow([save, test, cancel, hostKeyBtn, fresult]));
+  form.appendChild(sshActionRow([save, test, cancel, hostKeyBtn, pwClear, fresult]));
+  if (pw.wrap.parentElement) {
+    const note = document.createElement("div");
+    note.className = "files-note";
+    note.textContent = t("ssh.passwordHint");
+    pw.wrap.parentElement.insertBefore(note, pw.wrap.nextSibling);
+  }
   form.appendChild(hostKeyBox);
   put(form);
 }

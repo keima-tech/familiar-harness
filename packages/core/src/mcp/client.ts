@@ -63,6 +63,7 @@ export class McpClient {
       // lives on the remote host with its stdio piped through.
       child = spawn(this.spawnSpec.file, this.spawnSpec.args, {
         stdio: ["pipe", "pipe", "pipe"],
+        ...(this.spawnSpec.env ? { env: { ...process.env, ...this.spawnSpec.env } } : {}),
       });
     } else {
       const line = [this.cfg.command, ...(this.cfg.args ?? [])].join(" ");

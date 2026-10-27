@@ -583,16 +583,18 @@ export class AgentServer {
         return { phase1, consolidation: outcome };
       }
       case "conn.list":
-        return { connections: this.sshConnections.listProfiles(), current: this.sshConnections.status() };
+        return { connections: this.sshConnections.listProfilesPublic(), current: this.sshConnections.status() };
       case "conn.save": {
         const profile = this.sshConnections.saveProfile(params);
-        return { ok: true, profile, connections: this.sshConnections.listProfiles() };
+        return { ok: true, profile, connections: this.sshConnections.listProfilesPublic() };
       }
-      case "conn.delete":
-        return {
-          ok: this.sshConnections.deleteProfile(str(params, "id") ?? ""),
-          connections: this.sshConnections.listProfiles(),
-        };
+      case "conn.delete": {
+        const deletedId = str(params, "id") ?? "";
+        const doomed = deletedId ? this.sshConnections.getProfile(deletedId) : null;
+        const ok = this.sshConnections.deleteProfile(deletedId);
+        if (ok && doomed) this.sshConnections.forgetPassword(doomed);
+        return { ok, connections: this.sshConnections.listProfilesPublic() };
+      }
       case "conn.test": {
         const id = str(params, "id");
         let profile = id ? this.sshConnections.getProfile(id) : null;

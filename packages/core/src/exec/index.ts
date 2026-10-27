@@ -13,6 +13,16 @@ export type {
 export { OUTPUT_CAP, SKIP_DIR_NAMES } from "./types.js";
 export { LocalBackend, resolveShellCommand, walkLocal } from "./local.js";
 export { noteSshOutcome, sshCooldownError, sshTargetKey } from "./ssh.js";
+export {
+  askpassHelperPath,
+  deleteSshSecret,
+  hasSshSecret,
+  sshAuthArgs,
+  sshAuthEnv,
+  sshSecretPath,
+  writeSshSecret,
+} from "./ssh-auth.js";
+export { sshArgs, sshStdioSpec } from "./ssh.js";
 export { SshBackend } from "./ssh.js";
 
 /** The execution boundary for a session: local, or a remote host over ssh. */

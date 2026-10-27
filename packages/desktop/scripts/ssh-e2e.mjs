@@ -12,7 +12,8 @@
  *
  * Run: node scripts/ssh-e2e.mjs
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -40,6 +41,9 @@ const remoteHome = path.join(base, "remote-home");
 const remoteWork = path.join(remoteHome, "work");
 const binDir = path.join(base, "bin");
 for (const dir of [localHome, remoteHome, remoteWork, binDir]) fs.mkdirSync(dir, { recursive: true });
+
+// the test process shares the isolated home with the app (core helpers use it)
+process.env.FAMILIAR_HOME = localHome;
 
 const CONFIG = `version: 1
 default_provider: mock
@@ -144,6 +148,16 @@ for (let i = 0; i < argv.length; i++) {
   positional.push(a);
 }
 const host = positional[0] ?? "";
+if (host.startsWith("pw")) {
+  let ok = false;
+  try {
+    ok = require("node:fs").readFileSync(process.env.FAMILIAR_ASKPASS_FILE || "", "utf8").trim() === "s3cret";
+  } catch { ok = false; }
+  if (!ok) {
+    process.stderr.write("user@" + host + ": Permission denied (publickey,password).\\n");
+    process.exit(255);
+  }
+}
 if (host.startsWith("denied")) {
   process.stderr.write("user@" + host + ": Permission denied (publickey,password).\\n");
   process.exit(255);
@@ -384,11 +398,11 @@ try {
     openSettingsModal("connections");
     await new Promise((r) => setTimeout(r, 500));
     const inputs = [...document.querySelectorAll("#settings-content .ssh-field input")];
-    if (inputs.length < 6) return { err: "form inputs missing: " + inputs.length };
+    if (inputs.length < 7) return { err: "form inputs missing: " + inputs.length };
     inputs[0].value = "Test remote";
     inputs[1].value = "remote1";
     inputs[2].value = "tester";
-    inputs[5].value = ${JSON.stringify(shim)};
+    inputs[6].value = ${JSON.stringify(shim)};
     const form = document.querySelector("#settings-content > .card:last-of-type");
     form.querySelector(".conn-actions button").click();
     for (let i = 0; i < 60; i++) {
@@ -774,6 +788,99 @@ try {
     catch (err) { return String(err.message); }
   })()`);
   check(/paused connection attempts/.test(String(deniedDirs)), "proxy file RPCs obey the backoff", String(deniedDirs).slice(0, 160));
+
+  // ---- password auth: connect without keys or changes on the host ----------
+  const authMod = await import(new URL("../../../packages/core/dist/exec/ssh-auth.js", import.meta.url).href);
+  const pwTarget = { host: "pw1", user: "tester" };
+  const secretFile = authMod.sshSecretPath(pwTarget);
+  authMod.writeSshSecret(pwTarget, "s3cret");
+  check(
+    (fs.statSync(secretFile).mode & 0o777) === 0o600 && fs.readFileSync(secretFile, "utf8").trim() === "s3cret",
+    "password secrets are stored 0600",
+    secretFile,
+  );
+  const helper = authMod.askpassHelperPath();
+  const helperOut = spawnSync("/bin/sh", [helper], {
+    env: { ...process.env, FAMILIAR_ASKPASS_FILE: secretFile },
+  }).stdout.toString().trim();
+  check(helperOut === "s3cret", "the askpass helper returns the stored password", helperOut);
+  authMod.deleteSshSecret(pwTarget);
+  check(!authMod.hasSshSecret(pwTarget), "stored secrets can be cleared");
+
+  const pwSaved = await evalOnce(
+    `rpcConnApi.saveConnection({ host: "pw1", user: "tester", auth: "password", password: "s3cret", name: "PW host" })`,
+  );
+  check(
+    pwSaved?.profile?.auth === "password" && (pwSaved.connections ?? []).some((x) => x.host === "pw1" && x.hasPassword === true),
+    "RPC stores a password profile",
+    JSON.stringify(pwSaved).slice(0, 200),
+  );
+  const pwTest = await evalOnce(`rpcConnApi.testConnection(${JSON.stringify(pwSaved.profile.id)})`);
+  check(
+    pwTest?.ok === true && pwTest?.hostname === os.hostname() && pwTest?.home === remoteHome,
+    "password auth connects without a key",
+    JSON.stringify(pwTest),
+  );
+  const expectedSecret = path.join(
+    localHome,
+    "secrets",
+    `ssh-${crypto.createHash("sha256").update("tester@pw1:22").digest("hex").slice(0, 16)}.pass`,
+  );
+  check(fs.existsSync(expectedSecret), "the secret lands in the familiar home", expectedSecret);
+  check(
+    !fs.readFileSync(path.join(localHome, "desktop.json"), "utf8").includes("s3cret"),
+    "profiles never contain the password",
+  );
+  check(!fs.readFileSync(path.join(localHome, "state.db")).includes("s3cret"), "sessions never contain the password");
+
+  const pwSession = await evalOnce(`(async () => {
+    const s = await rpc("session.create", { cwd: ${JSON.stringify(remoteWork)}, ssh: { host: "pw1", user: "tester" } });
+    await rpc("session.send", { id: s.id, text: "@write pw-note.txt", yolo: true });
+    await rpc("session.delete", { id: s.id });
+    return { cwd: s.cwd };
+  })()`);
+  await waitFor(() => fs.existsSync(path.join(remoteWork, "pw-note.txt")), "password session write", 30_000);
+  check(pwSession?.cwd === remoteWork && fs.existsSync(path.join(remoteWork, "pw-note.txt")), "tool calls work over password auth");
+
+  await evalOnce(`rpcConnApi.saveConnection({ host: "pw2", user: "tester", auth: "password", password: "wrong" })`);
+  const pwBad = await evalOnce(`(async () => {
+    const list = await rpcConnApi.connections();
+    const id = list.connections.find((x) => x.host === "pw2")?.id;
+    try { await rpcConnApi.testConnection(id); return "allowed"; }
+    catch (err) { return String(err.message); }
+  })()`);
+  check(/Permission denied/.test(String(pwBad)), "a wrong password reports the ssh error", String(pwBad).slice(0, 140));
+
+  const pwForm = await evalOnce(`(async () => {
+    connApiOverride = rpcConnApi;
+    try {
+      openSettingsModal("connections");
+      await new Promise((r) => setTimeout(r, 600));
+      const inputs = () => [...document.querySelectorAll("#settings-content .ssh-field input")];
+      inputs()[0].value = "PW form";
+      inputs()[1].value = "pw3";
+      inputs()[2].value = "tester";
+      const authSel = [...document.querySelectorAll("#settings-content .ssh-field select")]
+        .find((x) => [...x.options].some((o) => o.value === "password"));
+      authSel.value = "password";
+      authSel.dispatchEvent(new Event("change"));
+      const pwInput = inputs().find((i) => i.type === "password");
+      pwInput.value = "s3cret";
+      [...document.querySelectorAll("#settings-content .conn-actions button")]
+        .find((b) => b.textContent.trim() === "保存")
+        .click();
+      for (let i = 0; i < 50; i++) {
+        await new Promise((r) => setTimeout(r, 200));
+        const list = await rpcConnApi.connections();
+        if (list.connections.some((x) => x.host === "pw3" && x.hasPassword)) return { ok: true };
+      }
+      return { ok: false };
+    } finally {
+      connApiOverride = null;
+    }
+  })()`);
+  check(pwForm?.ok === true, "the settings form saves password profiles");
+  await evalOnce(`closeSettingsModal(); 1`);
 
   // ---- host-key verification (ssh-keyscan fingerprints → known_hosts) ------
   const knownHostsFile = path.join(base, "known_hosts");

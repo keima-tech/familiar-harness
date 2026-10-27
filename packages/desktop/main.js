@@ -350,53 +350,43 @@ async function disconnectConnection() {
   return conn;
 }
 
-ipcMain.handle("conn:list", (ev) => {
+ipcMain.handle("conn:list", async (ev) => {
   const local = isLocalSender(ev);
+  if (!local) {
+    // Remote pages only learn about the connection they are already using —
+    // never the other hosts saved on the local machine.
+    return { available: true, local, connections: [], current: connInfo(activeConn) };
+  }
+  // Profiles live on the server (shared with the WebUI, password flags too);
+  // `current` stays the desktop-owned tunnel because it swaps this window.
+  const res = await callLocalServer("conn.list", {});
   return {
     available: true,
     local,
-    // Remote pages only learn about the connection they are already using —
-    // never the other hosts saved on the local machine.
-    connections: local ? listProfiles() : [],
+    connections: res?.connections ?? [],
     current: connInfo(activeConn),
   };
 });
 
-ipcMain.handle("conn:save", (ev, input) => {
+ipcMain.handle("conn:save", async (ev, input) => {
   requireLocal(ev, "saving SSH connections");
-  const profile = saveProfile(input);
-  return { ok: true, profile, connections: listProfiles() };
+  // the server owns the file (and stores passwords in secrets/, 0600)
+  return await callLocalServer("conn.save", input);
 });
 
 ipcMain.handle("conn:delete", async (ev, id) => {
   requireLocal(ev, "deleting SSH connections");
   if (activeConn && activeConn.profile.id === id) await disconnectConnection();
-  return { ok: deleteProfile(String(id ?? "")), connections: listProfiles() };
+  return await callLocalServer("conn.delete", { id: String(id ?? "") });
 });
 
 ipcMain.handle("conn:test", async (ev, input) => {
   requireLocal(ev, "testing SSH connections");
-  const profile = typeof input === "string" ? getProfile(input) : sanitizeProfile(input, input);
-  if (!profile) throw new Error("connection profile not found");
-  if (profile.mode === "proxy") {
-    // proxy profiles need no remote familiar: use the server's connectivity probe
-    return await callLocalServer("conn.test", { profile });
-  }
-  const started = Date.now();
-  const conn = new SshConnection(profile);
-  try {
-    await conn.connect();
-    return {
-      ok: true,
-      hostname: conn.info.hostname,
-      platform: conn.info.platform,
-      home: conn.info.home,
-      version: conn.info.version,
-      latencyMs: Date.now() - started,
-    };
-  } finally {
-    await conn.close().catch(() => {});
-  }
+  // The server probe uses the stored credentials (askpass for passwords) and
+  // reports whether familiar is installed remotely; one code path for both UIs.
+  const params = typeof input === "string" ? { id: input } : { profile: input };
+  const res = await callLocalServer("conn.test", params);
+  return { ...res, version: res?.version || res?.familiar || "" };
 });
 
 ipcMain.handle("conn:connect", async (ev, input) => {

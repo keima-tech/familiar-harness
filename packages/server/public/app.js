@@ -303,7 +303,8 @@ const STR = {
     "ssh.passwordSaved": "保存済み(変更する場合のみ入力)",
     "ssh.passwordClear": "保存したパスワードを削除",
     "ssh.passwordHint": "パスワードは ~/.familiar/secrets/ssh-*.pass (0600) に保存され、ssh には SSH_ASKPASS 経由で渡します。LAN 内は HTTP のため、信頼できるネットワークでのみ使用してください。",
-    "ssh.passwordFirst": "パスワードを入力して「保存」してからテストしてください。",
+    "ssh.passwordFirst": "パスワードを入力してから「接続テスト」を押すと、自動で保存して試行します。",
+    "ssh.deleteFailed": "削除できませんでした(プロファイルが見つかりません)",
     "ssh.desktopOnly": "SSH 接続はデスクトップアプリでのみ利用できます。",
     "ssh.connectFail": "接続に失敗しました: {0}",
     "ssh.current": "接続中: {0}",
@@ -748,7 +749,8 @@ const STR = {
     "ssh.passwordSaved": "saved (type only to change)",
     "ssh.passwordClear": "Delete the saved password",
     "ssh.passwordHint": "The password is stored in ~/.familiar/secrets/ssh-*.pass (0600) and given to ssh through SSH_ASKPASS. The WebUI itself is plain HTTP — use it only on trusted networks.",
-    "ssh.passwordFirst": "Enter the password and press Save before testing.",
+    "ssh.passwordFirst": "Type the password and press Test — it is saved automatically first.",
+    "ssh.deleteFailed": "could not delete (profile not found)",
     "ssh.desktopOnly": "SSH connections are available in the desktop app only.",
     "ssh.connectFail": "Connection failed: {0}",
     "ssh.current": "Connected: {0}",
@@ -4585,6 +4587,7 @@ async function renderConnectionsSection(content, stale = () => false) {
     connect.addEventListener("click", async () => {
       connect.disabled = true;
       try {
+        await saveTypedPassword();
         const res = await api.connectProfile(pr.id, { newSession: false });
         if (res && res.url && res.token) {
           location.href = buildTunnelUrl(res, {});
@@ -4609,7 +4612,8 @@ async function renderConnectionsSection(content, stale = () => false) {
     del.addEventListener("click", async () => {
       if (!window.confirm(t("ssh.deleteConfirm", pr.name))) return;
       try {
-        await api.deleteConnection(pr.id);
+        const res = await api.deleteConnection(pr.id);
+        if (res && res.ok === false) throw new Error(t("ssh.deleteFailed"));
         if (sshEditId === pr.id) sshEditId = null;
         toast(t("ssh.deleted", pr.name), "ok");
         renderSettingsSection("connections");
@@ -4643,6 +4647,9 @@ async function renderConnectionsSection(content, stale = () => false) {
   pw.input.type = "password";
   pw.input.autocomplete = "new-password";
   pw.wrap.hidden = authMode.input.value !== "password";
+  const pwNote = document.createElement("div");
+  pwNote.className = "files-note";
+  pwNote.textContent = t("ssh.passwordHint");
   let clearPassword = false;
   const pwClear = document.createElement("button");
   pwClear.type = "button";
@@ -4655,9 +4662,13 @@ async function renderConnectionsSection(content, stale = () => false) {
     pw.input.placeholder = t("ssh.passwordSaved");
     pwClear.hidden = true;
   });
-  authMode.input.addEventListener("change", () => {
-    pw.wrap.hidden = authMode.input.value !== "password";
-  });
+  const syncAuthFields = () => {
+    const isPw = authMode.input.value === "password";
+    pw.wrap.hidden = !isPw;
+    pwNote.hidden = !isPw;
+    pwClear.hidden = !isPw || !editing?.hasPassword;
+  };
+  authMode.input.addEventListener("change", syncAuthFields);
   const key = sshField(t("ssh.key"), editing?.identityFile ?? "", "~/.ssh/id_ed25519");
   const bin = sshField(t("ssh.remoteBin"), editing?.remoteBin ?? "", "familiar");
   form.append(name.wrap, host.wrap, user.wrap, port.wrap, mode.wrap, authMode.wrap, pw.wrap, key.wrap, bin.wrap);
@@ -4703,6 +4714,19 @@ async function renderConnectionsSection(content, stale = () => false) {
       fresult.style.color = "var(--err)";
     }
   });
+  /** The secret is read from disk, so a typed password must be saved first. */
+  const saveTypedPassword = async () => {
+    if (authMode.input.value === "password" && pw.input.value !== "") {
+      await api.saveConnection(draft());
+      pw.input.value = "";
+      pw.input.placeholder = t("ssh.passwordSaved");
+      pwClear.hidden = false;
+    }
+  };
+  const testProfile = () => {
+    const { password: _pw, ...rest } = draft();
+    return rest;
+  };
   const test = document.createElement("button");
   test.type = "button";
   test.className = "ghost";
@@ -4716,7 +4740,8 @@ async function renderConnectionsSection(content, stale = () => false) {
     fresult.textContent = t("ssh.testing");
     fresult.style.color = "var(--dim)";
     try {
-      const r = await api.testConnection(draft());
+      await saveTypedPassword();
+      const r = await api.testConnection(testProfile());
       fresult.textContent = t("ssh.testOk", r.hostname, r.platform, r.version || r.familiar || "?");
       fresult.style.color = "var(--ok)";
       hostKeyBox.hidden = true;
@@ -4725,7 +4750,13 @@ async function renderConnectionsSection(content, stale = () => false) {
       fresult.textContent = t("ssh.testFail", msg);
       fresult.style.color = "var(--err)";
       let hint = sshErrorHint(msg);
-      if (/Permission denied|publickey/i.test(msg) && authMode.input.value === "password" && pw.input.value === "" && !editing?.hasPassword) {
+      if (/Permission denied|publickey/i.test(msg) && authMode.input.value === "key") {
+        // no key on this machine: offer the password path right here
+        authMode.input.value = "password";
+        syncAuthFields();
+        pw.input.focus();
+        hint = t("ssh.passwordFirst");
+      } else if (/Permission denied|publickey/i.test(msg) && authMode.input.value === "password" && !editing?.hasPassword && pw.input.value === "") {
         hint = t("ssh.passwordFirst");
       }
       if (/host key is known|Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED/i.test(msg)) {
@@ -4751,12 +4782,8 @@ async function renderConnectionsSection(content, stale = () => false) {
   hostKeyBtn.textContent = t("ssh.hostKeyBtn");
   hostKeyBtn.addEventListener("click", () => void showHostKeyPanel(draftTarget(), hostKeyBox, fresult));
   form.appendChild(sshActionRow([save, test, cancel, hostKeyBtn, pwClear, fresult]));
-  if (pw.wrap.parentElement) {
-    const note = document.createElement("div");
-    note.className = "files-note";
-    note.textContent = t("ssh.passwordHint");
-    pw.wrap.parentElement.insertBefore(note, pw.wrap.nextSibling);
-  }
+  pwNote.hidden = authMode.input.value !== "password";
+  if (pw.wrap.parentElement) pw.wrap.parentElement.insertBefore(pwNote, pw.wrap.nextSibling);
   form.appendChild(hostKeyBox);
   put(form);
 }
@@ -5341,7 +5368,7 @@ const connState = {
 const rpcConnApi = {
   connections: () => rpc("conn.list"),
   saveConnection: (profile) => rpc("conn.save", profile),
-  deleteConnection: (id) => rpc("conn.delete", id),
+  deleteConnection: (id) => rpc("conn.delete", { id }),
   testConnection: (profile) =>
     rpc("conn.test", typeof profile === "string" ? { id: profile } : { profile }),
   connectProfile: (id, opts) => rpc("conn.connect", { id, ...(opts ?? {}) }),

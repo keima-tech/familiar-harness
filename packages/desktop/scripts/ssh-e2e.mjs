@@ -882,6 +882,62 @@ try {
   check(pwForm?.ok === true, "the settings form saves password profiles");
   await evalOnce(`closeSettingsModal(); 1`);
 
+  // typing a password and pressing Test must save it first, then connect
+  const pwAutoSave = await evalOnce(`(async () => {
+    connApiOverride = rpcConnApi;
+    try {
+      openSettingsModal("connections");
+      await new Promise((r) => setTimeout(r, 600));
+      const inputs = () => [...document.querySelectorAll("#settings-content .ssh-field input")];
+      inputs()[0].value = "PW auto";
+      inputs()[1].value = "pw4";
+      inputs()[2].value = "tester";
+      const authSel = [...document.querySelectorAll("#settings-content .ssh-field select")]
+        .find((x) => [...x.options].some((o) => o.value === "password"));
+      authSel.value = "password";
+      authSel.dispatchEvent(new Event("change"));
+      inputs().find((i) => i.type === "password").value = "s3cret";
+      // click the FORM's test button (the first match is a row-level one)
+      const form = document.querySelector("#settings-content > .card:last-of-type");
+      const fout = () => form.querySelector(".conn-result")?.textContent ?? "";
+      [...form.querySelectorAll(".conn-actions button")]
+        .find((b) => /接続テスト|test/i.test(b.textContent))
+        .click();
+      for (let i = 0; i < 80; i++) {
+        await new Promise((r) => setTimeout(r, 250));
+        if (fout().includes("✓") || fout().includes("✗")) break;
+      }
+      const list = await rpcConnApi.connections();
+      const saved = list.connections.find((x) => x.host === "pw4");
+      return { result: fout(), hasPassword: !!saved?.hasPassword, id: saved?.id ?? "" };
+    } finally {
+      connApiOverride = null;
+    }
+  })()`);
+  check(
+    pwAutoSave?.result?.includes("✓") && pwAutoSave?.hasPassword === true,
+    "typing a password and testing saves it first",
+    JSON.stringify(pwAutoSave).slice(0, 200),
+  );
+  await evalOnce(`closeSettingsModal(); 1`);
+
+  // deleting a profile through the RPC layer removes it and its secret
+  const pw4Secret = path.join(
+    localHome,
+    "secrets",
+    `ssh-${crypto.createHash("sha256").update("tester@pw4:22").digest("hex").slice(0, 16)}.pass`,
+  );
+  const delResult = await evalOnce(`(async () => {
+    await rpcConnApi.deleteConnection(${JSON.stringify(pwAutoSave?.id ?? "")});
+    const list = await rpcConnApi.connections();
+    return { gone: !list.connections.some((x) => x.host === "pw4") };
+  })()`);
+  check(
+    delResult?.gone === true && !fs.existsSync(pw4Secret),
+    "deleting a profile removes it and its stored password",
+    JSON.stringify(delResult),
+  );
+
   // ---- host-key verification (ssh-keyscan fingerprints → known_hosts) ------
   const knownHostsFile = path.join(base, "known_hosts");
   const scan = await evalOnce(`rpc("conn.hostkey", { host: "remote1", port: 22 })`);

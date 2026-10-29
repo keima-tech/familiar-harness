@@ -985,6 +985,60 @@ server:
   serveP.kill("SIGTERM");
 }
 
+// ---------------------------------------------------------------------------
+// Scenario Q: bash approval tiers (allow / ask / deny)
+// ---------------------------------------------------------------------------
+console.log("— scenario Q: bash approval tiers —");
+{
+  // safe commands run with no approval at all now (mode: "allow")
+  const q1 = await run(
+    ["run", "-p", "@bash echo familiar-policy-ok", "--cwd", project, "--json"],
+    project,
+    familiarHome,
+  );
+  const r1 = q1.parsed.find((e) => e?.type === "tool.result" && e.name === "bash");
+  assert(
+    !!r1 && r1.isError !== true && String(r1.content).includes("familiar-policy-ok"),
+    "safe commands run without approval",
+    JSON.stringify(r1).slice(0, 200),
+  );
+
+  // destructive but approvable: headless (deny adapter) refuses…
+  const q2 = await run(
+    ["run", "-p", "@bash rm -rf /tmp/familiar-policy-nope", "--cwd", project, "--json"],
+    project,
+    familiarHome,
+  );
+  const r2 = q2.parsed.find((e) => e?.type === "tool.result" && e.name === "bash");
+  assert(
+    !!r2 && r2.isError === true && /denied by user\/policy/.test(String(r2.content)),
+    "rm -rf asks (headless denies)",
+    JSON.stringify(r2).slice(0, 200),
+  );
+
+  // …and --yolo approves it (it is not hard-blocked)
+  const q3 = await run(
+    ["run", "-p", "@bash rm -rf /tmp/familiar-policy-nope", "--cwd", project, "--json", "--yolo"],
+    project,
+    familiarHome,
+  );
+  const r3 = q3.parsed.find((e) => e?.type === "tool.result" && e.name === "bash");
+  assert(!!r3 && r3.isError !== true, "an approved rm -rf runs", JSON.stringify(r3).slice(0, 200));
+
+  // catastrophic disk writes stay blocked even under --yolo
+  const q4 = await run(
+    ["run", "-p", "@bash mkfs.ext4 /dev/sda1", "--cwd", project, "--json", "--yolo"],
+    project,
+    familiarHome,
+  );
+  const r4 = q4.parsed.find((e) => e?.type === "tool.result" && e.name === "bash");
+  assert(
+    !!r4 && r4.isError === true && /deny/.test(String(r4.content)),
+    "unrecoverable commands are hard-blocked",
+    JSON.stringify(r4).slice(0, 200),
+  );
+}
+
 console.log(
   failures === 0 ? "\nsmoke: all checks passed" : `\nsmoke: ${failures} failure(s)`,
 );

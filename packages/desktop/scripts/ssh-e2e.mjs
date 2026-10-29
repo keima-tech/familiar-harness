@@ -1173,6 +1173,84 @@ try {
   check(uiRows?.rows === 2 && fs.readFileSync(knownHostsFile, "utf8").includes("keyscan-ui"), "the settings form verifies and trusts keys", JSON.stringify(uiRows));
   await evalOnce(`closeSettingsModal(); 1`);
 
+  // ---- UI polish: empty state, target badges, queue, code copy --------------
+  const emptyState = await evalOnce(`(async () => {
+    const created = await rpc("session.create", { cwd: ${JSON.stringify(repoRoot)} });
+    await openSession(created.id);
+    await new Promise((r) => setTimeout(r, 400));
+    const before = document.querySelectorAll("#transcript .empty-state").length;
+    document.querySelector("#input").value = "hello there";
+    await send();
+    await new Promise((r) => setTimeout(r, 900));
+    return {
+      before,
+      after: document.querySelectorAll("#transcript .empty-state").length,
+      bubbles: document.querySelectorAll("#transcript .msg.user").length,
+      logo: !!document.querySelector("#transcript .empty-state") || true,
+    };
+  })()`);
+  check(
+    emptyState?.before === 1 && emptyState?.after === 0 && emptyState?.bubbles >= 1,
+    "the empty-state placeholder disappears on the first message",
+    JSON.stringify(emptyState),
+  );
+
+  const badge = await evalOnce(`(async () => {
+    const local = await rpc("session.create", { cwd: ${JSON.stringify(remoteWork)} });
+    const proxy = await rpc("session.create", { cwd: ${JSON.stringify(remoteWork)}, ssh: { host: "proxy1", user: "tester" } });
+    await refreshSessions();
+    await new Promise((r) => setTimeout(r, 400));
+    const rows = [...document.querySelectorAll("#sessions .folder-row")]
+      .filter((r) => r.dataset.cwd === ${JSON.stringify(remoteWork)})
+      .map((r) => ({ target: r.dataset.target, badge: r.querySelector(".ftarget")?.textContent.trim() ?? "", count: r.querySelector(".fcount")?.textContent ?? "" }));
+    return { rows, localId: local.id, proxyId: proxy.id };
+  })()`);
+  const badgeTargets = (badge?.rows ?? []).map((r) => r.target).sort();
+  check(
+    badge?.rows?.length === 2 &&
+      badgeTargets[0] === "local" &&
+      badgeTargets[1] === "tester@proxy1" &&
+      badge.rows.some((r) => r.badge.includes("ローカル")) &&
+      badge.rows.some((r) => r.badge.includes("tester@proxy1")),
+    "folder groups distinguish local from SSH targets",
+    JSON.stringify(badge?.rows),
+  );
+
+  const queue = await evalOnce(`(async () => {
+    state.busy = true;
+    document.querySelector("#input").value = "queued instruction";
+    await send();
+    const chips = [...document.querySelectorAll("#queue-strip .queue-chip")].map((c) => c.textContent.trim());
+    const hidden = document.querySelector("#queue-strip").hidden;
+    state.busy = false;
+    drainQueue();
+    await new Promise((r) => setTimeout(r, 1800));
+    return {
+      chips,
+      hidden,
+      after: document.querySelectorAll("#queue-strip .queue-chip").length,
+      bubbles: document.querySelectorAll("#transcript .msg.user").length,
+    };
+  })()`);
+  check(queue?.chips?.length === 1 && queue?.hidden === false, "typing while busy queues the instruction", JSON.stringify(queue));
+  check(queue?.after === 0 && queue?.bubbles >= 2, "the queue drains once the turn ends", JSON.stringify(queue));
+
+  const copyCheck = await evalOnce(`(async () => {
+    const fence = String.fromCharCode(96).repeat(3);
+    appendMessage("assistant", fence + "js" + String.fromCharCode(10) + "const x = 1;" + String.fromCharCode(10) + fence);
+    await new Promise((r) => setTimeout(r, 150));
+    const btn = document.querySelector("#transcript .code-copy");
+    if (!btn) return { err: "no copy button" };
+    btn.click();
+    await new Promise((r) => setTimeout(r, 400));
+    return { text: btn.textContent, copied: btn.classList.contains("copied") };
+  })()`);
+  check(
+    copyCheck?.copied === true || copyCheck?.text === "✓",
+    "the code-block copy button works on live messages",
+    JSON.stringify(copyCheck),
+  );
+
   // ---- EN mode: every new string is translated (no CJK fallback) -----------
   const cjk = await evalOnce(`(() => {
     setLang("en");

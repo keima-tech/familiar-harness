@@ -74,13 +74,18 @@ profiles: {}               # name → { system_prompt_file } (M2)
 
 permissions:
   bash:
-    allow:                 # 先頭一致 or 正規表現文字列
+    mode: allow            # allow(既定)=ask/deny 以外は承認なしで実行 / ask=旧来の毎回承認
+    allow:                 # 先頭一致 or 正規表現文字列(高速パス)
       - "^git (status|diff|log|show)"
       - "^node --version"
       - "^npm (run|test)"
-    deny:
-      - "^sudo"
-      - "rm -rf"
+    ask:                   # 承認が必要なパターン(破壊的・外部送信系)
+      - "\\brm\\s+(-[a-zA-Z]+\\s+)*-[a-zA-Z]*[rR]"   # rm -r / -rf
+      - "^\\s*(sudo|doas)\\b"
+      - "\\bgit\\s+(push\\b.*--force|reset\\s+--hard|clean\\s+-[a-zA-Z]*f)"
+      - "\\b(curl|wget)\\b[^|;]*(\\s-d\\s|--data|\\s-F\\s|--form|--upload-file)"
+    deny:                  # 無条件ブロック(--yolo でも不可)
+      - ">\\s*/dev/(sd|nvme|mmcblk)"
     max_timeout_ms: 600000
   files:
     bounds: cwd            # cwd | unrestricted(write/edit の系団・制限)
@@ -93,10 +98,13 @@ permissions:
     provider: searxng
     base_url: ""           # 例: http://127.0.0.1:8080 (未設定なら websearch ツールはエラー+ヒント)
 context:
-  token_soft_limit: 81920  # 推定(chars/4)超過で compaction ガード発動
+  token_soft_limit: 0      # 絶対トークン上限で圧縮をかけたい場合のみ(0 = 無効)
   keep_last: 10            # compaction で残す直近メッセージ数
   compaction:              # M4: 上限超過時の挙動
     mode: summarize        # summarize=aux 補正機(auxiliary.compactor 未設定ならメインモデル・失敗時 drop にフォールバック) / drop=伏字無しで削除
+    ratio: 0.9             # モデルのコンテキストウィンドウの 90% で圧縮を発動
+# 圧縮の判定は「直前ターンの実測 promptTokens」(履歴に保存)と文字数推定の大きい方を使う。
+# モデルのウィンドウは models.list の結果から学習(GUI が取得済みなら即利用、未取得なら背景で取得)。
 
 server:
   port: 46210

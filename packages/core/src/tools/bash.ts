@@ -55,8 +55,9 @@ export function createBashTool(): Tool {
         },
       );
       if (!outcome.approved) {
+        const why = outcome.reason ? ` (${outcome.reason})` : "";
         return {
-          content: `[denied by user/policy] ${command}`,
+          content: `[denied by user/policy]${why} ${command}`,
           isError: true,
         };
       }

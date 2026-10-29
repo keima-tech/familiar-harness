@@ -34,7 +34,7 @@ export class DenyApprovalAdapter implements ApprovalAdapter {
 export type CommandDecision =
   | { action: "allow" }
   | { action: "deny"; reason: string }
-  | { action: "ask" };
+  | { action: "ask"; reason?: string };
 
 function buildRegex(pattern: string): RegExp | null {
   try {
@@ -46,35 +46,51 @@ function buildRegex(pattern: string): RegExp | null {
 
 const REGEX_META = /[\\^$.*+?()[\]{}|]/;
 
-function matchesAny(command: string, patterns: string[]): boolean {
-  for (const p of patterns) {
-    // documented as "prefix match OR regular expression"
-    if (command.startsWith(p)) return true;
+/** First pattern that matches (documented as "prefix match OR regex"), if any. */
+function firstMatch(command: string, patterns: string[] | undefined): string | null {
+  for (const p of patterns ?? []) {
+    if (command.startsWith(p)) return p;
     if (REGEX_META.test(p)) {
       const re = buildRegex(p);
-      if (re && re.test(command)) return true;
+      if (re && re.test(command)) return p;
     }
   }
-  return false;
+  return null;
+}
+
+function matchesAny(command: string, patterns: string[] | undefined): boolean {
+  return firstMatch(command, patterns) !== null;
 }
 
 /**
- * bash command policy. Deny wins over allow; anything unmatched wants a human.
+ * bash command policy. `deny` is a hard block (never approvable), `ask` needs
+ * the human, and `mode` decides what happens to everything else: "allow"
+ * (default) runs it, "ask" keeps the legacy every-command-needs-approval
+ * behavior.
  */
 export function commandDecision(
   command: string,
   cfg: BashPermissionConfig,
 ): CommandDecision {
-  if (matchesAny(command, cfg.deny)) {
-    return { action: "deny", reason: "command matches deny pattern" };
+  const denied = firstMatch(command, cfg.deny);
+  if (denied !== null) {
+    return { action: "deny", reason: `blocked by permissions.bash.deny: ${denied}` };
+  }
+  const risky = firstMatch(command, cfg.ask);
+  if (risky !== null) {
+    return { action: "ask", reason: `needs approval (risky pattern: ${risky})` };
   }
   if (matchesAny(command, cfg.allow)) return { action: "allow" };
-  return { action: "ask" };
+  return cfg.mode === "ask"
+    ? { action: "ask", reason: "needs approval (permissions.bash.mode: ask)" }
+    : { action: "allow" };
 }
 
 export interface ApprovalOutcome {
   approved: boolean;
   via: "policy-allow" | "policy-deny" | "yolo" | "adapter";
+  /** why the policy decided this (deny reason / risky pattern) */
+  reason?: string;
 }
 
 /** Shared gate: policy → yolo → human adapter. */
@@ -83,12 +99,19 @@ export async function approveOrDeny(
   request: ApprovalRequest,
   opts: { command: string; bashCfg?: BashPermissionConfig; yolo: boolean; approval: ApprovalAdapter },
 ): Promise<ApprovalOutcome> {
+  let askRequest = request;
   if (opts.bashCfg) {
     const decision = commandDecision(opts.command, opts.bashCfg);
     if (decision.action === "allow") return { approved: true, via: "policy-allow" };
-    if (decision.action === "deny") return { approved: false, via: "policy-deny" };
+    if (decision.action === "deny") {
+      return { approved: false, via: "policy-deny", reason: decision.reason };
+    }
+    // tell the human *why* this one is being asked
+    if (decision.reason !== undefined && request.detail === undefined) {
+      askRequest = { ...request, detail: decision.reason };
+    }
   }
   if (opts.yolo) return { approved: true, via: "yolo" };
-  const approved = await opts.approval.request(request);
+  const approved = await opts.approval.request(askRequest);
   return { approved, via: "adapter" };
 }

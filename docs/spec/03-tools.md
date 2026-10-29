@@ -93,9 +93,11 @@ type ToolOutput = { content: string; isError?: boolean };
 
 - シェル: `resolveShellCommand()`(Windows: PowerShell / それ以外: bash)。
 - stdout+stderr 結合、上限 256KB(超過で末尾を残す)。
-- **承認**: `config.permissions.bash.allow`(先頭一致 or 正規表現)で OK / `deny` で拒否 /
-  それ以外は ApprovalAdapter(desktop はダイアログ、CLI は y/n プロンプト、非対話は拒否)。
-  `yolo` で全許可。
+- **承認(3 層)**: `deny`(無条件ブロック。`yolo` でも不可) → `ask`(ApprovalAdapter 経由:
+  desktop はダイアログ、CLI は y/n、非対話は拒否) → `allow`(承認なしで実行)。
+  `permissions.bash.mode` は `allow`(既定: ask/deny 以外はそのまま実行)または
+  `ask`(旧来: 未一致は毎回承認)。`rm -rf` などの破壊的コマンドは `ask`(承認すれば実行)、
+  `> /dev/sd*` などの復旧不能なものだけが `deny`。`yolo` は ask を自動承認する。
 
 ## 3. 承認フロー
 

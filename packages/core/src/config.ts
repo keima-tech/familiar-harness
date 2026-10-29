@@ -32,8 +32,21 @@ export interface ProviderConfig {
   stream_options?: boolean;
 }
 
+/**
+ * Three tiers, checked in this order:
+ *   deny  → hard block (never approvable, not even with --yolo)
+ *   ask   → human approval (destructive / data-leaving commands)
+ *   allow → runs without approval; with `mode: "allow"` this also covers
+ *           anything that matches neither deny nor ask (the default)
+ */
 export interface BashPermissionConfig {
+  /** "allow" (default): auto-run unless ask/deny matches. "ask": legacy. */
+  mode: "allow" | "ask";
+  /** fast-path allowlist (prefix or regular expression) */
   allow: string[];
+  /** patterns that require human approval */
+  ask: string[];
+  /** patterns that are blocked outright */
   deny: string[];
   max_timeout_ms: number;
 }
@@ -155,6 +168,12 @@ export interface AuxiliarySlot {
 export interface CompactionConfig {
   /** drop: remove old messages / summarize: aux model writes a durable note */
   mode: "drop" | "summarize";
+  /**
+   * Trigger compaction once the prompt reaches this fraction of the model's
+   * context window (0.9 = 90%). Ignored when the window is unknown — then
+   * `token_soft_limit` (or the built-in fallback) decides.
+   */
+  ratio: number;
 }
 
 export interface ResolvedConfig {
@@ -182,7 +201,13 @@ export interface ResolvedConfig {
   lsp: LspConfig;
   /** uploaded composer attachments (~/.familiar/uploads) */
   uploads: { retention_days: number };
-  context: { token_soft_limit: number; keep_last: number; compaction: CompactionConfig };
+  context: {
+    /** absolute prompt-token cap that also triggers compaction (0 = off) */
+    token_soft_limit: number;
+    /** how many trailing messages survive a compaction */
+    keep_last: number;
+    compaction: CompactionConfig;
+  };
   server: { port: number; bind: string; auth_token_file?: string };
   /** GUI-configured integrations (Jira / Confluence / Redmine connectors). */
   connectors?: Record<string, Record<string, unknown>>;
@@ -241,13 +266,48 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
   profiles: {},
   permissions: {
     bash: {
+      mode: "allow",
       allow: [
         "^git (status|diff|log|show|branch|remote|tag|rev-parse|shortlog|worktree)( .*)?$",
         "^node --version$",
         "^npm --version$",
         "^python3 --version$",
       ],
-      deny: ["^sudo\\b", "\\brm\\s+(-[a-z]+\\s+)*-[rf]r?f?", ">\\s*/dev/(sd|nvme)"],
+      // Destructive or data-leaving commands ask the human. Everything else
+      // runs straight away (mode: "allow"), so approvals stay rare.
+      ask: [
+        // destructive filesystem work
+        "\\brm\\s+(-[a-zA-Z]+\\s+)*-[a-zA-Z]*[rR]",
+        "\\brm\\s+(-[a-zA-Z]+\\s+)*-[a-zA-Z]*f",
+        "\\bdd\\b",
+        "^mkfs",
+        "\\bshred\\b",
+        "\\bchmod\\s+(-[a-zA-Z]+\\s+)*-R\\b",
+        "\\bchown\\s+(-[a-zA-Z]+\\s+)*-R\\b",
+        "\\bmv\\b.*\\s/(bin|boot|etc|lib|sbin|usr|var)(/|\\s|$)",
+        ">\\s*/(etc|boot|usr|var|bin|sbin|lib)(/|\\s|$)",
+        // system state
+        "^\\s*(sudo|doas)\\b",
+        "^\\s*(shutdown|reboot|poweroff|halt)\\b",
+        "\\bsystemctl\\s+(stop|disable|mask|poweroff|reboot)\\b",
+        "^\\s*(iptables|nft|ufw)\\b",
+        "\\bcrontab\\b",
+        "\\bkill\\s+(-[0-9]+\\s+)*-9\\b",
+        "\\bpkill\\s+(-[0-9]+\\s+)*-9\\b",
+        // package / container / git destructive
+        "\\b(apt|apt-get|dnf|yum|pacman)\\s+(remove|purge|autoremove|upgrade|dist-upgrade)\\b",
+        "\\bdocker\\s+(system\\s+prune|volume\\s+(rm|prune))\\b",
+        "\\bgit\\s+(push\\b.*--force|reset\\s+--hard|clean\\s+-[a-zA-Z]*f)",
+        // data leaving the machine
+        "\\b(curl|wget)\\b[^|;]*(\\s-d\\s|--data|\\s-F\\s|--form|--upload-file)",
+        "\\b(nc|ncat|netcat)\\b",
+        "\\bscp\\b",
+        "\\brsync\\b",
+        "\\bssh\\b.*\\s-R\\b",
+      ],
+      // Only the truly unrecoverable stays blocked (approve-able commands
+      // belong in `ask`).
+      deny: [">\\s*/dev/(sd|nvme|mmcblk)", "\\bmkfs[^|;]*\\s/dev/(sd|nvme|mmcblk)"],
       max_timeout_ms: 600_000,
     },
     files: { bounds: "cwd" },
@@ -273,7 +333,9 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
   cron: { jobs: [] },
   lsp: { servers: {} },
   uploads: { retention_days: 30 },
-  context: { token_soft_limit: 81_920, keep_last: 10, compaction: { mode: "summarize" } },
+  // Compaction fires at 90% of the model's context window by default;
+  // token_soft_limit stays available as an absolute cap (0 = off).
+  context: { token_soft_limit: 0, keep_last: 10, compaction: { mode: "summarize", ratio: 0.9 } },
   server: { port: 46_210, bind: "127.0.0.1" },
 };
 
@@ -797,8 +859,11 @@ curator:
 # 3つすべてが読める順に注入される(profiles.<p>.system_prompt_file で上書き可)。
 
 context:
-  token_soft_limit: 81920
+  token_soft_limit: 0            # 絶対上限で圧縮をかけたい場合のみ設定(0 = 無効)
   keep_last: 10
+  compaction:
+    mode: summarize
+    ratio: 0.9                   # モデルのコンテキストウィンドウの 90% で圧縮
   compaction:  # M4: over the soft limit, ask the aux compactor to write a note (fall back to drop)
     mode: summarize
 

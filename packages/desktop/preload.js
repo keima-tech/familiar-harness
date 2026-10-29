@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld("familiarDesktop", {
   onUpdateStatus: (cb) => {
     ipcRenderer.on("update:status", (_ev, st) => cb(st));
   },
+  /** Write text to the OS clipboard (code-block copy on plain-http pages). */
+  writeClipboard: (text) => ipcRenderer.invoke("app:clipboard", String(text ?? "")),
   /** Native desktop notification (turn finished / approval needed). */
   notify: (payload) => ipcRenderer.send("app:notify", payload),
   /** Open a file with the OS default application (file preview fallback). */

@@ -38,7 +38,12 @@ export interface JsonSchemaProperty {
 }
 
 export interface Usage {
+  /** prompt tokens of the LAST model call (the current context size) */
   promptTokens?: number;
+  /** prompt tokens summed over every step of the turn (cost view) */
+  totalPromptTokens?: number;
+  /** explicit alias for promptTokens (context gauge / compaction signal) */
+  contextTokens?: number;
   completionTokens?: number;
 }
 

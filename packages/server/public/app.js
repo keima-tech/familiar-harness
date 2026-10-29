@@ -102,6 +102,18 @@ const STR = {
     "top.gaugeTitle": "コンテキスト使用量 — クリックでセッション情報",
     "top.gaugeNoTurn": "コンテキスト使用量 — 次のターン送信後に表示",
     "side.noFolder": "フォルダーなし",
+    "side.local": "ローカル",
+    "queue.title": "送信待ち ({0})",
+    "queue.cancel": "この送信待ちを取り消す",
+    "queue.sendNow": "今すぐ送信(実行中のターンを停止)",
+    "queue.waiting": "実行中のため待機中",
+    "queue.queued": "送信待ちに追加しました ({0})",
+    "queue.otherDevice": "他の端末でターンが実行中です — 送信待ちに追加しました",
+    "composer.phBusy": "追加の指示を入力(このターンの終了後に送信されます)",
+    "usage.overNote": "コンテキストウィンドウを超えています — 次のターンで自動的に圧縮されます",
+    "msg.copyFailed": "コピーできませんでした — テキストを選択してコピーしてください",
+    "code.showAll": "すべて表示",
+    "code.collapse": "折りたたむ",
     "chip.ctx": "コンテキスト使用量",
     "update.available": "アップデートがあります — v{0}(⬇ から適用)",
     "update.downloading": "アップデートをダウンロード中…",
@@ -384,7 +396,7 @@ const STR = {
     "taskDone": "タスクが完了しました",
     "auth.required": "トークン認証が必要です",
     "auth.hint": "このサーバーはBearerトークンを要求しています。 familiar token --write で発行し、URL に ?token=... を付けて開き直してください。",
-    "home.title": "まだメッセージがありません",
+    "home.title": "このセッションで何をお手伝いしますか?",
     "home.hint": "何でも聞いてください — ファイルの読み取り・コマンド実行・コード編集ができます。",
     "approval.needed": "承認が必要: {0}",
     "approval.approve": "承認",
@@ -553,6 +565,18 @@ const STR = {
     "top.gaugeTitle": "context usage — click for session info",
     "top.gaugeNoTurn": "context usage — shown after the next turn is sent",
     "side.noFolder": "no folder",
+    "side.local": "local",
+    "queue.title": "Queued ({0})",
+    "queue.cancel": "Cancel this queued message",
+    "queue.sendNow": "Send now (stops the running turn)",
+    "queue.waiting": "waiting for the running turn",
+    "queue.queued": "queued ({0})",
+    "queue.otherDevice": "A turn is already running in another client — queued instead",
+    "composer.phBusy": "type to queue an instruction (sent after this turn)",
+    "usage.overNote": "Over the context window — the next turn compacts automatically",
+    "msg.copyFailed": "Copy failed — select the text and copy it manually",
+    "code.showAll": "show all",
+    "code.collapse": "collapse",
     "chip.ctx": "context usage",
     "update.available": "Update available — v{0} (apply from ⬇)",
     "update.downloading": "Downloading the update…",
@@ -835,7 +859,7 @@ const STR = {
     "taskDone": "Task completed",
     "auth.required": "Token authentication required",
     "auth.hint": "This server requires a bearer token. Generate one with `familiar token --write` and reopen the URL with ?token=...",
-    "home.title": "No messages yet",
+    "home.title": "What can I help you with in this session?",
     "home.hint": "Ask anything — familiar can read files, run commands, and edit code in this workspace.",
     "approval.needed": "approval needed: {0}",
     "approval.approve": "Approve",
@@ -1048,7 +1072,11 @@ function applyI18n() {
 
 /** Composer placeholder reflects the send-key preference. */
 function applyComposerPlaceholder() {
-  $("#input").placeholder = prefs.sendWithEnter ? t("composer.phEnter") : t("composer.phCtrl");
+  $("#input").placeholder = state.busy
+    ? t("composer.phBusy")
+    : prefs.sendWithEnter
+      ? t("composer.phEnter")
+      : t("composer.phCtrl");
 }
 
 // ---- md-render (pure, DOM-free; kept contiguous for headless unit tests) ----
@@ -1245,6 +1273,14 @@ function relTime(ts) {
 }
 
 async function copyText(text) {
+  // Electron: the shell writes to the OS clipboard directly (works even when
+  // the page is plain http:// on a LAN address, where navigator.clipboard is
+  // unavailable)
+  try {
+    if (typeof window.familiarDesktop?.writeClipboard === "function") {
+      if (await window.familiarDesktop.writeClipboard(text)) return true;
+    }
+  } catch { /* fall through to the web APIs */ }
   try {
     await navigator.clipboard.writeText(text);
     return true;
@@ -1308,6 +1344,8 @@ const state = {
   modelChipDefault: true,
   /** last user message text, used by the retry button (Hermes /retry). */
   lastUserText: "",
+  /** instructions typed while a turn runs; sent one by one after it ends */
+  queue: [],
 };
 
 const ns = {
@@ -1497,13 +1535,23 @@ function sessionLi(s) {
   li.dataset.cwd = s.cwd || "";
   const title = s.title || s.id.slice(0, 8);
   const model = s.model ? "/" + s.model : "";
+  const target = sessionTarget(s);
   const when = fmtTime(s.updatedAt);
+  li.dataset.target = target;
   li.innerHTML =
     `<div class="row-line"><span class="t">${esc(title)}</span>` +
     `<button class="del" data-id="${esc(s.id)}" title="delete session">✕</button></div>` +
-    `<span class="when" title="${esc(when)}">${esc(relTime(s.updatedAt))} · ${esc(s.provider)}${esc(model)}</span>`;
+    `<span class="when" title="${esc(when)}">${esc(relTime(s.updatedAt))} · ${esc(s.provider)}${esc(model)}${
+      target === "local" ? "" : ` · ssh:${esc(target)}`
+    }</span>`;
   if (s.id === state.sessionId) li.classList.add("active");
   return li;
+}
+
+/** Where a session runs: "local", or "user@host" for SSH (proxy) sessions. */
+function sessionTarget(s) {
+  if (!s?.remote) return "local";
+  return `${s.remote.user ? `${s.remote.user}@` : ""}${s.remote.host}`;
 }
 
 async function refreshSessions() {
@@ -1512,32 +1560,45 @@ async function refreshSessions() {
   ul.innerHTML = "";
   // Claude-desktop-style grouping: one collapsible folder (cwd) section,
   // newest folder first, newest session first within the folder.
+  // group by *target + folder*: the same path on the local machine and on an
+  // SSH host is a different workspace and must not merge
   const groups = new Map();
   for (const s of state.sessions) {
-    const key = s.cwd || "";
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(s);
+    const target = sessionTarget(s);
+    const key = `${target}|${s.cwd || ""}`;
+    if (!groups.has(key)) groups.set(key, { target, cwd: s.cwd || "", list: [] });
+    groups.get(key).list.push(s);
   }
   const sorted = [...groups.entries()].sort(
     (a, b) =>
-      Math.max(...b[1].map((x) => x.updatedAt ?? 0)) - Math.max(...a[1].map((x) => x.updatedAt ?? 0)),
+      Math.max(...b[1].list.map((x) => x.updatedAt ?? 0)) -
+      Math.max(...a[1].list.map((x) => x.updatedAt ?? 0)),
   );
   const folds = loadFolderFolds();
-  for (const [cwd, list] of sorted) {
-    list.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
-    const collapsed = folds[cwd] === true;
+  for (const [key, group] of sorted) {
+    group.list.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+    const collapsed = folds[key] === true;
+    const badge =
+      group.target === "local"
+        ? `<span class="ftarget local" title="${esc(t("side.local"))}">💻 ${esc(t("side.local"))}</span>`
+        : `<span class="ftarget remote" title="ssh: ${esc(group.target)}">🖥 ${esc(group.target)}</span>`;
     const head = document.createElement("li");
     head.className = "folder-row";
-    head.dataset.cwd = cwd;
-    head.title = cwd || t("side.noFolder");
+    head.dataset.cwd = group.cwd;
+    head.dataset.target = group.target;
+    head.dataset.key = key;
+    head.title = `${group.target === "local" ? t("side.local") : `ssh: ${group.target}`} — ${
+      group.cwd || t("side.noFolder")
+    }`;
     head.innerHTML =
       `<button class="folder-toggle" type="button">` +
       `<span class="chev">${collapsed ? "▸" : "▾"}</span>` +
-      `<span class="fname">📁 ${esc(baseName(cwd) || t("side.noFolder"))}</span>` +
-      `<span class="fcount">${list.length}</span></button>`;
+      `<span class="fname">📁 ${esc(baseName(group.cwd) || t("side.noFolder"))}</span>` +
+      badge +
+      `<span class="fcount">${group.list.length}</span></button>`;
     ul.appendChild(head);
     if (!collapsed) {
-      for (const s of list) ul.appendChild(sessionLi(s));
+      for (const s of group.list) ul.appendChild(sessionLi(s));
     }
   }
   applySessionFilter();
@@ -1561,7 +1622,7 @@ function applySessionFilter() {
   let visible = 0;
   const matchesQuery = (s) => {
     if (query === "") return true;
-    const hay = `${s.title ?? ""} ${s.provider ?? ""} ${s.model ?? ""}`.toLowerCase();
+    const hay = `${s.title ?? ""} ${s.provider ?? ""} ${s.model ?? ""} ${sessionTarget(s)}`.toLowerCase();
     return hay.includes(query);
   };
   for (const li of document.querySelectorAll("#sessions li[data-id]")) {
@@ -1572,7 +1633,9 @@ function applySessionFilter() {
   }
   // folder headers: hide when nothing inside matches; auto-expand while filtering
   for (const row of document.querySelectorAll("#sessions .folder-row")) {
-    const matches = state.sessions.filter((s) => (s.cwd || "") === row.dataset.cwd && matchesQuery(s));
+    const matches = state.sessions.filter(
+      (s) => (s.cwd || "") === row.dataset.cwd && sessionTarget(s) === row.dataset.target && matchesQuery(s),
+    );
     row.classList.toggle("filtered", query !== "" && matches.length === 0);
     if (query !== "" && matches.length > 0) {
       const chev = row.querySelector(".chev");
@@ -1720,11 +1783,13 @@ function setGaugeSvg(svg, used, win) {
   }
   bar.style.display = "";
   if (win) {
-    const pct = Math.min(1, used / win);
+    const ratio = used / win;
     const c = 2 * Math.PI * 8;
     bar.style.strokeDasharray = `${c}`;
-    bar.style.strokeDashoffset = `${c * (1 - pct)}`;
-    if (textEl) textEl.textContent = `${Math.round(pct * 100)}%`;
+    bar.style.strokeDashoffset = `${c * (1 - Math.min(1, ratio))}`;
+    // the ring clamps at 100% but the number tells the truth
+    if (textEl) textEl.textContent = `${Math.round(ratio * 100)}%`;
+    svg.classList.toggle("over", ratio >= 1);
   } else {
     bar.style.strokeDashoffset = `${2 * Math.PI * 8 * 0.5}`;
     if (textEl) textEl.textContent = formatTokens(used);
@@ -1746,9 +1811,13 @@ function renderTopbarGauge() {
   if (win) {
     const pct = Math.round((used / win) * 100);
     pctEl.textContent = `${pct}%`;
-    btn.title = `${t("chip.ctx")}: ${approx}${formatTokens(used)} / ${formatTokens(win)} tok${winNote} (${pct}%)`;
+    btn.classList.toggle("over", used >= win);
+    btn.title =
+      `${t("chip.ctx")}: ${approx}${formatTokens(used)} / ${formatTokens(win)} tok${winNote} (${pct}%)` +
+      (used >= win ? ` — ${t("usage.overNote")}` : "");
   } else {
     pctEl.textContent = formatTokens(used);
+    btn.classList.remove("over");
     btn.title = `${t("chip.ctx")}: ${approx}${formatTokens(used)} tok`;
   }
 }
@@ -1778,9 +1847,14 @@ function renderCtxPane() {
     note.textContent = t("ctx.noteEstimated");
   } else if (!win) {
     note.textContent = t("ctx.noteNoWindow");
+  } else if (used >= win) {
+    note.textContent = `${t("ctx.noteHint", formatTokens(used), formatTokens(win))} — ${t("usage.overNote")}`;
   } else {
     note.textContent = t("ctx.noteHint", formatTokens(used), formatTokens(win));
   }
+  note.classList.toggle("over", used !== undefined && !!win && used >= win);
+  $("#ctx-btn").classList.toggle("over", used !== undefined && !!win && used >= win);
+  $("#ctx-head-pct").classList.toggle("over", used !== undefined && !!win && used >= win);
 }
 
 /** The context tab inside the right pane (same numbers, card layout). */
@@ -2069,14 +2143,20 @@ function emptyStateNode() {
   const div = document.createElement("div");
   div.className = "empty-state";
   div.innerHTML = `
-    <div class="glyph">◍</div>
+    <div class="glyph"><img src="/icon-192.png" alt="" /></div>
     <h3>${esc(t("home.title"))}</h3>
     <div class="hint">${esc(t("home.hint"))}</div>`;
   return div;
 }
 
+/** The placeholder must not survive the first real message of a live turn. */
+function dropEmptyState() {
+  $("#transcript")?.querySelector(".empty-state")?.remove();
+}
+
 /** User / assistant bubbles. opts: { reasoning, footBits, foot } */
 function appendMessage(role, content, toolCalls, opts = {}) {
+  dropEmptyState();
   const tr = $("#transcript");
   const div = document.createElement("div");
   div.className = `msg ${role}`;
@@ -2095,7 +2175,6 @@ function appendMessage(role, content, toolCalls, opts = {}) {
     contentEl.innerHTML = mdRender(content);
     bubble.appendChild(contentEl);
     if (opts.foot !== false) addMsgFooter(bubble, String(content ?? ""), opts.footBits);
-    wireCodeButtons(div);
   } else {
     const imgs = Array.isArray(opts.attachments) ? opts.attachments : [];
     if (imgs.length > 0) {
@@ -2178,27 +2257,6 @@ function addMsgFooter(bubbleNode, raw, bits) {
       }, 1200);
     });
   });
-}
-
-function wireCodeButtons(scope) {
-  for (const btn of scope.querySelectorAll("button.code-copy:not([data-wired])")) {
-    btn.dataset.wired = "1";
-    btn.addEventListener("click", () => {
-      const code = btn.closest(".codeblock")?.querySelector("pre code");
-      void copyText(code?.textContent ?? "").then((ok) => {
-        btn.textContent = ok ? "✓" : "✕";
-        setTimeout(() => (btn.textContent = "⧉"), 1200);
-      });
-    });
-  }
-  for (const btn of scope.querySelectorAll("button.code-expand:not([data-wired])")) {
-    btn.dataset.wired = "1";
-    btn.addEventListener("click", () => {
-      const block = btn.closest(".codeblock");
-      block.classList.toggle("collapsed");
-      btn.textContent = block.classList.contains("collapsed") ? "show all" : "collapse";
-    });
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2476,6 +2534,7 @@ function diffHtml(diff) {
 }
 
 function appendToolCard(name, args, resultContent, status, opts = {}) {
+  dropEmptyState();
   const tr = $("#transcript");
   const wrap = document.createElement("div");
   wrap.className = `toolwrap ${status === "err" ? "is-error" : status === "run" ? "is-run" : ""}`;
@@ -2620,9 +2679,10 @@ function setBusy(busy) {
   state.busy = busy;
   if (!busy) state.busySessionId = null;
   $("#send").disabled = false; // the send button doubles as the stop button
-  $("#input").disabled = busy;
+  $("#input").disabled = false; // always typeable: Enter queues while busy
   $("#turn-spinner").hidden = !busy;
   refreshSendButton();
+  applyComposerPlaceholder();
   if (busy) {
     state.turnStartedAt = Date.now();
     if (state.turnTimer) clearInterval(state.turnTimer);
@@ -2643,7 +2703,72 @@ function setBusy(busy) {
     } else {
       $("#turn-label").textContent = "";
     }
+    // instructions typed during the turn go out now (one at a time)
+    window.setTimeout(() => drainQueue(), 0);
   }
+}
+
+/** Pending instructions rendered above the composer. */
+function renderQueueStrip() {
+  const strip = $("#queue-strip");
+  if (!strip) return;
+  strip.innerHTML = "";
+  strip.hidden = state.queue.length === 0;
+  state.queue.forEach((item, idx) => {
+    const chip = document.createElement("div");
+    chip.className = "queue-chip";
+    chip.title = item.text;
+    const text = document.createElement("span");
+    text.className = "q-text";
+    text.textContent = item.text.length > 80 ? `${item.text.slice(0, 80)}…` : item.text;
+    chip.appendChild(text);
+    if (item.otherDevice) {
+      const note = document.createElement("small");
+      note.textContent = t("queue.waiting");
+      chip.appendChild(note);
+    }
+    const sendNow = document.createElement("button");
+    sendNow.type = "button";
+    sendNow.className = "ghost";
+    sendNow.textContent = "⚡";
+    sendNow.title = t("queue.sendNow");
+    sendNow.addEventListener("click", () => interruptQueued(idx));
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "ghost";
+    del.textContent = "✕";
+    del.title = t("queue.cancel");
+    del.addEventListener("click", () => {
+      state.queue.splice(idx, 1);
+      renderQueueStrip();
+    });
+    chip.append(sendNow, del);
+    strip.appendChild(chip);
+  });
+}
+
+function enqueueMessage(text, atts, opts = {}) {
+  state.queue.push({ text, atts, ...(opts.otherDevice ? { otherDevice: true } : {}) });
+  renderQueueStrip();
+  toast(t(opts.otherDevice ? "queue.otherDevice" : "queue.queued", String(state.queue.length)), "info");
+}
+
+/** Send the next queued instruction once nothing is running. */
+function drainQueue() {
+  if (state.busy || state.queue.length === 0) return;
+  const item = state.queue.shift();
+  renderQueueStrip();
+  void sendTurn(item.text, item.atts ?? []);
+}
+
+/** ⚡ on a queued chip: stop the running turn, then send this one first. */
+function interruptQueued(idx) {
+  const item = state.queue[idx];
+  if (!item) return;
+  state.queue.splice(idx, 1);
+  state.queue.unshift(item);
+  renderQueueStrip();
+  void stopTurn(); // turn.aborted/end releases busy → drainQueue()
 }
 
 const TURN_LABEL_TTL = 10_000;
@@ -2778,15 +2903,18 @@ function onEvent(sessionId, e) {
     case "turn.end": {
       const u = e.usage ?? {};
       const rec = state.usageBySession[sessionId] ?? { prompt: 0, completion: 0 };
-      rec.prompt += u.promptTokens ?? 0;
+      rec.prompt += u.totalPromptTokens ?? u.promptTokens ?? 0;
       rec.completion += u.completionTokens ?? 0;
       state.usageBySession[sessionId] = rec;
-      if (u.promptTokens !== undefined) {
-        state.lastPromptTokensBySession[sessionId] = u.promptTokens;
+      // contextTokens is the LAST step's prompt (the real context size);
+      // promptTokens on older servers is the turn total — prefer contextTokens
+      const ctxTokens = u.contextTokens ?? u.promptTokens;
+      if (ctxTokens !== undefined) {
+        state.lastPromptTokensBySession[sessionId] = ctxTokens;
         delete state.ctxEstimated[sessionId]; // real value — drop the ≈ marker
       }
       const secs = parseFloat(state.lastElapsed ?? "") || 0;
-      const hasUsage = u.promptTokens !== undefined;
+      const hasUsage = ctxTokens !== undefined;
       let completion = u.completionTokens ?? 0;
       if (!hasUsage) {
         // provider gave no usage (e.g. stream_options rejected): estimate from
@@ -5802,6 +5930,7 @@ function renderNsRecent() {
   box.innerHTML = "";
   const seen = new Map();
   for (const s of state.sessions) {
+    if (s.remote) continue; // remote folders live on the SSH host
     const cwd = s.cwd || "";
     if (!cwd) continue;
     if (!seen.has(cwd)) seen.set(cwd, { cwd, count: 0, last: s.updatedAt ?? 0 });
@@ -5976,8 +6105,25 @@ function composerAction() {
 async function send() {
   const input = $("#input");
   const text = input.value.trim();
-  if (text === "" || state.busy) return;
-  const atts = state.pendingAttachments.slice();
+  if (text === "") return;
+  if (state.busy) {
+    // the turn keeps running; this instruction waits its turn
+    const atts = state.pendingAttachments.slice();
+    state.pendingAttachments = [];
+    renderAttachStrip();
+    input.value = "";
+    autoSize(input);
+    enqueueMessage(text, atts);
+    return;
+  }
+  input.value = "";
+  autoSize(input);
+  await sendTurn(text, state.pendingAttachments.slice());
+}
+
+/** Start a turn with an explicit message (composer or queue drain). */
+async function sendTurn(text, atts) {
+  const input = $("#input");
   let id = state.sessionId;
   setBusy(true);
   try {
@@ -6025,8 +6171,19 @@ async function send() {
     if (state.draft.effort) sparams.effort = state.draft.effort;
     await rpc("session.send", sparams);
   } catch (err) {
-    // nothing was sent: drop the optimistic bubble and give the images back
+    const msg = String(err?.message ?? err);
     document.querySelector('#transcript .msg[data-opt="1"]')?.remove();
+    if (/already running/i.test(msg)) {
+      // another client (or another tab) owns the turn: wait for its turn.end
+      // and send this instruction right after, instead of failing
+      state.pendingAttachments = [];
+      renderAttachStrip();
+      enqueueMessage(text, atts, { otherDevice: true });
+      setBusy(true);
+      state.busySessionId = id ?? state.sessionId;
+      return;
+    }
+    // nothing was sent: give the images back to the composer
     if (atts.length > 0) {
       state.pendingAttachments = atts;
       renderAttachStrip();
@@ -6493,6 +6650,34 @@ function boot() {
     // gauge click: open the context tab; clicking again closes the pane
     if (!$("#rightpane").hidden && activePaneTab() === "ctx") closePane();
     else showPane("ctx");
+  });
+
+  // Code-block controls are delegated: streamed markdown, file previews and
+  // re-renders all work without per-render wiring.
+  document.addEventListener("click", (ev) => {
+    const target = ev.target instanceof Element ? ev.target : null;
+    const copyBtn = target?.closest("button.code-copy");
+    if (copyBtn) {
+      const code = copyBtn.closest(".codeblock")?.querySelector("pre code");
+      void copyText(code?.textContent ?? "").then((ok) => {
+        copyBtn.textContent = ok ? "✓" : "✕";
+        copyBtn.classList.toggle("copied", ok);
+        copyBtn.classList.toggle("copy-fail", !ok);
+        if (!ok) toast(t("msg.copyFailed"), "err");
+        setTimeout(() => {
+          copyBtn.textContent = "⧉";
+          copyBtn.classList.remove("copied", "copy-fail");
+        }, 1200);
+      });
+      return;
+    }
+    const expandBtn = target?.closest("button.code-expand");
+    if (expandBtn) {
+      const block = expandBtn.closest(".codeblock");
+      if (!block) return;
+      block.classList.toggle("collapsed");
+      expandBtn.textContent = block.classList.contains("collapsed") ? t("code.showAll") : t("code.collapse");
+    }
   });
 
   document.addEventListener("keydown", (ev) => {

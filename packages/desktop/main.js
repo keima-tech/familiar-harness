@@ -4,7 +4,7 @@
 // Packaging (electron-builder installers) is the M6 milestone.
 "use strict";
 
-const { app, BrowserWindow, shell, dialog, ipcMain, Notification } = require("electron");
+const { app, BrowserWindow, shell, dialog, ipcMain, Notification, clipboard } = require("electron");
 const { spawn, execFile } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -260,6 +260,13 @@ ipcMain.handle("update:restart", (ev) => {
   requireLocal(ev, "updates");
   app.relaunch();
   app.exit(0);
+});
+
+// clipboard writes from the UI (code-block copy); the web Clipboard API is
+// unavailable on plain-http LAN pages, this always works
+ipcMain.handle("app:clipboard", (_ev, text) => {
+  clipboard.writeText(String(text ?? ""));
+  return true;
 });
 
 // open a file with the OS default application (GUI file viewer: 外部アプリで開く)

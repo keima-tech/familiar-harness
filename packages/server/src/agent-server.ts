@@ -711,6 +711,10 @@ export class AgentServer {
     };
   }
 
+  /** provider -> { model -> context window }, learned from models.list */
+  private readonly modelWindows = new Map<string, Map<string, number>>();
+  private modelWarmInFlight = new Set<string>();
+
   private async modelsList(params: Record<string, unknown>): Promise<{
     provider: string;
     models: ModelInfo[];
@@ -720,10 +724,31 @@ export class AgentServer {
     try {
       const provider = this.providers.getPrimary(providerId);
       const models = await provider.listModels();
+      const windows = new Map<string, number>();
+      for (const m of models) {
+        if ((m.contextTokens ?? 0) > 0) windows.set(m.id, m.contextTokens!);
+      }
+      if (windows.size > 0) this.modelWindows.set(providerId, windows);
       return { provider: providerId, models };
     } catch (err) {
       return { provider: providerId, models: [], error: err instanceof Error ? err.message : String(err) };
     }
+  }
+
+  /** Context window of a model, from the (GUI-warmed) cache — 0 when unknown. */
+  private cachedContextWindow(providerId: string, model: string): number {
+    return this.modelWindows.get(providerId)?.get(model) ?? 0;
+  }
+
+  /** Fetch model metadata in the background so compaction has a window. */
+  private warmModelWindows(providerId: string): void {
+    if (this.modelWindows.has(providerId) || this.modelWarmInFlight.has(providerId)) return;
+    this.modelWarmInFlight.add(providerId);
+    void this.modelsList({ provider: providerId })
+      .catch(() => {
+        /* offline provider: compaction falls back to the estimate */
+      })
+      .finally(() => this.modelWarmInFlight.delete(providerId));
   }
 
   /**
@@ -1577,6 +1602,12 @@ export class AgentServer {
     try {
       // Proxy sessions advertise the host's MCP tools instead of local ones.
       const remoteTools = session.remote ? await this.mcpToolsFor(session.remote) : undefined;
+      // Compaction ratio needs the model window; the GUI's models.list warms
+      // this cache, and we ask for it in the background when still unknown.
+      const providerForWindow = str(params, "provider") ?? session.provider;
+      const modelForWindow = str(params, "model") ?? session.model;
+      const contextWindowTokens = this.cachedContextWindow(providerForWindow, modelForWindow);
+      if (contextWindowTokens === 0) this.warmModelWindows(providerForWindow);
       const res = await this.runner.runTurn({
         sessionId,
         userText: text,
@@ -1590,6 +1621,7 @@ export class AgentServer {
         maxSteps: num(params, "maxSteps"),
         signal: controller.signal,
         onEvent: events,
+        ...(contextWindowTokens > 0 ? { contextWindowTokens } : {}),
         ...(remoteTools ? { extraTools: remoteTools } : {}),
         ...(session.remote ? { excludeToolPrefix: "mcp__" } : {}),
       });

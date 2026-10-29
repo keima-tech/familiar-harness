@@ -124,7 +124,7 @@ body {
   padding: 10px 16px; gap: 12px;
 }
 .title-wrap { min-width: 0; display: flex; align-items: center; gap: 9px; }
-.ticon { color: var(--accent); font-size: 15px; }
+.ticon { width: 20px; height: 20px; border-radius: 5px; flex: none; }
 .title-col { min-width: 0; }
 .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .title input {
@@ -672,7 +672,7 @@ details.thinking .th-text {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   height: 100%; color: var(--dim); text-align: center; gap: 4px; padding: 30px;
 }
-.empty-state .glyph { font-size: 40px; opacity: 0.35; }
+.empty-state .glyph img { width: 48px; height: 48px; border-radius: 12px; opacity: 0.9; display: block; }
 .empty-state h3 { margin: 8px 0 4px; color: var(--text); font-weight: 600; }
 .empty-state .hint { font-size: 12.5px; line-height: 1.6; }
 
@@ -829,7 +829,13 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
   flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   text-transform: none; letter-spacing: 0;
 }
-#sessions li.folder-row .fcount {
+#sessions li.folder-row .ftarget {
+  flex: none; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 10px; line-height: 16px; padding: 0 6px; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--dim);
+}
+.folder-row .ftarget.remote { color: var(--accent); border-color: var(--accent); }
+.folder-row .fcount {
   background: var(--panel2); color: var(--dim);
   border-radius: 8px; padding: 0 6px; font-size: 10px; font-weight: 600;
 }
@@ -1243,6 +1249,20 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
 .skill-editor-actions .ghost { background: var(--panel2); color: var(--text); }
 
 /* ---- composer attachments (multimodal images) ---- */
+.code-copy.copied { color: var(--ok); }
+.code-copy.copy-fail { color: var(--err); }
+#ctx-gauge.over #gauge-pct, #ctx-btn.over .gauge-pct, #ctx-pop .ctx-head-text b.over { color: var(--err); }
+#ctx-gauge.over svg .gauge-bar, #ctx-btn.over svg .gauge-bar, #ctx-pop svg .gauge-bar { stroke: var(--err); }
+.ctx-pop .ctx-note.over { color: var(--err); }
+.queue-strip { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 12px 0; }
+.queue-chip {
+  display: flex; align-items: center; gap: 6px; min-width: 0;
+  background: var(--panel2); border: 1px dashed var(--accent); border-radius: 999px;
+  padding: 2px 8px; font-size: 11.5px;
+}
+.queue-chip .q-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: min(320px, 60vw); }
+.queue-chip small { color: var(--dim); font-size: 10px; white-space: nowrap; }
+.queue-chip button { padding: 0 4px; font-size: 11px; }
 .attach-strip {
   display: flex; flex-wrap: wrap; gap: 8px;
   padding: 6px 2px 8px;

@@ -146,6 +146,7 @@ providers:
 
 - Secrets resolve as `api_key` → `api_key_file` → `env`; API keys set through the GUI are stored as `~/.familiar/secrets/<provider>.key` (0600) and referenced by file.
 - `stream_options: false` on a provider disables the `include_usage` request (some compat servers reject it; Familiar retries without it automatically).
+- Bash runs without a prompt unless the command looks destructive or leaks data (`permissions.bash.ask`): `rm -rf`, `sudo`, `curl -d`, force-push and friends still ask, and only unrecoverable commands (`> /dev/sd*`, `mkfs` on a device) are blocked outright. Set `permissions.bash.mode: ask` for the old "approve everything" behavior.
 - Model names move fast — check your provider's model list (`/models` in the TUI, or `curl $BASE_URL/models`).
 - Full reference: [docs/spec/05-config.md](docs/spec/05-config.md).
 

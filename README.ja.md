@@ -150,6 +150,7 @@ providers:
 
 - 秘密情報は `api_key` → `api_key_file` → `env` の順で解決。GUI から設定した API キーは `~/.familiar/secrets/<provider>.key`(0600)に保存され、設定ファイルにはファイル参照のみ書かれます。
 - `stream_options: false` で usage 取得要求(`include_usage`)を無効化(拒否する互換サーバ向け。Familiar は 400/422 時に自動で外して再試行します)。
+- bash は破壊的・情報送信系(`permissions.bash.ask`: `rm -rf`、`sudo`、`curl -d`、強制 push など)以外は承認なしで実行します。無条件ブロックは復旧不能なもの(`> /dev/sd*`、デバイスへの `mkfs`)のみ。旧来の「毎回承認」に戻すには `permissions.bash.mode: ask`。
 - モデル名は移り変わりが速いため、プロバイダのモデル一覧(TUI の `/models`、または `curl $BASE_URL/models`)で最新を確認してください。
 - 詳細は [docs/spec/05-config.md](docs/spec/05-config.md)。
 

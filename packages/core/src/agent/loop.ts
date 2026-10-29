@@ -50,6 +50,8 @@ export interface RunTurnOptions {
   onEvent: (event: AgentEvent) => void;
   /** cancel the turn (provider streams abort; tools finish their step) */
   signal?: AbortSignal;
+  /** the model's context window, when the caller knows it (compaction ratio) */
+  contextWindowTokens?: number;
 }
 
 export interface RunTurnResult {
@@ -134,6 +136,10 @@ export class AgentRunner {
 
     const turnId = crypto.randomUUID();
     const usage: Usage = {};
+    /** prompt tokens reported by the LAST step — the real context size */
+    let lastStepPromptTokens = 0;
+    /** prompt tokens of the step currently streaming (fallback source) */
+    let stepPromptFromChunks = 0;
     let steps = 0;
     let toolCallsTotal = 0;
 
@@ -250,9 +256,13 @@ export class AgentRunner {
                 textParts.push(chunk.text);
                 opts.onEvent({ type: "text.delta", messageId: assistantId, text: chunk.text });
               } else if (chunk.type === "usage") {
-                usage.promptTokens = (usage.promptTokens ?? 0) + (chunk.usage.promptTokens ?? 0);
+                // cumulative (cost) vs per-step (context size) are tracked apart
+                usage.totalPromptTokens =
+                  (usage.totalPromptTokens ?? 0) + (chunk.usage.promptTokens ?? 0);
                 usage.completionTokens =
                   (usage.completionTokens ?? 0) + (chunk.usage.completionTokens ?? 0);
+                stepPromptFromChunks = chunk.usage.promptTokens ?? stepPromptFromChunks;
+                lastStepPromptTokens = stepPromptFromChunks;
               } else if (chunk.type === "stop") {
                 stepStopReason = chunk.finishReason;
               } else if (chunk.type === "tool_call_start" || chunk.type === "tool_call_delta") {
@@ -310,6 +320,10 @@ export class AgentRunner {
           stopReason: stepStopReason,
           usage: result.usage,
         });
+
+        // the step's own prompt size (provider usage wins over chunk sums)
+        if ((result.usage?.promptTokens ?? 0) > 0) lastStepPromptTokens = result.usage!.promptTokens!;
+        stepPromptFromChunks = 0;
 
         if (stepToolCalls.length === 0) break;
 
@@ -388,7 +402,17 @@ export class AgentRunner {
         }
       }
 
-      const finalUsage: Usage = usage.promptTokens || usage.completionTokens ? usage : {};
+      const finalUsage: Usage = {
+        ...(lastStepPromptTokens > 0
+          ? { promptTokens: lastStepPromptTokens, contextTokens: lastStepPromptTokens }
+          : {}),
+        ...((usage.totalPromptTokens ?? 0) > 0
+          ? { totalPromptTokens: usage.totalPromptTokens }
+          : (usage.promptTokens ?? 0) > 0
+            ? { totalPromptTokens: usage.promptTokens }
+            : {}),
+        ...(usage.completionTokens ? { completionTokens: usage.completionTokens } : {}),
+      };
       opts.onEvent({ type: "turn.end", turnId, usage: finalUsage });
       await this.hooks?.run("turn_complete", {
         event: "turn_complete",
@@ -454,27 +478,48 @@ export class AgentRunner {
    * slot, else the session model) for a durable note; any failure falls back
    * to the M1 drop guard. Ephemeral either way (not persisted).
    */
+  /**
+   * Compaction gate. The trigger combines two signals:
+   *  - the character estimate (4 chars ≈ 1 token) — cheap but weak for
+   *    Japanese, where real tokens are 3-4x the estimate;
+   *  - the provider's own prompt-token count of the previous turn's last step
+   *    (stored per assistant message) — the ground truth.
+   * The threshold is `compaction.ratio` (default 0.9) of the model window
+   * when the caller knows it, lowered by `token_soft_limit` when set.
+   */
   private async compactIfNeeded(
     history: ChatMessage[],
     session: SessionRecord,
     opts: RunTurnOptions,
   ): Promise<ChatMessage[]> {
-    const limitChars = this.cfg.context.token_soft_limit * 4;
-    let total = 0;
+    let chars = 0;
     for (const m of history) {
-      total += m.content.length + (m.toolCalls?.length ?? 0) * 128;
+      chars += m.content.length + (m.toolCalls?.length ?? 0) * 128;
       // image attachments ride along on every step, so they count too
       const atts = m.meta?.["attachments"];
       if (Array.isArray(atts)) {
         for (const a of atts) {
           if (a && typeof a === "object" && typeof (a as { data?: unknown }).data === "string") {
-            total += ((a as { data: string }).data.length * 3) / 4;
+            chars += ((a as { data: string }).data.length * 3) / 4;
           }
         }
       }
     }
+    const estimatedTokens = Math.ceil(chars / 4);
+    const observedTokens = lastPromptTokens(history);
+    const usedTokens = Math.max(estimatedTokens, observedTokens ?? 0);
 
-    if (total <= limitChars) return history;
+    const ratio = this.cfg.context.compaction?.ratio ?? 0.9;
+    const win = opts.contextWindowTokens ?? 0;
+    const soft = this.cfg.context.token_soft_limit || 0;
+    const limits: number[] = [];
+    if (win > 0 && ratio > 0) limits.push(Math.max(1_000, Math.floor(win * ratio)));
+    if (soft > 0) limits.push(soft);
+    // nothing known about the model: keep a conservative fallback
+    const limitTokens = limits.length > 0 ? Math.min(...limits) : 128_000;
+
+    if (usedTokens < limitTokens) return history;
+    const total = chars; // kept for the log line below
     const keepLast = Math.max(2, this.cfg.context.keep_last);
     const keepFirst = history.filter((m) => m.role === "user")[0];
 
@@ -513,7 +558,10 @@ export class AgentRunner {
     for (const m of compacted) kept += m.content.length;
     opts.onEvent({ type: "compaction", dropped, kept, summarized });
     log.warn(
-      `compaction: ${summarized ? "summarized" : "dropped"} ${dropped} messages (estimate ${total} chars > ${limitChars})`,
+      `compaction: ${summarized ? "summarized" : "dropped"} ${dropped} messages ` +
+        `(estimate ${estimatedTokens} tok / observed ${observedTokens ?? "-"} tok >= ${limitTokens} tok${
+          win > 0 ? ` = ${Math.round(ratio * 100)}% of ${win}` : ""
+        })`,
     );
     return compacted;
   }
@@ -582,6 +630,18 @@ function newCallBuffer(): CallBuffer {
 }
 
 /** Exported for AgentRunner wiring: feed provider chunks here. */
+/** Prompt tokens of the newest assistant step (the real context size). */
+function lastPromptTokens(history: ChatMessage[]): number | undefined {
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const m = history[i];
+    if (!m || m.role !== "assistant") continue;
+    const usage = m.meta?.["usage"] as { promptTokens?: unknown } | undefined;
+    const n = Number(usage?.promptTokens);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return undefined;
+}
+
 export function observeProviderChunk(
   messageId: string,
   chunk:

@@ -14,6 +14,7 @@ import {
  * Behaviour (stateless — decided from the tail of the transcript):
  * - last is user, text contains `@dump-prompt-tools` → lists the advertised tool names
  * - last is user, text contains `@fail`            → throws ProviderError 503 (fallback tests)
+ * - last is user, contains `@hold <ms>`            → waits, keeping the turn open
  * - last is user text contains `@write <path>`     → tool call: write
  * - last is user, contains `@read <path>`          → tool call: read
  * - last is user, otherwise                        → streams back `mock: <echo>`
@@ -88,6 +89,15 @@ export class MockProvider implements Provider {
       const names = (params.tools ?? []).map((tool) => tool.name).sort();
       streamText(names.length > 0 ? names.join("\n") : "(no tools)", onChunk);
       return { stopReason: "end_turn", usage: { promptTokens: 1, completionTokens: 2 } };
+    }
+    // `@hold <ms>`: keep the turn (and its session lock) open for a while.
+    // Lets tests exercise "a turn is already running", turn.start UI states
+    // and the queue deterministically — the turn has started by now.
+    const holdMatch = userText.match(/@hold\s+(\d+)/);
+    if (holdMatch) {
+      await new Promise((resolve) => setTimeout(resolve, Math.min(30_000, Number(holdMatch[1]))));
+      streamText(`mock: held ${holdMatch[1]}ms`, onChunk);
+      return { stopReason: "end_turn", usage: { promptTokens: 1, completionTokens: 5 } };
     }
     // `@fail` or `@fail-<providerId>`: simulate a pre-stream failure.
     // With the provider form, only that provider fails (fallback tests).

@@ -85,7 +85,10 @@ permissions:
       - "\\bgit\\s+(push\\b.*--force|reset\\s+--hard|clean\\s+-[a-zA-Z]*f)"
       - "\\b(curl|wget)\\b[^|;]*(\\s-d\\s|--data|\\s-F\\s|--form|--upload-file)"
     deny:                  # 無条件ブロック(--yolo でも不可)
-      - ">\\s*/dev/(sd|nvme|mmcblk)"
+      - ">\\s*/dev/(sd|nvme|mmcblk)"     # デバイスへの上書き
+      # 既定の deny には加えて、rm の /・/*・システムディレクトリそのもの(/etc 等)・
+      # ~・$HOME・Windows ドライブルート、--no-preserve-root、find / -delete /
+      # -exec rm、dd of=/dev/sd*、mkfs(デバイス)が入る(承認でも実行不可)
     max_timeout_ms: 600000
   files:
     bounds: cwd            # cwd | unrestricted(write/edit の系団・制限)

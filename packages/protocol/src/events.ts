@@ -5,7 +5,8 @@ import type { ToolCall, Usage } from "./types.js";
  * CLI uses the in-process callback, `familiar serve` forwards them over WebSocket.
  */
 export type AgentEvent =
-  | { type: "turn.start"; turnId: string }
+  /** `text` is the user instruction that started the turn (duplicate guard) */
+  | { type: "turn.start"; turnId: string; text?: string }
   | { type: "step.start"; turnId: string; index: number }
   | { type: "message.start"; messageId: string; role: "assistant" }
   | { type: "text.delta"; messageId: string; text: string }

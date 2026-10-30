@@ -62,6 +62,12 @@ export interface PermissionRespondParams {
 export interface SessionGetResult {
   session: SessionRecord;
   messages: ChatMessage[];
+  /** true while a turn is streaming for this session (any client) */
+  running?: boolean;
+  /** when the running turn started (ms epoch) */
+  runningStartedAt?: number;
+  /** the instruction being processed (duplicate-send guard) */
+  runningText?: string;
 }
 
 export interface ModelsListParams {

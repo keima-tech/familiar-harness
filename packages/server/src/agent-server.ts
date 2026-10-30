@@ -187,7 +187,10 @@ export class AgentServer {
   /** M4: ms timestamp of the last turn activity (idle feed for the curator) */
   private lastTurnAt = Date.now();
   /** runs per session while a turn is streamed (session.abort kills it) */
-  private readonly activeTurns = new Map<string, AbortController>();
+  private readonly activeTurns = new Map<
+    string,
+    { controller: AbortController; text: string; startedAt: number }
+  >();
   /** M5: MCP dynamic tools */
   readonly mcp?: McpHub;
   private mcpDiscover?: Promise<void>;
@@ -521,10 +524,23 @@ export class AgentServer {
       case "session.create":
         return this.createSession(params);
       case "session.list":
-        return this.store.listSessions();
+        // `running` lets clients show that a turn is live — a reloaded page
+        // or a second client has no local busy state otherwise
+        return this.store.listSessions().map((s) => ({
+          ...s,
+          running: this.activeTurns.has(s.id),
+        }));
       case "session.get": {
         const session = this.requireSession(str(params, "id"));
-        return { session, messages: this.store.getMessages(session.id) };
+        const running = this.activeTurns.get(session.id);
+        return {
+          session,
+          messages: this.store.getMessages(session.id),
+          running: running !== undefined,
+          ...(running
+            ? { runningStartedAt: running.startedAt, runningText: running.text }
+            : {}),
+        };
       }
       case "session.delete": {
         const delId = str(params, "id");
@@ -1594,11 +1610,19 @@ export class AgentServer {
     const session = this.requireSession(sessionId);
     const events = (event: unknown): void => ctx.onEvent?.(sessionId, event);
     const msgCountBefore = this.store.getMessages(sessionId).length;
-    if (this.activeTurns.has(sessionId)) {
-      throw new RpcError(RPC_ERROR_INVALID_PARAMS, "a turn is already running for this session (stop it first)");
+    const running = this.activeTurns.get(sessionId);
+    if (running) {
+      // The running turn's text travels with the error: a client that retries
+      // the very same instruction (double Enter, a stale tab, /retry) can
+      // recognize it and NOT deliver a duplicate some minutes later.
+      throw new RpcError(
+        RPC_ERROR_INVALID_PARAMS,
+        "a turn is already running for this session (stop it first)",
+        { runningText: running.text, runningStartedAt: running.startedAt },
+      );
     }
     const controller = new AbortController();
-    this.activeTurns.set(sessionId, controller);
+    this.activeTurns.set(sessionId, { controller, text, startedAt: Date.now() });
     try {
       // Proxy sessions advertise the host's MCP tools instead of local ones.
       const remoteTools = session.remote ? await this.mcpToolsFor(session.remote) : undefined;
@@ -1685,9 +1709,9 @@ export class AgentServer {
   private abortTurn(params: Record<string, unknown>): { aborting: boolean } {
     const sessionId = str(params, "id");
     if (!sessionId) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "session id is required");
-    const controller = this.activeTurns.get(sessionId);
-    if (!controller) return { aborting: false };
-    controller.abort();
+    const running = this.activeTurns.get(sessionId);
+    if (!running) return { aborting: false };
+    running.controller.abort();
     return { aborting: true };
   }
 
@@ -1848,6 +1872,8 @@ export class RpcError extends Error {
   constructor(
     readonly code: number,
     message: string,
+    /** extra machine-readable detail, forwarded as JSON-RPC `error.data` */
+    readonly data?: Record<string, unknown>,
   ) {
     super(message);
     this.name = "RpcError";

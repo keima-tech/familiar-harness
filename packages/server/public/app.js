@@ -69,7 +69,12 @@ async function rpc(method, params = {}) {
     showAuthHint();
     throw new Error("unauthorized");
   }
-  if (body.error) throw new Error(body.error.message ?? JSON.stringify(body.error));
+  if (body.error) {
+    const err = new Error(body.error.message ?? JSON.stringify(body.error));
+    err.code = body.error.code;
+    if (body.error.data !== undefined) err.data = body.error.data;
+    throw err;
+  }
   return body.result;
 }
 
@@ -108,6 +113,10 @@ const STR = {
     "queue.sendNow": "今すぐ送信(実行中のターンを停止)",
     "queue.waiting": "実行中のため待機中",
     "queue.queued": "送信待ちに追加しました ({0})",
+    "turn.received": "受信しました — 応答を生成しています",
+    "turn.working": "実行中… {0}",
+    "toast.dupRunning": "同じ内容がすでに実行中です(重複送信はしません)",
+    "side.running": "実行中",
     "queue.otherDevice": "他の端末でターンが実行中です — 送信待ちに追加しました",
     "composer.phBusy": "追加の指示を入力(このターンの終了後に送信されます)",
     "usage.overNote": "コンテキストウィンドウを超えています — 次のターンで自動的に圧縮されます",
@@ -571,6 +580,10 @@ const STR = {
     "queue.sendNow": "Send now (stops the running turn)",
     "queue.waiting": "waiting for the running turn",
     "queue.queued": "queued ({0})",
+    "turn.received": "received — generating a reply",
+    "turn.working": "working… {0}",
+    "toast.dupRunning": "the same instruction is already running (not sent twice)",
+    "side.running": "running",
     "queue.otherDevice": "A turn is already running in another client — queued instead",
     "composer.phBusy": "type to queue an instruction (sent after this turn)",
     "usage.overNote": "Over the context window — the next turn compacts automatically",
@@ -1320,6 +1333,8 @@ const state = {
   currentSession: null,
   busy: false,
   pendingEvents: new Map(), // sessionId -> partial assistant render state
+  pendingBubble: null, // "received" placeholder shown until the first token
+  runningTextBySession: new Map(), // sessionId -> instruction being processed
   pendingToolCards: [], // live tool.call cards awaiting their result
   pendingAttachments: [], // images waiting in the composer (multimodal send)
   busySessionId: null, // session whose turn is running (busy is global, turns are not)
@@ -1540,6 +1555,7 @@ function sessionLi(s) {
   li.dataset.target = target;
   li.innerHTML =
     `<div class="row-line"><span class="t">${esc(title)}</span>` +
+    (s.running ? `<span class="run-dot" title="${esc(t("side.running"))}"></span>` : "") +
     `<button class="del" data-id="${esc(s.id)}" title="delete session">✕</button></div>` +
     `<span class="when" title="${esc(when)}">${esc(relTime(s.updatedAt))} · ${esc(s.provider)}${esc(model)}${
       target === "local" ? "" : ` · ssh:${esc(target)}`
@@ -1953,6 +1969,17 @@ async function openSession(id) {
   closeAllPops();
   renderTranscript(data.messages ?? []);
   applyTranscriptFilter();
+  // a turn may already be live (started before a reload, or by another
+  // client) — reflect it instead of looking idle
+  if (data.running === true) {
+    if (typeof data.runningStartedAt === "number") state.turnStartedAt = data.runningStartedAt;
+    if (typeof data.runningText === "string") state.runningTextBySession.set(id, data.runningText);
+    state.busySessionId = id;
+    setBusy(true);
+    showPendingBubble(id);
+  } else {
+    state.runningTextBySession.delete(id);
+  }
   // the Files pane is keyed by session — drop the stale tree when visible
   if (activePaneTab() === "files") {
     filesSessionKey = null;
@@ -2099,6 +2126,7 @@ function truncate(text, cap) {
 function renderTranscript(messages) {
   const tr = $("#transcript");
   tr.innerHTML = "";
+  state.pendingBubble = null; // the DOM node is gone with innerHTML
   state.pendingToolCards = [];
   state.toolCounter = 0;
   const visible = messages.filter((m) => m.meta?.ephemeral !== true);
@@ -2631,11 +2659,38 @@ function scrollBottom(force = false) {
   if (force || near) tr.scrollTop = tr.scrollHeight;
 }
 
+/**
+ * Right under the user's message: proof the run was accepted, shown from the
+ * moment we send until the first token/tool call replaces it. Without it the
+ * only sign of life was the small top-bar "working…" label (easy to miss).
+ */
+function showPendingBubble(sessionId) {
+  if (sessionId !== state.sessionId) return;
+  if (state.pendingBubble) return;
+  if (state.pendingEvents.get(sessionId)) return; // a live step already streams
+  const wrap = document.createElement("div");
+  wrap.className = "msg assistant pending-turn";
+  wrap.innerHTML =
+    `<div class="bubble"><span class="dots"><i></i><i></i><i></i></span>` +
+    `<span>${esc(t("turn.received"))}</span><span class="pending-time"></span></div>`;
+  $("#transcript").appendChild(wrap);
+  dropEmptyState();
+  state.pendingBubble = wrap;
+  scrollBottom();
+}
+
+function hidePendingBubble() {
+  if (!state.pendingBubble) return;
+  state.pendingBubble.remove();
+  state.pendingBubble = null;
+}
+
 // live streaming: one bubble per assistant step for the active session
 function liveBubble(sessionId) {
   if (sessionId !== state.sessionId) return null;
   let entry = state.pendingEvents.get(sessionId);
   if (!entry) {
+    hidePendingBubble();
     const bubble = appendMessage("assistant", "", null, { foot: false });
     bubble.innerHTML = "";
     const contentEl = document.createElement("div");
@@ -2684,13 +2739,18 @@ function setBusy(busy) {
   refreshSendButton();
   applyComposerPlaceholder();
   if (busy) {
-    state.turnStartedAt = Date.now();
+    if (!state.turnStartedAt) state.turnStartedAt = Date.now();
+    $("#turn-state")?.classList.add("running");
     if (state.turnTimer) clearInterval(state.turnTimer);
     state.turnTimer = setInterval(() => {
       const s = ((Date.now() - state.turnStartedAt) / 1000).toFixed(1);
-      $("#turn-label").textContent = `working… ${s}s`;
+      $("#turn-label").textContent = t("turn.working", `${s}s`);
+      const pendingTime = state.pendingBubble?.querySelector(".pending-time");
+      if (pendingTime) pendingTime.textContent = `${Math.floor(Number(s))}s`;
     }, 100);
   } else {
+    $("#turn-state")?.classList.remove("running");
+    hidePendingBubble();
     if (state.turnTimer) {
       clearInterval(state.turnTimer);
       state.turnTimer = null;
@@ -2829,6 +2889,9 @@ function onEvent(sessionId, e) {
   }
   // busy is global but turns are per session: release it even when the turn
   // belongs to a session we are no longer looking at (otherwise wedged forever)
+  if (e.type === "turn.end" || e.type === "turn.error" || e.type === "turn.aborted") {
+    state.runningTextBySession.delete(sessionId);
+  }
   if (
     state.busySessionId === sessionId &&
     (e.type === "turn.end" || e.type === "turn.error" || e.type === "turn.aborted")
@@ -2844,6 +2907,9 @@ function onEvent(sessionId, e) {
       state.turnBubbles = [];
       setBusy(true);
       state.busySessionId = sessionId;
+      if (typeof e.text === "string") state.runningTextBySession.set(sessionId, e.text);
+      showPendingBubble(sessionId);
+      void refreshSessions(); // sidebar running dot
       break;
     case "message.start":
       state.pendingEvents.delete(sessionId);
@@ -2880,6 +2946,7 @@ function onEvent(sessionId, e) {
     }
     case "tool.call": {
       state.pendingEvents.delete(sessionId);
+      hidePendingBubble();
       appendToolCard(e.toolCall.name, e.toolCall.arguments ?? "", "", "run");
       break;
     }
@@ -6107,6 +6174,17 @@ async function send() {
   const text = input.value.trim();
   if (text === "") return;
   if (state.busy) {
+    const runningText =
+      state.runningTextBySession.get(state.sessionId) ??
+      (state.busySessionId === state.sessionId ? state.lastUserText : null);
+    if (typeof runningText === "string" && runningText.trim() === text.trim()) {
+      // this exact instruction is the one already being processed — queuing
+      // it would deliver a duplicate to the agent after the turn ends
+      input.value = "";
+      autoSize(input);
+      toast(t("toast.dupRunning"), "info");
+      return;
+    }
     // the turn keeps running; this instruction waits its turn
     const atts = state.pendingAttachments.slice();
     state.pendingAttachments = [];
@@ -6143,6 +6221,7 @@ async function sendTurn(text, atts) {
     state.busySessionId = id;
     const bubble = appendMessage("user", text, null, { attachments: atts });
     bubble.closest(".msg")?.setAttribute("data-opt", "1");
+    showPendingBubble(id);
     state.pendingAttachments = [];
     renderAttachStrip();
     input.value = "";
@@ -6172,10 +6251,22 @@ async function sendTurn(text, atts) {
     await rpc("session.send", sparams);
   } catch (err) {
     const msg = String(err?.message ?? err);
-    document.querySelector('#transcript .msg[data-opt="1"]')?.remove();
     if (/already running/i.test(msg)) {
-      // another client (or another tab) owns the turn: wait for its turn.end
-      // and send this instruction right after, instead of failing
+      const runningText = typeof err?.data?.runningText === "string" ? err.data.runningText : null;
+      if (runningText !== null && runningText.trim() === text.trim()) {
+        // the identical instruction is already running (double Enter, a stale
+        // tab, /retry …): keep the bubble but never deliver a second copy
+        state.pendingAttachments = [];
+        renderAttachStrip();
+        state.lastUserText = runningText;
+        setBusy(true);
+        state.busySessionId = id ?? state.sessionId;
+        toast(t("toast.dupRunning"), "info");
+        return;
+      }
+      // a *different* instruction: wait for the running turn to end and send
+      // it then, instead of failing (the queue chip shows it is waiting)
+      document.querySelector('#transcript .msg[data-opt="1"]')?.remove();
       state.pendingAttachments = [];
       renderAttachStrip();
       enqueueMessage(text, atts, { otherDevice: true });
@@ -6183,6 +6274,7 @@ async function sendTurn(text, atts) {
       state.busySessionId = id ?? state.sessionId;
       return;
     }
+    document.querySelector('#transcript .msg[data-opt="1"]')?.remove();
     // nothing was sent: give the images back to the composer
     if (atts.length > 0) {
       state.pendingAttachments = atts;
@@ -6611,7 +6703,9 @@ function boot() {
       : ev.key === "Enter" && (ev.ctrlKey || ev.metaKey);
     if (wantsSend) {
       ev.preventDefault();
-      composerAction();
+      // Enter always means "send": while a turn runs this queues the text
+      // (visible chip) — the ■ button is the one that stops the turn
+      void send();
     }
   });
   input.addEventListener("input", () => {

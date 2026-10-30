@@ -1251,6 +1251,108 @@ try {
     JSON.stringify(copyCheck),
   );
 
+  // ---- duplicate-send protection, pending bubble, Enter-while-busy ---------
+  // `@hold <ms>` keeps a mock turn (and its session lock) open, so a stale
+  // client that sends the same text is rejected with the running text and
+  // must NOT queue a duplicate delivery.
+  const dupGuard = await evalOnce(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const s = await rpc("session.create", { cwd: ${JSON.stringify(repoRoot)} });
+    const p1 = rpc("session.send", { id: s.id, text: "@hold 1800 dup-check" }).catch(() => null);
+    await sleep(420);
+    await openSession(s.id);
+    const runningDuring = (await rpc("session.get", { id: s.id })).running === true;
+    state.busy = false; // a stale client does not know the turn is alive
+    await sendTurn("@hold 1800 dup-check", []);
+    const queued = state.queue.length;
+    const busyAfterDup = state.busy === true;
+    const msgs1 = (await rpc("session.get", { id: s.id })).messages.filter((m) => m.role === "user").length;
+    await p1;
+    await sleep(900); // a (wrong) queue drain would fire here
+    const msgs2 = (await rpc("session.get", { id: s.id })).messages.filter((m) => m.role === "user").length;
+    return { runningDuring, queued, busyAfterDup, msgs1, msgs2, queue: state.queue.length };
+  })()`);
+  check(dupGuard?.runningDuring === true, "session.get reports a live turn", JSON.stringify(dupGuard));
+  check(
+    dupGuard?.queued === 0 && dupGuard?.queue === 0,
+    "the identical text is not queued as a duplicate",
+    JSON.stringify(dupGuard),
+  );
+  check(
+    dupGuard?.msgs1 === 1 && dupGuard?.msgs2 === 1,
+    "the duplicate never reaches the session",
+    JSON.stringify(dupGuard),
+  );
+
+  const queueOther = await evalOnce(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const s = await rpc("session.create", { cwd: ${JSON.stringify(repoRoot)} });
+    const p1 = rpc("session.send", { id: s.id, text: "@hold 1500 first" }).catch(() => null);
+    await sleep(420);
+    await openSession(s.id);
+    state.busy = false;
+    await sendTurn("@hold 1500 second", []);
+    const chips = state.queue.length;
+    await p1;
+    for (let i = 0; i < 25; i++) {
+      if (!(await rpc("session.get", { id: s.id })).running) break;
+      await sleep(200);
+    }
+    const users = (await rpc("session.get", { id: s.id })).messages
+      .filter((m) => m.role === "user")
+      .map((m) => String(m.content));
+    return { chips, users, queue: state.queue.length };
+  })()`);
+  check(queueOther?.chips === 1, "a different instruction waits in the queue", JSON.stringify(queueOther));
+  check(
+    queueOther?.users?.length === 2 &&
+      queueOther.users[0].includes("first") &&
+      queueOther.users[1].includes("second"),
+    "the queued instruction is delivered exactly once after the turn",
+    JSON.stringify(queueOther),
+  );
+
+  const pending = await evalOnce(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const s = await rpc("session.create", { cwd: ${JSON.stringify(repoRoot)} });
+    await openSession(s.id);
+    void sendTurn("@hold 1200 bubble-check", []);
+    await sleep(350);
+    const node = document.querySelector("#transcript .pending-turn");
+    const during = node !== null;
+    await sleep(1700);
+    const after = document.querySelector("#transcript .pending-turn") !== null;
+    for (let i = 0; i < 25; i++) {
+      if (!(await rpc("session.get", { id: s.id })).running) break;
+      await sleep(200);
+    }
+    return { during, after };
+  })()`);
+  check(pending?.during === true, "the received placeholder shows before the first token", JSON.stringify(pending));
+  check(pending?.after === false, "the placeholder is replaced once tokens stream", JSON.stringify(pending));
+
+  const enterQueue = await evalOnce(`(async () => {
+    state.busy = true;
+    state.busySessionId = state.sessionId;
+    state.lastUserText = "previous turn text";
+    const input = document.querySelector("#input");
+    input.value = "queued via Enter";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 80));
+    const chips = document.querySelectorAll("#queue-strip .queue-chip").length;
+    const cleared = input.value === "";
+    state.queue = [];
+    renderQueueStrip();
+    state.busy = false;
+    state.busySessionId = null;
+    return { chips, cleared };
+  })()`);
+  check(
+    enterQueue?.chips === 1 && enterQueue?.cleared === true,
+    "Enter while busy queues the instruction (does not stop the turn)",
+    JSON.stringify(enterQueue),
+  );
+
   // ---- EN mode: every new string is translated (no CJK fallback) -----------
   const cjk = await evalOnce(`(() => {
     setLang("en");

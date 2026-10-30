@@ -159,7 +159,7 @@ export class AgentRunner {
       this.store.renameSession(session.id, opts.userText.slice(0, 60));
     }
 
-    opts.onEvent({ type: "turn.start", turnId });
+    opts.onEvent({ type: "turn.start", turnId, text: opts.userText });
 
     // Plan mode (M2): only read-only tools are advertised and executable.
     const plan = opts.plan === true;

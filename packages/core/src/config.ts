@@ -279,6 +279,8 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
         // destructive filesystem work
         "\\brm\\s+(-[a-zA-Z]+\\s+)*-[a-zA-Z]*[rR]",
         "\\brm\\s+(-[a-zA-Z]+\\s+)*-[a-zA-Z]*f",
+        "\\bfind\\b[^|;&]*(?:-delete\\b|-exec\\s+(?:rm|rmdir|shred)\\b)",
+        "\\bRemove-Item\\b[^|;&]*-[Rr]ecurse\\b",
         "\\bdd\\b",
         "^mkfs",
         "\\bshred\\b",
@@ -306,8 +308,25 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
         "\\bssh\\b.*\\s-R\\b",
       ],
       // Only the truly unrecoverable stays blocked (approve-able commands
-      // belong in `ask`).
-      deny: [">\\s*/dev/(sd|nvme|mmcblk)", "\\bmkfs[^|;]*\\s/dev/(sd|nvme|mmcblk)"],
+      // belong in `ask`). Wiping the filesystem — or the directory tree a
+      // user's work lives in — is never approvable, not even with --yolo:
+      // `rm -rf /`, a system directory itself, the home directory, a Windows
+      // drive root, `find / ... -delete`, and raw writes to a disk device.
+      deny: [
+        ">\\s*/dev/(sd|vd|hd|nvme|mmcblk)",
+        "\\bmkfs[^|;]*\\s/dev/(sd|vd|hd|nvme|mmcblk)",
+        "\\bdd\\b[^|;&]*\\bof=/dev/(sd|vd|hd|nvme|mmcblk)",
+        "\\brm\\b[^|;&]*--no-preserve-root",
+        "\\brm\\s+(?:-[^\\s|;&]+\\s+)*['\"]?/(?:\\*|/)?['\"]?(?=\\s|['\"]|$|[|;&])",
+        "\\brm\\s+(?:-[^\\s|;&]+\\s+)*['\"]?/(?:bin|boot|dev|etc|home|lib|lib64|mnt|opt|proc|root|run|sbin|srv|sys|usr|var)(?:\\*|/\\*?)?['\"]?(?=\\s|['\"]|$|[|;&])",
+        "\\brm\\s+(?:-[^\\s|;&]+\\s+)*['\"]?(?:~|\\$HOME|\\$\\{HOME\\})(?:\\*|/\\*?)?['\"]?(?=\\s|['\"]|$|[|;&])",
+        "\\brm\\s+(?:-[^\\s|;&]+\\s+)*['\"]?[A-Za-z]:[\\\\/](?:\\*)?['\"]?(?=\\s|['\"]|$|[|;&])",
+        "\\brm\\s+(?:-[^\\s|;&]+\\s+)*['\"]?/\\{[^}]*\\}",
+        "\\bfind\\s+['\"]?(?:/(?:\\*|/)?|~(?:\\*|/\\*?)?|\\$HOME(?:\\*|/\\*?)?|\\$\\{HOME\\}(?:\\*|/\\*?)?)['\"]?(?=\\s|$)[^|;&]*\\s(?:-delete\\b|-exec\\s+(?:rm|rmdir|shred)\\b)",
+        // Windows (PowerShell / cmd): a drive root itself is never deletable
+        "\\bRemove-Item\\b[^|;&]*['\"]?[A-Za-z]:[\\\\/]?['\"]?(?=\\s|['\"]|$|[|;&])",
+        "\\b(del|rd|rmdir)\\b[^|;&]*['\"]?[A-Za-z]:[\\\\/]?['\"]?(?=\\s|['\"]|$|[|;&])",
+      ],
       max_timeout_ms: 600_000,
     },
     files: { bounds: "cwd" },
@@ -793,11 +812,16 @@ providers:
 
 permissions:
   bash:
+    # allow (default): run unless ask/deny matches. ask = approve every command
+    mode: allow
     allow:
       - "^git (status|diff|log|show|branch|remote|tag|rev-parse|shortlog|worktree)( .*)?$"
-    deny:
-      - "^sudo\\\\b"
-      - "\\\\brm\\\\s+(-[a-z]+\\\\s+)*-[rf]r?f?"
+    # ask  (approve, then run): rm -rf / rm -f, find -delete / -exec rm, sudo,
+    #      dd, git push --force / reset --hard, docker prune, curl -d, scp, ...
+    # deny (never runs, not even with --yolo): rm of / or a system directory /
+    #      home / Windows drive root, --no-preserve-root, find / -delete,
+    #      mkfs / dd / redirects on /dev/sd*, /dev/nvme*, ...
+    # A list given here replaces the built-in one.
     max_timeout_ms: 600000
   webfetch:
     allow_domains: []

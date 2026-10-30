@@ -97,7 +97,10 @@ type ToolOutput = { content: string; isError?: boolean };
   desktop はダイアログ、CLI は y/n、非対話は拒否) → `allow`(承認なしで実行)。
   `permissions.bash.mode` は `allow`(既定: ask/deny 以外はそのまま実行)または
   `ask`(旧来: 未一致は毎回承認)。`rm -rf` などの破壊的コマンドは `ask`(承認すれば実行)、
-  `> /dev/sd*` などの復旧不能なものだけが `deny`。`yolo` は ask を自動承認する。
+  スコープ内の削除も同様。**ファイルシステム全体を消し得るものは `deny`**(承認でも実行不可):
+  `rm -rf /`・`/*`・`--no-preserve-root`、システムディレクトリ(`/etc` 等)そのもの、
+  ホームディレクトリ(`~` / `$HOME`)、Windows ドライブルート、`find / -delete` /
+  `find / -exec rm`、`> /dev/sd*`・デバイスへの `mkfs`/`dd`。`yolo` は ask を自動承認する。
 
 ## 3. 承認フロー
 

@@ -398,7 +398,12 @@ async function handleRpc(
           : RPC_ERROR_INTERNAL;
     const message = err instanceof Error ? err.message : String(err);
     log.error(`rpc ${req.method} failed: ${message}`);
-    return { jsonrpc: "2.0", id: req.id, error: { code, message } };
+    const data = err instanceof RpcError ? err.data : undefined;
+    return {
+      jsonrpc: "2.0",
+      id: req.id,
+      error: { code, message, ...(data !== undefined ? { data } : {}) },
+    };
   }
 }
 

@@ -1037,6 +1037,58 @@ console.log("— scenario Q: bash approval tiers —");
     "unrecoverable commands are hard-blocked",
     JSON.stringify(r4).slice(0, 200),
   );
+
+  // the compiled decision table: wiping the filesystem is denied even with
+  // approval, while deeper targets stay approvable
+  const { commandDecision } = await import(
+    path.join(repoRoot, "packages/core/dist/tools/permissions.js")
+  );
+  const { DEFAULT_CONFIG } = await import(path.join(repoRoot, "packages/core/dist/config.js"));
+  const bcfg = DEFAULT_CONFIG.permissions.bash;
+  const table = [
+    // [command, expected action]
+    ["rm -rf /", "deny"],
+    ["rm -rf /*", "deny"],
+    ["rm -rf / --no-preserve-root", "deny"],
+    ["sudo rm -rf /", "deny"],
+    ["rm -rf /etc", "deny"],
+    ["rm -rf /home", "deny"],
+    ["rm -rf /usr /var", "deny"],
+    ["rm -rf ~", "deny"],
+    ["rm -rf ~/*", "deny"],
+    ["rm -rf $HOME", "deny"],
+    ["rm -rf C:\\", "deny"],
+    ["rm -rf c:/", "deny"],
+    ["find / -delete", "deny"],
+    ["find / -exec rm -rf {} +", "deny"],
+    ["find ~ -delete", "deny"],
+    ["Remove-Item -Recurse -Force C:\\", "deny"],
+    ["del /s /q C:\\", "deny"],
+    ["rd /s /q D:\\", "deny"],
+    ["dd if=/dev/zero of=/dev/sda", "deny"],
+    ["mkfs.ext4 /dev/sda1", "deny"],
+    ["echo x > /dev/sda", "deny"],
+    // approvable: destructive but scoped
+    ["rm -rf /tmp/build", "ask"],
+    ["rm -rf /home/user/work/x", "ask"],
+    ["rm -rf ~/work", "ask"],
+    ["find /tmp -delete", "ask"],
+    ["sudo apt update", "ask"],
+    ["git push --force origin main", "ask"],
+    ["rm -f a.txt", "ask"],
+    // routine
+    ["git status", "allow"],
+    ["rm a.txt", "allow"],
+    ["npm test", "allow"],
+  ];
+  const bad = table.filter(([cmd, want]) => commandDecision(cmd, bcfg).action !== want);
+  assert(
+    bad.length === 0,
+    `bash decision table (${table.length} cases)`,
+    bad
+      .map(([cmd, want]) => `${JSON.stringify(cmd)} want=${want} got=${commandDecision(cmd, bcfg).action}`)
+      .join(" | "),
+  );
 }
 
 console.log(

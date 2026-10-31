@@ -569,10 +569,29 @@ function spawnServe(port) {
   });
 }
 
+/** Window icon: packaged installs ship it as resources/icon.png
+ * (extraResources), a dev checkout uses build/icon.png. Explicitly setting it
+ * matters when the app runs from an extracted directory (AppRun): the
+ * .desktop entry alone then does not reach the taskbar, which would show a
+ * generic icon. */
+function resolveWindowIcon() {
+  const candidates = [
+    path.join(process.resourcesPath ?? "", "icon.png"),
+    path.join(__dirname, "build", "icon.png"),
+    path.join(__dirname, "..", "..", "packages", "server", "public", "icon-512.png"),
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (candidate && fs.existsSync(candidate) && fs.statSync(candidate).size > 0) return candidate;
+    } catch {
+      /* try the next location */
+    }
+  }
+  return null;
+}
+
 function createWindow(url) {
-  // dev: packages/desktop/build/icon.png — packaged installs get the icon
-  // from the electron-builder desktop entries, so this is only a fallback
-  const iconPath = path.join(__dirname, "build", "icon.png");
+  const iconPath = resolveWindowIcon();
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 840,
@@ -580,7 +599,7 @@ function createWindow(url) {
     minHeight: 600,
     title: "Familiar Harness",
     backgroundColor: "#0f1117",
-    ...(fs.existsSync(iconPath) ? { icon: iconPath } : {}),
+    ...(iconPath ? { icon: iconPath } : {}),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

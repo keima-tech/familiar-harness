@@ -891,6 +891,24 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   セッションで write ツール、誤パスワードのエラー、認証/リセットのバックオフ、
   設定フォームからの保存。typecheck / smoke 通過。
 
+## v0.1.0 の実装メモ㊹(2026-11-01、デスクトップのアプリアイコン)
+
+- **症状**: Linux(展開した AppImage を `AppRun` で起動)でタスクバーに汎用の歯車アイコン。
+- **原因(実測)**: (a) Wayland の app_id は Electron が `package.json` の `desktopName`
+  (無ければ `{app.name}.desktop`、app.name は productName が無いため `@familiar/desktop`)から
+  作り、ユーザーの `familiar-harness.desktop` と不一致 → KDE が .desktop に紐付けできない。
+  (b) パッケージに `build/icon.png` が含まれず `BrowserWindow({ icon })` が未指定のため
+  `_NET_WM_ICON` も空(X11 のフォールバックも効かない)。
+- **修正**: `desktopName: "familiar-harness.desktop"`(Wayland app_id = familiar-harness →
+  `familiar-harness.desktop` と一致)、`extraResources` で `resources/icon.png` を同梱して
+  `resolveWindowIcon()`(resources → dev build → repo public の順)を `BrowserWindow({ icon })`
+  に渡す、`linux.syncDesktopName: true` で生成 .desktop 名を desktopName に同期。
+  X11 の WM_CLASS は `app.name` のままだが `_NET_WM_ICON` でアイコン表示される。
+- **確認**: linux-unpacked を Xvfb で起動し `_NET_WM_ICON` に 512x512 データが入ること、
+  パッケージ内 package.json に desktopName が残ること、AppImage 内 .desktop が
+  `familiar-harness.desktop`(StartupWMClass=familiar-harness)になることを実測。Windows は
+  exe に `build/icon.ico` が埋め込まれていることを確認(従来から表示される)。
+
 ## v0.1.0 の実装メモ㊸(2026-10-30、全削除の無条件ブロック・重複送信の修正・受信表示)
 
 - **ファイルシステム全削除を deny に格上げ**: `rm` の対象が `/`・`/*`・システム

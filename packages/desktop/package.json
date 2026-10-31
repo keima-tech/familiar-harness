@@ -4,6 +4,7 @@
   "private": true,
   "description": "Familiar desktop shell (Electron) — client for familiar-server; packaged via electron-builder (M6)",
   "main": "main.js",
+  "desktopName": "familiar-harness.desktop",
   "author": "Familiar contributors",
   "homepage": "https://example.invalid/familiar",
   "license": "MIT",
@@ -33,6 +34,10 @@
       "package.json"
     ],
     "extraResources": [
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
+      },
       {
         "from": "stage/familiar/packages",
         "to": "familiar/packages",
@@ -70,7 +75,8 @@
       ],
       "category": "Development",
       "executableName": "familiar",
-      "maintainer": "Familiar contributors <familiar@example.invalid>"
+      "maintainer": "Familiar contributors <familiar@example.invalid>",
+      "syncDesktopName": true
     }
   }
 }

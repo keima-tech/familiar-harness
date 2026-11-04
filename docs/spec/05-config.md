@@ -106,6 +106,9 @@ context:
   compaction:              # M4: 上限超過時の挙動
     mode: summarize        # summarize=aux 補正機(auxiliary.compactor 未設定ならメインモデル・失敗時 drop にフォールバック) / drop=伏字無しで削除
     ratio: 0.9             # モデルのコンテキストウィンドウの 90% で圧縮を発動
+  max_turn_steps: 100      # 1 ターンのステップ上限。25 ステップの窓を超えても
+                           # turn.continuing を出して自動継続し、この値で打ち切る
+                           # (打ち切り時は turn.ceiling + 「続けて」で再開)
 # 圧縮の判定は「直前ターンの実測 promptTokens」(履歴に保存)と文字数推定の大きい方を使う。
 # モデルのウィンドウは models.list の結果から学習(GUI が取得済みなら即利用、未取得なら背景で取得)。
 

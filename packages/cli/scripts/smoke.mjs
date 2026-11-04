@@ -1091,6 +1091,55 @@ console.log("— scenario Q: bash approval tiers —");
   );
 }
 
+// ---------------------------------------------------------------------------
+// Scenario R: long turns auto-continue past the step window (no 続けて)
+// ---------------------------------------------------------------------------
+console.log("— scenario R: long turns auto-continue —");
+{
+  // the default ceiling is 100: a 28-tool-step turn crosses the 25-step
+  // window and keeps going on its own
+  const r1 = await run(["run", "-p", "@repeat 28", "--cwd", project, "--json"], project, familiarHome);
+  assert(r1.code === 0, "a 28-step run exits 0", `code=${r1.code} stderr=${r1.stderr.slice(0, 200)}`);
+  const continuing = r1.parsed.filter((e) => e?.type === "turn.continuing");
+  assert(
+    continuing.length === 1 &&
+      continuing[0].kind === "steps" &&
+      continuing[0].step === 25 &&
+      continuing[0].ceiling === 100,
+    "the turn auto-continues past the 25-step window",
+    JSON.stringify(continuing).slice(0, 200),
+  );
+  const streamed = r1.parsed
+    .filter((e) => e?.type === "text.delta")
+    .map((e) => String(e.text))
+    .join("");
+  assert(
+    streamed.includes("repeated 28 steps"),
+    "the turn still ends with the model's final answer",
+    JSON.stringify(r1.parsed.slice(-4)).slice(0, 200),
+  );
+  assert(
+    !r1.parsed.some((e) => e?.type === "turn.ceiling"),
+    "no ceiling marker when the work finishes first",
+    "",
+  );
+
+  // a capped ceiling leaves a visible marker instead of stopping silently
+  const homeR = path.join(tmpBase, "home-limit");
+  fs.mkdirSync(homeR, { recursive: true });
+  fs.writeFileSync(
+    path.join(homeR, "config.yaml"),
+    `version: 1\ndefault_provider: mock\nproviders:\n  mock:\n    kind: mock\nserver:\n  port: 1\n  bind: 127.0.0.1\ncontext:\n  max_turn_steps: 26\n`,
+  );
+  const r2 = await run(["run", "-p", "@repeat 40", "--cwd", project, "--json"], project, homeR);
+  const ceiling = r2.parsed.find((e) => e?.type === "turn.ceiling");
+  assert(
+    !!ceiling && ceiling.step === 26,
+    "hitting the configured ceiling emits a marker",
+    JSON.stringify(r2.parsed.filter((e) => e?.type === "turn.ceiling" || e?.type === "turn.continuing")).slice(0, 200),
+  );
+}
+
 console.log(
   failures === 0 ? "\nsmoke: all checks passed" : `\nsmoke: ${failures} failure(s)`,
 );

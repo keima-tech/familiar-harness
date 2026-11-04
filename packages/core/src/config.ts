@@ -207,6 +207,12 @@ export interface ResolvedConfig {
     /** how many trailing messages survive a compaction */
     keep_last: number;
     compaction: CompactionConfig;
+    /**
+     * Hard ceiling for one turn's steps. Past the 25-step window the turn
+     * continues on its own (a visible "auto-continue" note) instead of
+     * stopping mid-work and waiting for the user to type 続けて.
+     */
+    max_turn_steps: number;
   };
   server: { port: number; bind: string; auth_token_file?: string };
   /** GUI-configured integrations (Jira / Confluence / Redmine connectors). */
@@ -354,7 +360,12 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
   uploads: { retention_days: 30 },
   // Compaction fires at 90% of the model's context window by default;
   // token_soft_limit stays available as an absolute cap (0 = off).
-  context: { token_soft_limit: 0, keep_last: 10, compaction: { mode: "summarize", ratio: 0.9 } },
+  context: {
+    token_soft_limit: 0,
+    keep_last: 10,
+    compaction: { mode: "summarize", ratio: 0.9 },
+    max_turn_steps: 100,
+  },
   server: { port: 46_210, bind: "127.0.0.1" },
 };
 
@@ -885,11 +896,11 @@ curator:
 context:
   token_soft_limit: 0            # 絶対上限で圧縮をかけたい場合のみ設定(0 = 無効)
   keep_last: 10
-  compaction:
-    mode: summarize
+  compaction:  # M4: over the limit, ask the aux compactor to write a note (fall back to drop)
+    mode: summarize              # summarize | drop
     ratio: 0.9                   # モデルのコンテキストウィンドウの 90% で圧縮
-  compaction:  # M4: over the soft limit, ask the aux compactor to write a note (fall back to drop)
-    mode: summarize
+  max_turn_steps: 100            # 1ターンのステップ上限。25 ステップの窓を超えても
+                                 # 自動継続し、この値で打ち切る(「続けて」不要)
 
 server:
   port: 46210

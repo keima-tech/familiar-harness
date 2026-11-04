@@ -49,8 +49,11 @@ user text
         assistant msg 完了 → append(assistant)
         toolCalls あり?
           → 各 call: Permission check → Tool.execute → append(tool result)
-          → 次の step へ(maxSteps 上限あり)
-        toolCalls なし → turn 完了
+          → 次の step へ(maxSteps = 25 の窓。窓を超えたら turn.continuing を
+            出して自動継続し、context.max_turn_steps(既定 100)で打ち切り)
+        toolCalls なし → 未完了 TODO があり質問で終わっていなければ
+          自動継続(最大 2 回)。それ以外は turn 完了。
+          上限で打ち切った場合は turn.ceiling + 再開を促すマーカーを残す
   → 各イベントは SessionStore への書込とクライアント通知を並行して実施
 ```
 

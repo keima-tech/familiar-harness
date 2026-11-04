@@ -1353,6 +1353,65 @@ try {
     JSON.stringify(enterQueue),
   );
 
+  // ---- auto-continue notices, stop retry, long-wait hint -------------------
+  const notices = await evalOnce(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const before = document.querySelectorAll("#transcript .turn-note").length;
+    onEvent(state.sessionId, { type: "turn.continuing", turnId: "t1", kind: "steps", step: 25, ceiling: 100 });
+    onEvent(state.sessionId, { type: "turn.ceiling", turnId: "t2", step: 100 });
+    await sleep(100);
+    const notes = [...document.querySelectorAll("#transcript .turn-note")].map((n) => n.textContent);
+    const action = document.querySelector("#turn-label .label-action")?.textContent ?? "";
+    document.querySelector("#turn-label").textContent = "";
+    return { added: notes.length - before, last: notes.slice(-2).join(" / "), action };
+  })()`);
+  check(
+    notices?.added === 2 && String(notices?.last).includes("自動継続") && String(notices?.last).includes("上限"),
+    "auto-continue and ceiling notices appear in the transcript",
+    JSON.stringify(notices),
+  );
+  check(String(notices?.action).includes("続けて"), "the ceiling offers a one-click continue", JSON.stringify(notices));
+
+  const retryBtn = await evalOnce(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    state.lastUserText = "retry target text";
+    onEvent(state.sessionId, { type: "turn.aborted", turnId: "t3" });
+    await sleep(100);
+    const btn = document.querySelector("#turn-label .label-action");
+    const label = document.querySelector("#turn-label").textContent;
+    document.querySelector("#turn-label").textContent = "";
+    state.lastUserText = "";
+    return { hasBtn: btn !== null, label };
+  })()`);
+  check(
+    retryBtn?.hasBtn === true && String(retryBtn?.label).includes("停止"),
+    "a stopped turn offers a one-click retry",
+    JSON.stringify(retryBtn),
+  );
+
+  const longWait = await evalOnce(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const s = await rpc("session.create", { cwd: ${JSON.stringify(repoRoot)} });
+    await openSession(s.id);
+    const prev = state.pendingHintMs;
+    state.pendingHintMs = 60;
+    void sendTurn("@hold 2200 hint-check", []);
+    await sleep(400);
+    const hinted = document.querySelector("#transcript .pending-label")?.textContent ?? "";
+    state.pendingHintMs = prev;
+    for (let i = 0; i < 30; i++) {
+      if (!(await rpc("session.get", { id: s.id })).running) break;
+      await sleep(200);
+    }
+    await sleep(300);
+    return { hinted };
+  })()`);
+  check(
+    String(longWait?.hinted).includes("まだ応答を待っています"),
+    "the pending bubble explains a long first-token wait",
+    JSON.stringify(longWait),
+  );
+
   // ---- EN mode: every new string is translated (no CJK fallback) -----------
   const cjk = await evalOnce(`(() => {
     setLang("en");
@@ -1365,6 +1424,7 @@ try {
       "ssh.save", "ssh.edit", "ssh.delete", "ssh.connect", "ssh.test", "ssh.testing", "ssh.testOk",
       "ssh.testFail", "ssh.saved", "ssh.deleted", "ssh.deleteConfirm", "ssh.none", "ssh.errHost",
       "ssh.desktopOnly", "ssh.connectFail", "ssh.current", "nav.connections", "attach.remotePath",
+      "turn.longWait", "turn.noteSteps", "turn.noteTodos", "turn.noteCeiling", "turn.retryNow",
     ];
     const bad = /[\u3040-\u30ff\u3400-\u9fff\uff66-\uff9f]/;
     return keys.filter((k) => bad.test(t(k))).map((k) => k + "=" + t(k));

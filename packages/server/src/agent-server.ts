@@ -1660,7 +1660,11 @@ export class AgentServer {
       return res;
     } catch (err) {
       if (controller.signal.aborted) {
-        log.debug(`turn aborted by user: session ${sessionId}`);
+        // info, not debug: an aborted turn leaves no assistant message, and
+        // "the session went quiet" reports were impossible to diagnose
+        log.info(
+          `turn aborted by user: session ${sessionId} ("${text.length > 60 ? `${text.slice(0, 60)}…` : text}")`,
+        );
         return { turnId: "", steps: 0, toolCalls: 0, usage: {}, aborted: true };
       }
       // Include the failure in the response as well (events already carried it).

@@ -15,6 +15,7 @@ import {
  * - last is user, text contains `@dump-prompt-tools` → lists the advertised tool names
  * - last is user, text contains `@fail`            → throws ProviderError 503 (fallback tests)
  * - last is user, contains `@hold <ms>`            → waits, keeping the turn open
+ * - last is user, contains `@repeat <n>`           → n chained read calls (long turns)
  * - last is user text contains `@write <path>`     → tool call: write
  * - last is user, contains `@read <path>`          → tool call: read
  * - last is user, otherwise                        → streams back `mock: <echo>`
@@ -35,6 +36,29 @@ export class MockProvider implements Provider {
     const last = messages[messages.length - 1];
 
     if (last && last.role === "tool") {
+      // `@repeat <n>`: keep calling the tool until n results followed the
+      // instruction — exercises long turns (step windows / auto-continue).
+      const repeatInstr = [...messages]
+        .reverse()
+        .find((m) => m.role === "user" && typeof m.content === "string" && /@repeat\s+\d+/.test(m.content));
+      if (repeatInstr) {
+        const target = Number(repeatInstr.content.match(/@repeat\s+(\d+)/)?.[1] ?? 0);
+        const done = messages
+          .slice(messages.indexOf(repeatInstr))
+          .filter((m) => m.role === "tool").length;
+        if (done < target) {
+          onChunk({ type: "tool_call_start", index: 0, id: `call_repeat_${done}`, name: "read" });
+          onChunk({
+            type: "tool_call_delta",
+            index: 0,
+            argumentsDelta: JSON.stringify({ path: `repeat-${done + 1}.txt` }),
+          });
+          onChunk({ type: "stop", finishReason: "tool_calls" });
+          return { stopReason: "tool_calls" };
+        }
+        streamText(`mock: repeated ${done} steps`, onChunk);
+        return { stopReason: "end_turn", usage: { promptTokens: 1, completionTokens: 3 } };
+      }
       const firstLine = last.content.split("\n")[0] ?? "";
       const text = `MOCK-OK: ${firstLine}`;
       streamText(text, onChunk);
@@ -98,6 +122,18 @@ export class MockProvider implements Provider {
       await new Promise((resolve) => setTimeout(resolve, Math.min(30_000, Number(holdMatch[1]))));
       streamText(`mock: held ${holdMatch[1]}ms`, onChunk);
       return { stopReason: "end_turn", usage: { promptTokens: 1, completionTokens: 5 } };
+    }
+    // `@repeat <n>`: first step; the tool branch above continues until n is hit.
+    const repeatMatch = userText.match(/@repeat\s+(\d+)/);
+    if (repeatMatch && Number(repeatMatch[1]) > 0) {
+      onChunk({ type: "tool_call_start", index: 0, id: "call_repeat_0", name: "read" });
+      onChunk({
+        type: "tool_call_delta",
+        index: 0,
+        argumentsDelta: JSON.stringify({ path: "repeat-1.txt" }),
+      });
+      onChunk({ type: "stop", finishReason: "tool_calls" });
+      return { stopReason: "tool_calls" };
     }
     // `@fail` or `@fail-<providerId>`: simulate a pre-stream failure.
     // With the provider form, only that provider fails (fallback tests).

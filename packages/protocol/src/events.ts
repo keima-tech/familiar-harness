@@ -24,6 +24,13 @@ export type AgentEvent =
       /** unified-diff text for edit/write results (GUI colored diff) */
       diff?: string;
     }
+  /**
+   * The turn crossed a step window (or was nudged about open TODOs) and keeps
+   * going by itself — no 続けて needed. `step`/`ceiling` are step counts.
+   */
+  | { type: "turn.continuing"; turnId: string; kind: "steps" | "todos"; step: number; ceiling: number }
+  /** the step ceiling stopped the turn mid-work; a reply resumes it */
+  | { type: "turn.ceiling"; turnId: string; step: number }
   | { type: "turn.end"; turnId: string; usage?: Usage }
   | { type: "turn.error"; turnId: string; error: string; recoverable: boolean }
   /** the turn was cancelled (user abort) — normal shutdown, not an error */

@@ -131,7 +131,19 @@ export class AgentRunner {
     const model = opts.model ?? session.model;
     const profile = opts.profile ?? session.profile;
     const effort = normalizeEffort(opts.effort ?? (session as { effort?: string | null }).effort);
-    const maxSteps = opts.maxSteps ?? 25;
+    // `maxSteps` is the size of one step window. When the caller did not pin
+    // it (CLI/RPC override), the turn keeps going past the window up to the
+    // configured ceiling — heavy multi-step chores used to stop dead at 25
+    // steps and wait for the user to type 続けて.
+    const stepWindow = opts.maxSteps ?? 25;
+    const stepCeiling =
+      opts.maxSteps ?? Math.max(stepWindow, this.cfg.context?.max_turn_steps ?? 100);
+    /** consecutive "open todos" nudges issued in this turn */
+    let todoNudges = 0;
+    /** system note for the next step (an auto-continue instruction) */
+    let pendingNudge: string | undefined;
+    /** true when the model finished on its own (no tool calls) */
+    let finishedNaturally = false;
     const yolo = opts.yolo ?? false;
 
     const turnId = crypto.randomUUID();
@@ -182,8 +194,18 @@ export class AgentRunner {
       : baseTools.filter((t) => !SELF_IMPROVE_TOOLS.includes(t.name as "memory_manage"));
 
     try {
-      for (let stepIndex = 0; stepIndex < maxSteps; stepIndex++) {
+      for (let stepIndex = 0; stepIndex < stepCeiling; stepIndex++) {
         steps += 1;
+        if (stepIndex > 0 && stepIndex % stepWindow === 0) {
+          // the previous window ended with tool calls pending — keep working
+          opts.onEvent({
+            type: "turn.continuing",
+            turnId,
+            kind: "steps",
+            step: stepIndex,
+            ceiling: stepCeiling,
+          });
+        }
         opts.onEvent({ type: "step.start", turnId, index: stepIndex });
 
         // Build injected prompt sections: memory + skills catalog (M3),
@@ -205,6 +227,10 @@ export class AgentRunner {
           if (section !== "") extra.push(section);
         }
         for (const part of opts.extraSystem ?? []) extra.push(part);
+        if (pendingNudge !== undefined) {
+          extra.push(pendingNudge);
+          pendingNudge = undefined;
+        }
         if (session.remote) {
           extra.push(
             `## Remote execution\n` +
@@ -325,7 +351,26 @@ export class AgentRunner {
         if ((result.usage?.promptTokens ?? 0) > 0) lastStepPromptTokens = result.usage!.promptTokens!;
         stepPromptFromChunks = 0;
 
-        if (stepToolCalls.length === 0) break;
+        if (stepToolCalls.length === 0) {
+          // The model stopped. If it left TODO items open and did not ask the
+          // user a question, nudge it to keep working (what the user used to
+          // have to trigger by typing 続けて). Bounded and visible.
+          const nudge = this.todoContinuationNudge(session, assistantText, todoNudges);
+          if (nudge !== undefined) {
+            todoNudges += 1;
+            pendingNudge = nudge;
+            opts.onEvent({
+              type: "turn.continuing",
+              turnId,
+              kind: "todos",
+              step: stepIndex + 1,
+              ceiling: stepCeiling,
+            });
+            continue;
+          }
+          finishedNaturally = true;
+          break;
+        }
 
         toolCallsTotal += stepToolCalls.length;
 
@@ -402,6 +447,22 @@ export class AgentRunner {
         }
       }
 
+      if (!finishedNaturally) {
+        // Step ceiling hit with work still in flight: leave a visible marker
+        // instead of the transcript just stopping on a tool result.
+        const marker =
+          `[familiar: step ceiling (${stepCeiling}) reached — the turn paused mid-work. ` +
+          `Reply “続けて” (or “continue”) to resume.]`;
+        this.store.appendMessage(session.id, {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: marker,
+          createdAt: Date.now(),
+          meta: { stopReason: "step_ceiling" },
+        });
+        opts.onEvent({ type: "turn.ceiling", turnId, step: stepCeiling });
+      }
+
       const finalUsage: Usage = {
         ...(lastStepPromptTokens > 0
           ? { promptTokens: lastStepPromptTokens, contextTokens: lastStepPromptTokens }
@@ -473,13 +534,39 @@ export class AgentRunner {
   }
 
   /**
+   * The model ended its turn with open TODO items and without asking a
+   * question — tell it (as a system note for the next step) to keep going.
+   * Returns undefined when there is nothing to nudge (no store, no open
+   * items, a question was asked, or the per-turn budget is spent).
+   */
+  private todoContinuationNudge(
+    session: SessionRecord,
+    lastText: string,
+    usedNudges: number,
+  ): string | undefined {
+    if (!this.todos || usedNudges >= 2) return undefined;
+    const open = (this.todos.get(session.id) ?? []).filter((t) => t.status !== "done");
+    if (open.length === 0) return undefined;
+    // a question near the end is a deliberate hand-back: don't talk over it
+    if (/[?？]/.test(lastText.slice(-200))) return undefined;
+    const list = open
+      .slice(0, 5)
+      .map((t) => `${t.status}: ${t.title}`)
+      .join("; ");
+    return (
+      `## Unfinished work\n` +
+      `${open.length} TODO item(s) are still open (${list}). Continue working on them now. ` +
+      `Do not stop while work remains — if you are truly blocked, state exactly what you need.`
+    );
+  }
+
+  /**
    * M1/M4 compaction guard: character-based estimate over the soft limit.
    * mode "summarize" (default M4): ask the aux compactor (auxiliary.compactor
    * slot, else the session model) for a durable note; any failure falls back
    * to the M1 drop guard. Ephemeral either way (not persisted).
-   */
-  /**
-   * Compaction gate. The trigger combines two signals:
+   *
+   * The trigger combines two signals:
    *  - the character estimate (4 chars ≈ 1 token) — cheap but weak for
    *    Japanese, where real tokens are 3-4x the estimate;
    *  - the provider's own prompt-token count of the previous turn's last step

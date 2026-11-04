@@ -114,6 +114,13 @@ const STR = {
     "queue.waiting": "実行中のため待機中",
     "queue.queued": "送信待ちに追加しました ({0})",
     "turn.received": "受信しました — 応答を生成しています",
+    "turn.longWait": "まだ応答を待っています… しばらくぶり・大きな履歴のセッションでは、最初の応答に数分かかることがあります",
+    "turn.noteSteps": "↻ ステップ上限に達したため自動継続します ({0}/{1})",
+    "turn.noteTodos": "↻ 未完了のTODOがあるため自動継続します ({0}/{1})",
+    "turn.noteCeiling": "ステップ上限({0})に達しました — 続行するには「続けて」",
+    "turn.retryNow": "再実行",
+    "turn.continueNow": "続けて",
+    "turn.continueWord": "続けて",
     "turn.working": "実行中… {0}",
     "toast.dupRunning": "同じ内容がすでに実行中です(重複送信はしません)",
     "side.running": "実行中",
@@ -581,6 +588,13 @@ const STR = {
     "queue.waiting": "waiting for the running turn",
     "queue.queued": "queued ({0})",
     "turn.received": "received — generating a reply",
+    "turn.longWait": "still waiting for the model… the first reply of an idle or very large session can take a few minutes",
+    "turn.noteSteps": "↻ auto-continued past the step window ({0}/{1})",
+    "turn.noteTodos": "↻ continuing automatically — TODOs still open ({0}/{1})",
+    "turn.noteCeiling": "step ceiling ({0}) reached — reply “continue” to resume",
+    "turn.retryNow": "retry",
+    "turn.continueNow": "continue",
+    "turn.continueWord": "continue",
     "turn.working": "working… {0}",
     "toast.dupRunning": "the same instruction is already running (not sent twice)",
     "side.running": "running",
@@ -1338,6 +1352,8 @@ const state = {
   pendingToolCards: [], // live tool.call cards awaiting their result
   pendingAttachments: [], // images waiting in the composer (multimodal send)
   busySessionId: null, // session whose turn is running (busy is global, turns are not)
+  /** after this long without a first token, explain the likely cause */
+  pendingHintMs: 25_000,
   turnStartedAt: null,
   turnTimer: null,
   lastElapsed: null,
@@ -2672,7 +2688,8 @@ function showPendingBubble(sessionId) {
   wrap.className = "msg assistant pending-turn";
   wrap.innerHTML =
     `<div class="bubble"><span class="dots"><i></i><i></i><i></i></span>` +
-    `<span>${esc(t("turn.received"))}</span><span class="pending-time"></span></div>`;
+    `<span class="pending-label">${esc(t("turn.received"))}</span>` +
+    `<span class="pending-time"></span></div>`;
   $("#transcript").appendChild(wrap);
   dropEmptyState();
   state.pendingBubble = wrap;
@@ -2683,6 +2700,33 @@ function hidePendingBubble() {
   if (!state.pendingBubble) return;
   state.pendingBubble.remove();
   state.pendingBubble = null;
+}
+
+/** A quiet full-width line in the transcript (auto-continue notices etc.). */
+function appendTurnNote(text) {
+  const tr = $("#transcript");
+  if (!tr) return;
+  const div = document.createElement("div");
+  div.className = "turn-note";
+  div.textContent = text;
+  tr.appendChild(div);
+  scrollBottom();
+}
+
+/** Small action button inside the top turn label (retry / continue). */
+function addLabelButton(labelText, onClick, title) {
+  const label = $("#turn-label");
+  if (!label || label.querySelector(".label-action")) return;
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "label-action";
+  btn.textContent = labelText;
+  if (title) btn.title = title;
+  btn.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    onClick();
+  });
+  label.appendChild(btn);
 }
 
 // live streaming: one bubble per assistant step for the active session
@@ -2747,6 +2791,17 @@ function setBusy(busy) {
       $("#turn-label").textContent = t("turn.working", `${s}s`);
       const pendingTime = state.pendingBubble?.querySelector(".pending-time");
       if (pendingTime) pendingTime.textContent = `${Math.floor(Number(s))}s`;
+      // the first token of an idle/large session can take minutes (cold model
+      // cache): say so instead of leaving the user guessing
+      const pendingLabel = state.pendingBubble?.querySelector(".pending-label");
+      if (
+        pendingLabel &&
+        Date.now() - state.turnStartedAt >= state.pendingHintMs &&
+        pendingLabel.dataset.hinted !== "1"
+      ) {
+        pendingLabel.dataset.hinted = "1";
+        pendingLabel.textContent = t("turn.longWait");
+      }
     }, 100);
   } else {
     $("#turn-state")?.classList.remove("running");
@@ -3034,10 +3089,26 @@ function onEvent(sessionId, e) {
       appendMessage("assistant", `⚠ ${e.error}`, null);
       void notifyDesktop(t("notify.turnFailed"), String(e.error ?? "").slice(0, 140), { urgent: true });
       break;
+    case "turn.continuing":
+      appendTurnNote(
+        t(e.kind === "todos" ? "turn.noteTodos" : "turn.noteSteps", String(e.step), String(e.ceiling)),
+      );
+      break;
+    case "turn.ceiling":
+      appendTurnNote(t("turn.noteCeiling", String(e.step)));
+      // one click to keep the work going, like typing 続けて
+      addLabelButton(`▶ ${t("turn.continueNow")}`, () => {
+        if (!state.busy) void sendTurn(t("turn.continueWord"), []);
+      });
+      break;
     case "turn.aborted":
       for (const b of state.turnBubbles) if (b.caret) b.caret.remove();
       state.turnBubbles = [];
       setTurnEndLabel(t("turn.stopped"));
+      // a stopped turn leaves no answer: make the instruction one click away
+      if (state.lastUserText) {
+        addLabelButton(`↻ ${t("turn.retryNow")}`, () => retryLastTurn(), state.lastUserText);
+      }
       void refreshTodo();
       refreshSessions();
       break;

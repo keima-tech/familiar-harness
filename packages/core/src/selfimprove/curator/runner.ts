@@ -71,6 +71,14 @@ export class CuratorRunner {
   // state (pause / last run)
   // ---------------------------------------------------------------------------
 
+  /**
+   * Only Familiar's own store. Skills installed globally (shared across agents)
+   * are read-only here and must never be archived, consolidated or pruned.
+   */
+  private ownedCatalog(): SkillCatalogEntry[] {
+    return this.si.skills.list().filter((e) => e.source === undefined || e.source === "familiar");
+  }
+
   private get stateFile(): string {
     return path.join(this.home, "curator", "state.json");
   }
@@ -140,7 +148,7 @@ export class CuratorRunner {
     const now = Date.now();
 
     const usage = this.si.skills.readUsage();
-    const catalog: SkillCatalogEntry[] = this.si.skills.list();
+    const catalog: SkillCatalogEntry[] = this.ownedCatalog();
     const result: CuratorPhase1Result = {
       staled: [],
       archived: [],
@@ -244,7 +252,7 @@ export class CuratorRunner {
       skipped: false,
     };
 
-    const catalog = this.si.skills.list();
+    const catalog = this.ownedCatalog();
     if (catalog.length === 0) {
       outcome.note = "no skills to consolidate";
       outcome.skipped = true;

@@ -919,6 +919,29 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
     シナリオ R(窓超えの自動継続 / 上限マーカー)を追加。ssh-e2e は 107 項目に
     (自動継続と上限のノート、停止後の再実行ボタン、長時間待ちの説明)。
 
+## v0.1.0 の実装メモ㊻(2026-11-04、共有 skills の併読)
+
+- **共有 agent-skills を読み取り専用で併読できるように**: `skills.include_global: true`(既定)で
+  `~/.agents/skills` をはじめとする共有ルート(+ `skills.paths` で追加指定可)を走査し、
+  `~/.familiar/skills` と同様に **カタログに表示して `skill_view` で全文ロード**できる。
+  `npx skills add <repo>` 等でグローバルインストールしたスキルが、OpenCode/Codex/Claude 等と
+  同様に Familiar からも使える。
+- 詳細:
+  - 併読ルートは `resolveSkillRoots()`: 既定で `~/.agents/skills`・`~/.claude/skills`・
+    `~/.codex/skills`・`~/.config/opencode/skills`・`~/.opencode/skills`・`~/.cursor/skills`・
+    `~/.windsurf/skills`(存在するもののみ。realpath で重複排除)。`skills.paths` に
+    `~` 始まりで追加可。
+  - **同名は familiar 側(`~/.familiar/skills/<name>`)が優先**(familiar で書き換えたものが勝つ)。
+  - Frontmatter は(folded scalar 含む)YAML としてパースするため、共有スキルで典型的な
+    `description: >` の複数行記述も正しくカタログ化される。
+  - `skill_view` の応答は `[dir: <絶対パス>]` を含むので、SKILL.md 内の
+    `references/` `scripts/` への相対参照を絶対パスに解決できる。
+  - 外部スキルは**familiar に一切書き込まれず、curator の stale/archive/consolidate 対象外**。
+    編集したい場合は familiar 側を編集(同名で `~/.familiar/skills` に作成)する。
+- **テスト**: mock に `@dump-skills`(`# Skills` セクションを出力)を追加。smoke に
+  シナリオ S(familiar 側が shade する / グローバル側が folded description のまま
+  カタログに出ることの検証)。実機でも 35 件(familiar 14 + 共有 21)を実測確認。
+
 ## v0.1.0 の実装メモ㊹(2026-11-01、デスクトップのアプリアイコン)
 
 - **症状**: Linux(展開した AppImage を `AppRun` で起動)でタスクバーに汎用の歯車アイコン。

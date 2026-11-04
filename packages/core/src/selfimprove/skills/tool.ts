@@ -29,8 +29,10 @@ export function createSkillViewTool(): Tool {
         return { content: `skill not found: ${name} (catalog: ${known || "empty"})`, isError: true };
       }
       const warns = skill.warnings.length > 0 ? `\n[lint warns] ${skill.warnings.join("; ")}` : "";
+      // skills reference scripts/ and references/ relative to their directory,
+      // so the model needs the absolute path
       return {
-        content: `# ${skill.name}\n\n${skill.body}${warns}`,
+        content: `# ${skill.name}\n[dir: ${skill.dir}]\n\n${skill.body}${warns}`,
         isError: false,
       };
     },

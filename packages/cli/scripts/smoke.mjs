@@ -1140,6 +1140,81 @@ console.log("— scenario R: long turns auto-continue —");
   );
 }
 
+// ---------------------------------------------------------------------------
+// Scenario S: globally installed skills (like the shared agent-skills dir)
+// ---------------------------------------------------------------------------
+console.log("— scenario S: global skills from an extra root —");
+{
+  const globalRoot = path.join(tmpBase, "global-skills");
+  const skillDir = path.join(globalRoot, "teleporter");
+  fs.mkdirSync(skillDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(skillDir, "SKILL.md"),
+    `---
+name: teleporter
+description: >
+  Folded description that spans multiple
+  lines and must be preserved as one line.
+---
+
+# Teleporter
+Do the thing globally.
+`,
+  );
+  // a home that reads the global root (and no built-in globals)
+  const homeS = path.join(tmpBase, "home-skills");
+  fs.mkdirSync(homeS, { recursive: true });
+  fs.writeFileSync(
+    path.join(homeS, "config.yaml"),
+    `version: 1\ndefault_provider: mock\nproviders:\n  mock:\n    kind: mock\nserver:\n  port: 1\n  bind: 127.0.0.1\nskills:\n  include_global: false\n  paths:\n    - ${globalRoot}\n`,
+  );
+  // familiar's own store: a shadowing copy of the global skill
+  const familiarOwn = path.join(homeS, "skills", "teleporter");
+  fs.mkdirSync(familiarOwn, { recursive: true });
+  fs.writeFileSync(
+    path.join(familiarOwn, "SKILL.md"),
+    `---
+name: teleporter
+description: familiar-owned description wins
+---
+
+# Teleporter
+Familiar's own copy.
+`,
+  );
+  const s1 = await run(
+    ["run", "-p", "@dump-skills", "--cwd", project, "--json", "--yolo"],
+    project,
+    homeS,
+  );
+  const sText = s1.parsed
+    .filter((e) => e?.type === "text.delta")
+    .map((e) => String(e.text))
+    .join("");
+  assert(
+    /teleporter/.test(sText) && /familiar-owned description wins/.test(sText),
+    "the familiar-local skill shadows the global one",
+    JSON.stringify(sText).slice(0, 260),
+  );
+  // a familiar-home that has no copy → the global skill is listed, description folded
+  fs.rmSync(familiarOwn, { recursive: true, force: true });
+  const s2 = await run(
+    ["run", "-p", "@dump-skills", "--cwd", project, "--json", "--yolo"],
+    project,
+    homeS,
+  );
+  const s2Text = s2.parsed
+    .filter((e) => e?.type === "text.delta")
+    .map((e) => String(e.text))
+    .join("");
+  assert(
+    /teleporter/.test(s2Text) &&
+      /Folded description that spans multiple lines and must be preserved as one line\./.test(s2Text),
+    "global skills are catalogued with the folded description intact",
+    JSON.stringify(s2Text).slice(0, 260),
+  );
+}
+
 console.log(
   failures === 0 ? "\nsmoke: all checks passed" : `\nsmoke: ${failures} failure(s)`,
 );

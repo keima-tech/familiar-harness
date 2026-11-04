@@ -15,6 +15,7 @@ export * from "./selfimprove/memory/store.js";
 export * from "./selfimprove/memory/approval.js";
 export * from "./selfimprove/memory/inject.js";
 export * from "./selfimprove/skills/store.js";
+export * from "./selfimprove/skills/roots.js";
 export * from "./selfimprove/skills/approval.js";
 export * from "./selfimprove/skills/lint.js";
 export * from "./selfimprove/review/prompt.js";

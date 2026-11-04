@@ -16,6 +16,7 @@ import {
  * - last is user, text contains `@fail`            → throws ProviderError 503 (fallback tests)
  * - last is user, contains `@hold <ms>`            → waits, keeping the turn open
  * - last is user, contains `@repeat <n>`           → n chained read calls (long turns)
+ * - last is user, contains `@dump-skills`          → prints the "# Skills" section
  * - last is user text contains `@write <path>`     → tool call: write
  * - last is user, contains `@read <path>`          → tool call: read
  * - last is user, otherwise                        → streams back `mock: <echo>`
@@ -154,6 +155,12 @@ export class MockProvider implements Provider {
       const present = target ? sys.includes(target) : sys.includes("# Persona instructions");
       streamText(present ? "SOUL-PRESENT" : "SOUL-ABSENT", onChunk);
       return { stopReason: "end_turn", usage: { promptTokens: 1, completionTokens: 2 } };
+    }
+    if (userText.includes("@dump-skills")) {
+      const sys = String(params.system ?? "");
+      const m = sys.match(/# Skills[\s\S]*?(?=\n\n|$)/);
+      streamText(m ? m[0] : "SKILLS-ABSENT", onChunk);
+      return { stopReason: "end_turn", usage: { promptTokens: 1, completionTokens: 3 } };
     }
     if (userText.includes("@dump-prompt-skill")) {
       const sys = params.system ?? "";

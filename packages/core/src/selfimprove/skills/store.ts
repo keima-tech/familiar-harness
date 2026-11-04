@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { parse as parseYaml } from "yaml";
 import type { SkillCatalogEntry } from "@familiar/protocol";
 import { ensureDir } from "../../paths.js";
 import { lintSkillBody } from "./lint.js";
@@ -19,17 +20,45 @@ export interface SkillView {
   description: string;
   body: string;
   warnings: string[];
+  /** absolute directory holding SKILL.md — skills reference files relative to it */
+  dir: string;
 }
 
 /**
- * Skills live at <home>/skills/<name>/SKILL.md with frontmatter
- * (name, description). Usage counters in <home>/skills/.usage.json.
+ * Familiar's own skills live at <home>/skills/<name>/SKILL.md with frontmatter
+ * (name, description); usage counters in <home>/skills/.usage.json.
+ *
+ * Additional read-only roots may be supplied (global agent-skills directories
+ * and user-configured paths). Familiar's own store wins on name conflicts; the
+ * external roots are never written to.
  */
 export class SkillStore {
   private readonly root: string;
+  private readonly extraRoots: readonly string[];
 
-  constructor(home: string) {
+  constructor(home: string, opts: { extraRoots?: string[] } = {}) {
     this.root = path.join(home, "skills");
+    this.extraRoots = (opts.extraRoots ?? []).filter((r) => r.trim() !== "");
+  }
+
+  /** Roots in read order: ours first (wins on name conflicts), then externals. */
+  private allRoots(): readonly string[] {
+    return [this.root, ...this.extraRoots];
+  }
+
+  /** Locate a skill directory across all roots (familiar first). */
+  private findDir(name: string): { dir: string; source: string } | undefined {
+    for (const root of this.allRoots()) {
+      const dir = path.join(root, name);
+      try {
+        if (fs.statSync(dir).isDirectory() && fs.existsSync(path.join(dir, "SKILL.md"))) {
+          return { dir, source: root === this.root ? "familiar" : root };
+        }
+      } catch {
+        /* try the next root */
+      }
+    }
+    return undefined;
   }
 
   dirOf(name: string): string {
@@ -38,39 +67,55 @@ export class SkillStore {
 
   list(): SkillCatalogEntry[] {
     const usage = this.readUsage();
-    if (!fs.existsSync(this.root)) return [];
     const out: SkillCatalogEntry[] = [];
-    for (const name of fs.readdirSync(this.root).sort()) {
-      const dir = path.join(this.root, name);
-      if (name.startsWith(".") || !fs.statSync(dir).isDirectory()) continue;
-      const skill = parseSkillFile(path.join(dir, "SKILL.md"));
-      if (!skill) continue;
-      const u: SkillUsage = usage[name] ?? { useCount: 0 };
-      out.push({
-        name,
-        description: skill.description,
-        bodyChars: skill.body.length,
-        useCount: u.useCount ?? 0,
-        lastUsedAt: u.lastUsedMs,
-        createdAt: u.createdMs,
-      });
+    const seen = new Set<string>();
+    for (const root of this.allRoots()) {
+      if (!fs.existsSync(root)) continue;
+      for (const name of fs.readdirSync(root)) {
+        if (seen.has(name)) continue;
+        if (name.startsWith(".")) continue;
+        const dir = path.join(root, name);
+        let stat: fs.Stats;
+        try {
+          stat = fs.statSync(dir);
+        } catch {
+          continue;
+        }
+        if (!stat.isDirectory()) continue;
+        const skill = parseSkillFile(path.join(dir, "SKILL.md"));
+        if (!skill) continue;
+        seen.add(name);
+        const u: SkillUsage = usage[name] ?? { useCount: 0 };
+        out.push({
+          name,
+          description: skill.description,
+          bodyChars: skill.body.length,
+          useCount: u.useCount ?? 0,
+          lastUsedAt: u.lastUsedMs,
+          createdAt: u.createdMs,
+          source: root === this.root ? "familiar" : root,
+        });
+      }
     }
-    return out;
+    return out.sort((a, b) => a.name.localeCompare(b.name));
   }
 
   /** Load the full SKILL.md body and bump the usage counter. */
   view(name: string): SkillView | undefined {
-    const file = path.join(this.dirOf(name), "SKILL.md");
-    const skill = parseSkillFile(file);
+    const found = this.findDir(name);
+    if (!found) return undefined;
+    const skill = parseSkillFile(path.join(found.dir, "SKILL.md"));
     if (!skill) return undefined;
-    const fileCount = countReferenceFiles(this.dirOf(name));
+    const fileCount = countReferenceFiles(found.dir);
     const warnings = lintSkillBody({ body: skill.body, refFileCount: fileCount });
     this.bumpUsage(name);
-    return { name, description: skill.description, body: skill.body, warnings };
+    return { name, description: skill.description, body: skill.body, warnings, dir: found.dir };
   }
 
   get(name: string): { name: string; description: string; body: string } | undefined {
-    const skill = parseSkillFile(path.join(this.dirOf(name), "SKILL.md"));
+    const found = this.findDir(name);
+    if (!found) return undefined;
+    const skill = parseSkillFile(path.join(found.dir, "SKILL.md"));
     return skill ? { name, ...skill } : undefined;
   }
 
@@ -203,13 +248,26 @@ export function parseSkillFile(
     if (m) {
       const front = m[1] ?? "";
       body = text.slice((m.index ?? 0) + m[0].length);
-      const d = front.match(/^description:\s*(.+)$/m);
-      if (d) description = (d[1] ?? "").trim();
+      description = parseFrontmatter(front);
     }
     return { description, body: body.trim() };
   } catch {
     return undefined;
   }
+}
+
+/** YAML frontmatter, tolerating the folded style used by global skills. */
+function parseFrontmatter(front: string): string {
+  try {
+    const fm = parseYaml(front) as Record<string, unknown> | null | undefined;
+    const desc = fm && typeof fm === "object" ? fm["description"] : undefined;
+    if (typeof desc === "string") return desc.trim();
+  } catch {
+    // fall through: keep a naive single-line read for odd frontmatter
+    const d = front.match(/^description:\s*(.+)$/m);
+    if (d) return (d[1] ?? "").trim();
+  }
+  return "";
 }
 
 /** Compose a SKILL.md with frontmatter from description + body. */

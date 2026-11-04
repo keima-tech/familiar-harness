@@ -66,6 +66,8 @@ memory:
   max_prompt_chars: 4000    # 注入合計上限(超過は新しめ順カット + memory.truncation)
 skills:
   write_approval: true
+  include_global: true     # ~/.agents/skills 等の共有 skills を読み取り専用で併読(既定 true)
+  paths: []                # 追加で読むディレクトリ(先頭から順に。同名は familiar 側優先)
 self_review:
   enabled: true             # turn 完了後に reviewer(aux) を起動して staging 提案
 
@@ -129,6 +131,8 @@ memory:
   max_prompt_chars: 4000        # 注入上限(実装上のキー)
 skills:
   write_approval: true
+  include_global: true          # ~/.agents/skills 等の共有 skills を読み取り専用で併読
+  paths: []                     # 追加で読むディレクトリ(先頭から順に。同名は familiar 側優先)
 self_review:
   enabled: true                 # turn 直後の reviewer
 curator:

@@ -70,6 +70,17 @@ export interface MemoryConfig {
 
 export interface SkillsConfig {
   write_approval: boolean;
+  /**
+   * Also read skills from the well-known global agent-skills directories
+   * (~/.agents/skills, ~/.claude/skills, ~/.codex/skills, ~/.config/opencode/skills,
+   * ~/.opencode/skills, ~/.cursor/skills, ~/.windsurf/skills). Read-only.
+   */
+  include_global: boolean;
+  /**
+   * Extra read-only directories to read skills from, applied in order
+   * (the first directory holding a skill name wins).
+   */
+  paths: string[];
 }
 
 export interface SelfReviewConfig {
@@ -343,7 +354,7 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
     websearch: { provider: "duckduckgo", base_url: "" },
   },
   memory: { write_approval: true, max_prompt_chars: 4000 },
-  skills: { write_approval: true },
+  skills: { write_approval: true, include_global: true, paths: [] },
   self_review: { enabled: true },
   curator: {
     enabled: true,
@@ -846,7 +857,10 @@ memory:
   write_approval: true      # false で memory_manage / self-review が直接反映
   max_prompt_chars: 4000    # 注入合計上限(超過分は新しめ順カット)
 skills:
-  write_approval: true
+  write_approval: true     # false で skill_manage が直接反映(非推奨)
+  include_global: true     # ~/.agents/skills 等の共有 skills も読む(読み取り専用)
+  # paths:                 # 追加で読むディレクトリ(最初に見つかったものを採用)
+  #   - ~/my-skills
 self_review:
   enabled: true             # turn 完了後に reviewer を起動して staging 提案
 

@@ -175,4 +175,6 @@ export interface SkillCatalogEntry {
   useCount: number;
   lastUsedAt?: number;
   createdAt?: number;
+  /** "familiar" for the local store, otherwise the absolute directory it came from */
+  source?: string;
 }

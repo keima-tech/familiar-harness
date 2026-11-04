@@ -36,6 +36,7 @@ import {
   PendingMemoryStore,
   SkillStore,
   PendingSkillStore,
+  resolveSkillRoots,
   Settings,
   CuratorRunner,
   postTurnReview,
@@ -132,7 +133,7 @@ export class AgentServer {
         return {
           memories: new MemoryStore(home),
           pendingMemories: new PendingMemoryStore(home),
-          skills: new SkillStore(home),
+          skills: new SkillStore(home, { extraRoots: resolveSkillRoots(this.cfg.skills) }),
           pendingSkills: new PendingSkillStore(home),
           settings: new Settings(home),
         };

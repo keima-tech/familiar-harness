@@ -46,6 +46,12 @@ Hermes Agent の実装を参考に、以下の 5 部品で構成する。**memor
 ## 2. skills(遅延ロード手続き)
 
 - 形式: `~/.familiar/skills/<name>/SKILL.md`(+ `references/`, `scripts/`, `templates/` 任意)
+- **外部スキル(読み取り専用)**: `skills.include_global: true`(既定)で `~/.agents/skills`・
+  `~/.claude/skills`・`~/.codex/skills`・`~/.config/opencode/skills`・`~/.opencode/skills`・
+  `~/.cursor/skills`・`~/.windsurf/skills` を併読する(同名は familiar 側が優先)。
+  `skills.paths` に追加ルートを指定できる。Frontmatter は(folded 含む)YAML でパース。
+  `skill_view` は `dir: <abs path>` を返すので、SKILL.md 内の相対参照(scripts/ 等)を
+  絶対パスに解決できる。外部スキルは familiar に書き込まれず、curator の対象外。
   - frontmatter: `name`, `description`
   - SKILL.md 本体はカタログ一覧でのみ description を参照し、該当タスク時に `skill_view` で全文ロード
 - 操作: `skill_manage` ツール(create / edit / patch / delete / write_file / remove_file)

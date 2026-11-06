@@ -1,6 +1,7 @@
 import { messageAttachments, type ChatMessage, type ModelInfo } from "@familiar/protocol";
 import type { ProviderConfig } from "../config.js";
 import { log } from "../logger.js";
+import { repairToolArguments } from "./tool-args.js";
 import {
   type ChatParams,
   type ChatResult,
@@ -230,7 +231,13 @@ function safeParse(json: string): unknown {
   try {
     return JSON.parse(json || "{}") as unknown;
   } catch {
-    return { _invalid_json: json };
+    // truncated arguments used to be forwarded as an invalid object; repair
+    // them so the tool at least sees the recovered prefix
+    try {
+      return JSON.parse(repairToolArguments(json)) as unknown;
+    } catch {
+      return {};
+    }
   }
 }
 

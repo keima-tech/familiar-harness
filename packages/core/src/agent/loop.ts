@@ -12,6 +12,7 @@ import type { SessionStore } from "../session/store.js";
 import type { MessageAttachment, SessionRecord, SessionRemote } from "@familiar/protocol";
 import type { ProviderRegistry } from "../providers/index.js";
 import { ProviderError } from "../providers/base.js";
+import { repairToolArguments } from "../providers/tool-args.js";
 import {
   defaultToolRegistry,
   validateToolArgs,
@@ -760,7 +761,7 @@ function takeObservedToolCalls(messageId: string): ToolCall[] {
     .map(([i, c]) => ({
       id: c.id || `call_${i}`,
       name: c.name || "unknown_tool",
-      arguments: c.arguments || "{}",
+      arguments: repairToolArguments(c.arguments || "{}"),
     }));
 }
 

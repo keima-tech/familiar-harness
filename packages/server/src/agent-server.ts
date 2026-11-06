@@ -544,6 +544,15 @@ export class AgentServer {
             : {}),
         };
       }
+      case "session.repair": {
+        // un-poison a session whose stored tool-call arguments are not valid
+        // JSON (a truncated stream makes every later request HTTP 400)
+        const repairId = str(params, "id");
+        if (!repairId) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "session id is required");
+        this.requireSession(repairId);
+        const repaired = this.store.repairToolCallArguments(repairId);
+        return { repaired };
+      }
       case "session.delete": {
         const delId = str(params, "id");
         if (!delId) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "session id is required");
@@ -1670,8 +1679,38 @@ export class AgentServer {
         );
         return { turnId: "", steps: 0, toolCalls: 0, usage: {}, aborted: true };
       }
+      // A "HTTP 400" here is nearly always the provider rejecting a stored
+      // tool-call argument that was truncated mid-stream: repair the history
+      // and retry once so the session heals instead of staying broken.
+      const message = err instanceof Error ? err.message : String(err);
+      if (/HTTP 40[0-9]/.test(message)) {
+        const fixed = this.store.repairToolCallArguments(sessionId);
+        if (fixed > 0) {
+          log.warn(`turn failed (${message}); repaired ${fixed} message(s) — retrying once`);
+          try {
+            const retry = await this.runner.runTurn({
+              sessionId,
+              userText: text,
+              attachments: attachments.length > 0 ? attachments : undefined,
+              provider: str(params, "provider"),
+              model: str(params, "model"),
+              profile: str(params, "profile") ?? undefined,
+              effort: str(params, "effort"),
+              yolo: params["yolo"] === true,
+              plan: params["plan"] === true,
+              permissionMode: permissionModeOf(params["permissionMode"]),
+              maxSteps: num(params, "maxSteps"),
+              signal: controller.signal,
+              onEvent: events,
+            });
+            return retry;
+          } catch {
+            /* fall through to the original error */
+          }
+        }
+      }
       // Include the failure in the response as well (events already carried it).
-      log.error(`turn failed: ${err instanceof Error ? err.message : String(err)}`);
+      log.error(`turn failed: ${message}`);
       throw err;
     } finally {
       this.activeTurns.delete(sessionId);

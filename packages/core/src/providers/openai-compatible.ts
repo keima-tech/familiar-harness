@@ -1,6 +1,7 @@
 import { messageAttachments, type ChatMessage, type ModelInfo } from "@familiar/protocol";
 import type { ProviderConfig } from "../config.js";
 import { log } from "../logger.js";
+import { repairToolArguments } from "./tool-args.js";
 import {
   type ChatParams,
   type ChatResult,
@@ -158,7 +159,9 @@ export class OpenAiCompatibleProvider implements Provider {
           wire.tool_calls = msg.toolCalls.map((tc) => ({
             id: tc.id,
             type: "function",
-            function: { name: tc.name, arguments: tc.arguments },
+            // a truncated/legacy arguments string would make the provider
+            // reject the whole request with HTTP 400 — repair it on the way out
+            function: { name: tc.name, arguments: repairToolArguments(tc.arguments) },
           }));
         }
         messages.push(wire);

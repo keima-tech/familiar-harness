@@ -6,6 +6,7 @@ import type {
   SessionRemote,
   ToolCall,
 } from "@familiar/protocol";
+import { repairToolArguments } from "../providers/tool-args.js";
 import { ensureDir } from "../paths.js";
 
 /**
@@ -27,6 +28,11 @@ export interface SessionStore {
   listSessions(): SessionRecord[];
   appendMessage(sessionId: string, msg: ChatMessage): void;
   getMessages(sessionId: string): ChatMessage[];
+  /**
+   * Repair malformed tool-call arguments in stored messages (un-poisons a
+   * session that a truncated stream left unable to reach the provider).
+   */
+  repairToolCallArguments(sessionId: string): number;
   /** Set/update the title (used for first user message). */
   renameSession(id: string, title: string): void;
   /** Patch session options (title / provider / model / profile / cwd / effort). Returns the updated record. */
@@ -244,6 +250,43 @@ export class SqliteSessionStore implements SessionStore {
         msg.createdAt,
       );
     this.db.prepare(`UPDATE sessions SET updated_at = ? WHERE id = ?`).run(Date.now(), sessionId);
+  }
+
+  /**
+   * Rewrite every message's tool-call arguments so they are valid JSON.
+   * Sessions written before the streaming truncation was fixed can hold a
+   * malformed `arguments` string that makes providers reject the whole
+   * transcript (HTTP 400) — this un-poisons them in place. Returns the number
+   * of messages changed.
+   */
+  repairToolCallArguments(sessionId: string): number {
+    const rows = this.db
+      .prepare(`SELECT id, tool_calls FROM messages WHERE session_id = ? AND tool_calls IS NOT NULL`)
+      .all(sessionId) as { id: string; tool_calls: string }[];
+    let changed = 0;
+    for (const row of rows) {
+      let calls: ToolCall[];
+      try {
+        calls = JSON.parse(row.tool_calls) as ToolCall[];
+      } catch {
+        continue;
+      }
+      let dirty = false;
+      for (const call of calls) {
+        const fixed = repairToolArguments(call.arguments ?? "");
+        if (fixed !== call.arguments) {
+          call.arguments = fixed;
+          dirty = true;
+        }
+      }
+      if (dirty) {
+        this.db
+          .prepare(`UPDATE messages SET tool_calls = ? WHERE id = ?`)
+          .run(JSON.stringify(calls), row.id);
+        changed += 1;
+      }
+    }
+    return changed;
   }
 
   getMessages(sessionId: string): ChatMessage[] {

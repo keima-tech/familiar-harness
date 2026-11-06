@@ -87,6 +87,7 @@ export const RPC_METHODS = [
   "session.create",
   "session.list",
   "session.get",
+  "session.repair",
   "session.delete",
   "session.send",
   "permission.respond",

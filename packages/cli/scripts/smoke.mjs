@@ -1296,6 +1296,75 @@ console.log("— scenario T: office_create + permission modes —");
   assert(asked.length === 1, "'yolo' mode never asks", `asked=${asked.length}`);
 }
 
+// ---------------------------------------------------------------------------
+// Scenario U: truncated tool-call arguments are repaired, not persisted
+// ---------------------------------------------------------------------------
+console.log("— scenario U: truncated tool arguments —");
+{
+  const { repairToolArguments } = await import(
+    path.join(repoRoot, "packages/core/dist/providers/tool-args.js")
+  );
+  const cases = [
+    ['{"path":"a.txt","content":"ok"}', "valid"],
+    ['{"path":"a.txt","content":"line1\\nline2', "truncated string"],
+    ['{"a":[1,2,{"b":"x', "truncated nested"],
+    ['{"a":1,', "trailing comma"],
+    ['{"a":"end\\\\', "trailing backslash"],
+    ["totally not json", "garbage"],
+  ];
+  let allValid = true;
+  for (const [raw, label] of cases) {
+    const out = repairToolArguments(raw);
+    try {
+      JSON.parse(out);
+    } catch {
+      allValid = false;
+      console.log(`FAIL ${label}: still invalid -> ${out}`);
+    }
+  }
+  assert(allValid, "every repaired argument parses as JSON", "");
+  assert(
+    JSON.parse(repairToolArguments('{"path":"a.txt","content":"ok"}')).content === "ok",
+    "valid arguments pass through unchanged",
+    "",
+  );
+  assert(
+    JSON.parse(repairToolArguments('{"path":"a.txt","content":"line1\\nline2')).content === "line1\nline2",
+    "a truncated string keeps the recovered prefix",
+    "",
+  );
+  assert(
+    repairToolArguments("totally not json") === "{}",
+    "unrepairable arguments fall back to an empty object",
+    "",
+  );
+
+  // the store-level repair un-poisons an existing session and is idempotent
+  const { SqliteSessionStore } = await import(
+    path.join(repoRoot, "packages/core/dist/session/store.js")
+  );
+  const dbFile = path.join(tmpBase, "repair.db");
+  const store = new SqliteSessionStore(dbFile);
+  const sess = store.createSession({ provider: "mock", model: "mock-fast", cwd: project });
+  store.appendMessage(sess.id, {
+    id: "m1",
+    role: "assistant",
+    content: "",
+    createdAt: Date.now(),
+    toolCalls: [{ id: "c1", name: "write", arguments: '{"path":"b.txt","content":"half' }],
+  });
+  const changed = store.repairToolCallArguments(sess.id);
+  const after = store.getMessages(sess.id)[0].toolCalls[0].arguments;
+  let parses = true;
+  try {
+    JSON.parse(after);
+  } catch {
+    parses = false;
+  }
+  assert(changed === 1 && parses, "the store repairs a poisoned message", `changed=${changed} after=${after}`);
+  assert(store.repairToolCallArguments(sess.id) === 0, "the repair is idempotent", "");
+}
+
 console.log(
   failures === 0 ? "\nsmoke: all checks passed" : `\nsmoke: ${failures} failure(s)`,
 );

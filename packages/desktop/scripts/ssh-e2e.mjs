@@ -1412,6 +1412,58 @@ try {
     JSON.stringify(longWait),
   );
 
+  // ---- collapsible session folders ----------------------------------------
+  const folds = await evalOnce(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    localStorage.removeItem("familiar.folderFolds");
+    await refreshSessions();
+    await sleep(400);
+    const rows = () => [...document.querySelectorAll("#sessions .folder-row")];
+    const before = { count: rows().length, chevs: rows().map((r) => r.querySelector(".chev").textContent) };
+    // per-folder toggle collapses exactly one folder and persists by key
+    const row = rows()[0];
+    const key = row.dataset.key;
+    row.querySelector(".folder-toggle").click();
+    await sleep(800);
+    const afterOne = {
+      chev: rows().find((r) => r.dataset.key === key)?.querySelector(".chev").textContent,
+      stored: JSON.parse(localStorage.getItem("familiar.folderFolds") || "{}")[key] === true,
+      othersOpen: rows().filter((r) => r.dataset.key !== key).every((r) => r.querySelector(".chev").textContent === "▾"),
+    };
+    // fold-all collapses everything, then expands everything back
+    document.querySelector("#fold-all-btn").click();
+    await sleep(800);
+    const allFolded = { chevs: rows().map((r) => r.querySelector(".chev").textContent), sessions: document.querySelectorAll("#sessions li[data-id]").length, btn: document.querySelector("#fold-all-btn").textContent };
+    document.querySelector("#fold-all-btn").click();
+    await sleep(800);
+    const allOpen = { chevs: rows().map((r) => r.querySelector(".chev").textContent), sessions: document.querySelectorAll("#sessions li[data-id]").length };
+    localStorage.removeItem("familiar.folderFolds");
+    await refreshSessions();
+    return { before, key, afterOne, allFolded, allOpen };
+  })()`);
+  check(
+    folds?.before?.count > 0 && folds.before.chevs.every((c) => c === "▾"),
+    "folders start expanded",
+    JSON.stringify(folds?.before),
+  );
+  check(
+    folds?.afterOne?.chev === "▸" && folds?.afterOne?.stored === true && folds?.afterOne?.othersOpen === true,
+    "clicking a folder collapses it and persists per target+cwd",
+    JSON.stringify(folds?.afterOne),
+  );
+  check(
+    (folds?.allFolded?.chevs ?? []).every((c) => c === "▸") &&
+      folds?.allFolded?.sessions === 0 &&
+      folds?.allFolded?.btn === "⇔",
+    "the fold-all button collapses every folder",
+    JSON.stringify(folds?.allFolded),
+  );
+  check(
+    (folds?.allOpen?.chevs ?? []).every((c) => c === "▾") && folds?.allOpen?.sessions > 0,
+    "the fold-all button expands every folder again",
+    JSON.stringify(folds?.allOpen),
+  );
+
   // ---- Orca-style permission modes + voice-input mic ----------------------
   const modes = await evalOnce(`(() => {
     const rows = [...document.querySelectorAll("#mode-pop button[data-mode]")].map((b) => ({
@@ -1503,6 +1555,7 @@ try {
       "turn.longWait", "turn.noteSteps", "turn.noteTodos", "turn.noteCeiling", "turn.retryNow",
       "mode.plan", "mode.ask", "mode.edit", "mode.yolo", "mode.askDesc", "mode.editDesc",
       "mode.yoloDesc", "mic.start", "mic.stop", "mic.unsupported", "mic.denied",
+      "side.foldAll", "side.unfoldAll",
     ];
     const bad = /[\u3040-\u30ff\u3400-\u9fff\uff66-\uff9f]/;
     return keys.filter((k) => bad.test(t(k))).map((k) => k + "=" + t(k));

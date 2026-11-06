@@ -98,6 +98,8 @@ const STR = {
   ja: {
     "side.newSession": "新規セッション",
     "side.filterPh": "セッションを絞り込み…  (Ctrl+K)",
+    "side.foldAll": "すべてのフォルダーを折りたたむ",
+    "side.unfoldAll": "すべてのフォルダーを展開する",
     "side.settings": "⚙ 設定",
     "top.inbox": "承認インボックス",
     "top.status": "ステータス",
@@ -582,6 +584,8 @@ const STR = {
   en: {
     "side.newSession": "New session",
     "side.filterPh": "filter sessions…  (Ctrl+K)",
+    "side.foldAll": "collapse all folders",
+    "side.unfoldAll": "expand all folders",
     "side.settings": "⚙ Settings",
     "top.inbox": "approvals",
     "top.status": "status",
@@ -1655,6 +1659,7 @@ async function refreshSessions() {
       for (const s of group.list) ul.appendChild(sessionLi(s));
     }
   }
+  renderFoldAllButton();
   applySessionFilter();
   if (!state.sessionId && state.sessions.length > 0) {
     // reopen the session the user was last viewing (falls back to the newest)
@@ -1709,10 +1714,37 @@ function applySessionFilter() {
   }
 }
 
-function toggleFolderFold(row) {
-  const cwd = row.dataset.cwd;
+/**
+ * Collapse every folder when any is open, otherwise expand them all. The
+ * state is stored per "target|cwd" key so it survives a reload.
+ */
+function toggleAllFolds() {
+  const rows = [...document.querySelectorAll("#sessions .folder-row")];
+  if (rows.length === 0) return;
   const folds = loadFolderFolds();
-  folds[cwd] = !folds[cwd];
+  const anyOpen = rows.some((row) => folds[row.dataset.key] !== true);
+  for (const row of rows) folds[row.dataset.key] = anyOpen;
+  saveFolderFolds(folds);
+  void refreshSessions();
+}
+
+/** Keep the fold-all button's icon/label in sync with the current state. */
+function renderFoldAllButton() {
+  const btn = $("#fold-all-btn");
+  if (!btn) return;
+  const rows = [...document.querySelectorAll("#sessions .folder-row")];
+  const folds = loadFolderFolds();
+  const anyOpen = rows.some((row) => folds[row.dataset.key] !== true);
+  btn.textContent = anyOpen ? "⇕" : "⇔";
+  btn.title = t(anyOpen ? "side.foldAll" : "side.unfoldAll");
+}
+
+function toggleFolderFold(row) {
+  // the render key is "target|cwd": the same cwd on a local vs an SSH host is
+  // a different workspace, so their folded state must not be shared
+  const key = row.dataset.key || row.dataset.cwd;
+  const folds = loadFolderFolds();
+  folds[key] = !folds[key];
   saveFolderFolds(folds);
   void refreshSessions();
 }
@@ -6850,6 +6882,7 @@ function boot() {
   });
 
   $("#session-filter").addEventListener("input", applySessionFilter);
+  $("#fold-all-btn")?.addEventListener("click", () => toggleAllFolds());
   ulSessionsClick();
 
   // topbar: search + gauge + settings + session menu

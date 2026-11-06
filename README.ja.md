@@ -26,8 +26,8 @@
 - **client/server 分離** — 1 つのコア、3 つのフロントエンド。
 - **プロバイダ抽象** — OpenAI 互換 API(OpenAI / OpenRouter / NVIDIA / vLLM / llama.cpp 等)・Anthropic・キーレスのローカルエンドポイント(Ollama、LAN 内 LLM サーバ)。既定プロバイダに認証情報が無い場合、呼び出し可能なプロバイダへ自動フォールバックするため、ローカルモデルで `familiar chat` がそのまま動きます。
 - **フルスクリーン TUI** — スプラッシュ+外枠なしレイアウト、`/models`・`/sessions` ピッカー、bracketed paste、CJK IME 対応カーソル、TUI 内ツール承認(`y/N`)、Esc でターン中断、tok/s 表示、モデル別コンテキスト長表示。
-- **Web UI** — `familiar serve` が配信(既定 `http://127.0.0.1:46210`):セッション一覧、provider/model ピッカー、コンテキストゲージ、tok/s、diff カード、設定。
-- **ツール群** — read/write/edit、glob/grep、bash、webfetch/websearch、todo、サブエージェント `task`(並列)、git worktree、MCP サーバ(stdio・ホットロード)。
+- **Web UI** — `familiar serve` が配信(既定 `http://127.0.0.1:46210`):セッション一覧、provider/model ピッカー、権限モード(Plan / 承認を求める / 編集を許可 / フルアクセス)、音声入力、コンテキストゲージ、tok/s、diff カード、設定。
+- **ツール群** — read/write/edit、**office_create(Word / Excel / PowerPoint を生成)**、glob/grep、bash、webfetch/websearch、todo、サブエージェント `task`(並列)、git worktree、MCP サーバ(stdio・ホットロード)。
 - **自己改善ループ** — 永続 memory、`SKILL.md` 手続き+curator(使用統計・staleness・archival)、バックグラウンド自己レビュー、staging された書き込みの人間承認。
 - **安全性** — 危険なツール呼び出しは必ず承認アダプタ経由。`plan` モードは読み取り専用ツールに制限。秘密情報は環境変数か `~/.familiar/secrets/*.key` に保存し、設定ファイルに直書きしない。
 - **Windows + Linux 両対応**(パス・シェル解決・PowerShell 対応)。デスクトップは electron-builder でインストーラ配布(deb / AppImage / NSIS)。

@@ -258,12 +258,20 @@ const STR = {
     "plus.file": "📎 ファイルを添付…",
     "plus.ctx": "＠ コンテキスト追加",
     "plus.shell": "❯ シェルコマンド",
-    "chip.mode": "エージェントモード",
+    "chip.mode": "権限モード",
     "chip.model": "セッションのモデル",
-    "mode.build": "Build",
-    "mode.buildDesc": "全ツール使用可",
     "mode.plan": "Plan",
-    "mode.planDesc": "読み取り専用ツール",
+    "mode.planDesc": "読み取り専用。編集やコマンドは実行しません",
+    "mode.ask": "承認を求める",
+    "mode.askDesc": "設定で許可されていない編集やコマンドの前に確認します",
+    "mode.edit": "編集を許可",
+    "mode.editDesc": "ファイルの編集と操作を承認し、それ以外は確認します",
+    "mode.yolo": "フルアクセス",
+    "mode.yoloDesc": "編集やコマンドの前に確認しません",
+    "mic.start": "音声入力を開始",
+    "mic.stop": "音声入力を停止",
+    "mic.unsupported": "この環境では音声入力を使えません",
+    "mic.denied": "マイクの使用が許可されませんでした",
     "chip.modelLabel": "モデル",
     "mp.search": "モデルを検索…",
     "mp.manage": "モデルを管理",
@@ -535,8 +543,10 @@ const STR = {
     "cwd.noMatch": "一致するフォルダーがありません",
     "cmd.new": "新しいセッション",
     "cmd.model": "モデルを選択",
-    "cmd.plan": "Plan モードへ切替",
-    "cmd.build": "Build モードへ切替",
+    "cmd.plan": "Plan モードへ切替(読み取り専用)",
+    "cmd.ask": "編集とコマンドの前に確認する",
+    "cmd.edit": "ファイル編集を許可(それ以外は確認)",
+    "cmd.yolo": "フルアクセス — 確認しない",
     "cmd.export": "Markdown で出力",
     "cmd.retry": "直前のターンを再実行",
     "cmd.settings": "設定を開く",
@@ -732,12 +742,20 @@ const STR = {
     "plus.file": "📎 Attach from file…",
     "plus.ctx": "＠ Add context",
     "plus.shell": "❯ Shell command",
-    "chip.mode": "agent mode",
+    "chip.mode": "permission mode",
     "chip.model": "model for this session",
-    "mode.build": "Build",
-    "mode.buildDesc": "full tool access",
     "mode.plan": "Plan",
-    "mode.planDesc": "read-only tools",
+    "mode.planDesc": "read-only — never edits or runs commands",
+    "mode.ask": "Ask before acting",
+    "mode.askDesc": "ask before edits and commands that the config does not allow",
+    "mode.edit": "Allow edits",
+    "mode.editDesc": "approve file edits and operations; ask for everything else",
+    "mode.yolo": "Full access",
+    "mode.yoloDesc": "never ask before edits or commands",
+    "mic.start": "start voice input",
+    "mic.stop": "stop voice input",
+    "mic.unsupported": "voice input is not available in this environment",
+    "mic.denied": "microphone permission was denied",
     "chip.modelLabel": "model",
     "mp.search": "Search models…",
     "mp.manage": "Manage models",
@@ -1009,8 +1027,11 @@ const STR = {
     "cwd.noMatch": "no matching folders",
     "cmd.new": "new session",
     "cmd.model": "pick a model",
-    "cmd.plan": "switch to Plan mode",
-    "cmd.build": "switch to Build mode",
+    "cmd.plan": "switch to Plan mode (read-only)",
+    "cmd.build": "switch to Build mode (allow edits)",
+    "cmd.ask": "ask before edits and commands",
+    "cmd.edit": "allow file edits; ask for the rest",
+    "cmd.yolo": "full access — never ask",
     "cmd.export": "export as markdown",
     "cmd.retry": "retry the last turn",
     "cmd.settings": "open settings",
@@ -1090,7 +1111,7 @@ function applyI18n() {
   $("#session-title").textContent = state.currentSession
     ? state.currentSession.title
     : t("top.noSession");
-  $("#mode-chip").textContent = `${t(state.mode === "plan" ? "mode.plan" : "mode.build")} ▾`;
+  renderModeChip();
   renderEffortChip();
   if (state.modelChipDefault) {
     $("#model-chip").textContent = `${t("chip.modelLabel")} ▾`;
@@ -1359,7 +1380,8 @@ const state = {
   lastElapsed: null,
   /** live assistant bubbles of the running turn (thinking collapse + footer). */
   turnBubbles: [],
-  mode: "build", // "build" | "plan" — passed per send (plan => read-only tools)
+  mode: "edit", // "plan" | "ask" | "edit" | "yolo" — permission mode, sent per turn
+  lastEditMode: "edit", // what Tab returns to when leaving plan
   /** pending provider/model/effort change before the next turn (applied + persisted). */
   draft: { provider: "", model: "", effort: "" },
   /** tokens seen this browsing session, per session id (turn.end events). */
@@ -2343,7 +2365,9 @@ const COMMANDS = [
   { cmd: "/new", key: "cmd.new", run: () => openNewSessionModal() },
   { cmd: "/model", key: "cmd.model", run: () => void openModelPopover() },
   { cmd: "/plan", key: "cmd.plan", run: () => setMode("plan") },
-  { cmd: "/build", key: "cmd.build", run: () => setMode("build") },
+  { cmd: "/ask", key: "cmd.ask", run: () => setMode("ask") },
+  { cmd: "/edit", key: "cmd.edit", run: () => setMode("edit") },
+  { cmd: "/yolo", key: "cmd.yolo", run: () => setMode("yolo") },
   { cmd: "/export", key: "cmd.export", run: () => void exportMarkdown() },
   { cmd: "/retry", key: "cmd.retry", run: () => retryLastTurn() },
   { cmd: "/settings", key: "cmd.settings", run: () => openSettingsModal() },
@@ -3065,7 +3089,7 @@ function onEvent(sessionId, e) {
       const lastBubble = state.turnBubbles[state.turnBubbles.length - 1];
       if (lastBubble) {
         const s = state.currentSession;
-        const bits = [t(state.mode === "plan" ? "mode.plan" : "mode.build")];
+        const bits = [t(`mode.${activeMode()}`)];
         const modelBits = [s?.provider, s?.model].filter(Boolean).join("/");
         if (modelBits) bits.push(modelBits);
         if (secs > 0) bits.push(`${secs.toFixed(1)}s`);
@@ -5397,10 +5421,36 @@ async function ensureNsConfig() {
 // ---------------------------------------------------------------------------
 // composer chips: agent mode + model for the current session
 // ---------------------------------------------------------------------------
+const MODES = ["plan", "ask", "edit", "yolo"];
+const MODE_ICON = { plan: "🛡", ask: "✋", edit: "📝", yolo: "🔓" };
+
+function modeKey(mode) {
+  return MODES.includes(mode) ? mode : "edit";
+}
+
+/** Selected mode for the composer (the session's saved value wins). */
+function activeMode() {
+  return modeKey(state.draft.permissionMode || state.mode);
+}
+
+function renderModeChip() {
+  const mode = activeMode();
+  const chip = $("#mode-chip");
+  chip.textContent = `${MODE_ICON[mode]} ${t(`mode.${mode}`)} ▾`;
+  chip.classList.toggle("plan-mode", mode === "plan");
+  chip.classList.toggle("yolo-mode", mode === "yolo");
+  // highlight the current row in the popover
+  for (const btn of document.querySelectorAll("#mode-pop button[data-mode]")) {
+    btn.classList.toggle("active", btn.dataset.mode === mode);
+  }
+}
+
 function setMode(mode) {
-  state.mode = mode === "plan" ? "plan" : "build";
-  $("#mode-chip").textContent = `${t(state.mode === "plan" ? "mode.plan" : "mode.build")} ▾`;
-  $("#mode-chip").classList.toggle("plan-mode", state.mode === "plan");
+  const next = modeKey(mode);
+  if (next !== "plan") state.lastEditMode = next;
+  state.mode = next;
+  state.draft.permissionMode = next;
+  renderModeChip();
   $("#mode-pop").hidden = true;
 }
 
@@ -6312,7 +6362,8 @@ async function sendTurn(text, atts) {
       }
     }
     state.lastUserText = text;
-    const sparams = { id, text, plan: state.mode === "plan" };
+    const permMode = activeMode();
+    const sparams = { id, text, plan: permMode === "plan", permissionMode: permMode };
     if (atts.length > 0) {
       sparams.attachments = atts.map((a) => ({ media_type: a.media_type, data: a.data, ...(a.name ? { name: a.name } : {}) }));
     }
@@ -6368,6 +6419,104 @@ function insertIntoComposer(text) {
   const start = ta.selectionStart ?? ta.value.length;
   ta.setRangeText(text, start, ta.selectionEnd ?? start, "end");
   autoSize(ta);
+}
+
+// ---------------------------------------------------------------------------
+// voice input (Web Speech API; no server round-trip, no extra dependency)
+// ---------------------------------------------------------------------------
+function speechRecognitionCtor() {
+  return window.SpeechRecognition ?? window.webkitSpeechRecognition ?? null;
+}
+
+/** Feature-detect once at startup; hide the button when unsupported. */
+function setupMic() {
+  const btn = $("#mic-btn");
+  if (!btn) return;
+  if (!speechRecognitionCtor()) {
+    btn.hidden = true;
+    return;
+  }
+  btn.hidden = false;
+  btn.addEventListener("click", () => toggleMic());
+}
+
+let micRec = null;
+/** Text that was in the composer when dictation started. */
+let micBase = "";
+/** Final transcripts accumulated for this session. */
+let micFinal = "";
+
+function micStop() {
+  try {
+    micRec?.stop();
+  } catch {
+    /* already stopped */
+  }
+  micRec = null;
+  micBase = "";
+  micFinal = "";
+  const btn = $("#mic-btn");
+  if (btn) {
+    btn.classList.remove("recording");
+    btn.title = t("mic.start");
+  }
+}
+
+function micStart() {
+  const Ctor = speechRecognitionCtor();
+  if (!Ctor) {
+    toast(t("mic.unsupported"), "err");
+    return;
+  }
+  const rec = new Ctor();
+  rec.lang = navigator.language || "en-US";
+  rec.continuous = true;
+  rec.interimResults = true;
+  const ta = $("#input");
+  micBase = ta.value;
+  micFinal = "";
+  rec.onresult = (ev) => {
+    let interim = "";
+    for (let i = ev.resultIndex; i < ev.results.length; i++) {
+      const res = ev.results[i];
+      if (!res) continue;
+      const chunk = res[0]?.transcript ?? "";
+      if (res.isFinal) micFinal += chunk;
+      else interim += chunk;
+    }
+    const sep = micBase !== "" && !/\s$/.test(micBase) ? " " : "";
+    ta.value = `${micBase}${micBase ? sep : ""}${micFinal}${interim}`;
+    autoSize(ta);
+  };
+  rec.onerror = (ev) => {
+    // "no-speech" / "aborted" are normal end conditions, not errors
+    if (ev.error === "not-allowed" || ev.error === "service-not-allowed") {
+      toast(t("mic.denied"), "err");
+      micStop();
+    }
+  };
+  rec.onend = () => {
+    // continuous mode can end on its own (silence / tab switch)
+    micStop();
+  };
+  micRec = rec;
+  try {
+    rec.start();
+  } catch {
+    micStop();
+    return;
+  }
+  const btn = $("#mic-btn");
+  if (btn) {
+    btn.classList.add("recording");
+    btn.title = t("mic.stop");
+  }
+  ta.focus();
+}
+
+function toggleMic() {
+  if (micRec) micStop();
+  else micStart();
 }
 
 /** Resolve an absolute path for a dropped/attached file (Electron ships
@@ -6853,7 +7002,7 @@ function boot() {
         (t.tagName === "SELECT" || (t.tagName === "INPUT" && t.id !== "input"));
       if (!editable) {
         ev.preventDefault();
-        setMode(state.mode === "plan" ? "build" : "plan");
+        setMode(state.mode === "plan" ? (state.lastEditMode ?? "edit") : "plan");
         return;
       }
     }
@@ -6895,7 +7044,8 @@ function boot() {
     }
   });
 
-  setMode("build");
+  setMode(state.mode === "plan" ? "plan" : "edit");
+  setupMic();
   renderModelChip();
   renderEffortChip();
   updateContextGauge();

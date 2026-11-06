@@ -6,6 +6,7 @@ import { createConnectorTools } from "./connectors.js";
 import { createTodoTool } from "./todo.js";
 import { createTaskTool } from "./task.js";
 import { createLspTool } from "./lsp.js";
+import { createOfficeCreateTool } from "./office.js";
 import { createMemoryManageTool } from "../selfimprove/memory/tool.js";
 import { createSkillManageTool, createSkillViewTool } from "../selfimprove/skills/tool.js";
 import { createToolRegistry, type ToolRegistry } from "./registry.js";
@@ -20,6 +21,7 @@ export * from "./connectors.js";
 export * from "./todo.js";
 export * from "./task.js";
 export * from "./lsp.js";
+export * from "./office.js";
 
 /** Tool names managed by the self-improvement loop (M3). */
 export const SELF_IMPROVE_TOOLS = ["memory_manage", "skill_view", "skill_manage"] as const;
@@ -30,6 +32,7 @@ export function defaultToolRegistry(): ToolRegistry {
     createReadTool(),
     createWriteTool(),
     createEditTool(),
+    createOfficeCreateTool(),
     createGlobTool(),
     createGrepTool(),
     createBashTool(),

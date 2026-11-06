@@ -107,10 +107,24 @@
             </div>
           </div>
           <div class="menu-wrap">
-            <button id="mode-chip" type="button" title="エージェントモード" data-i18n-title="chip.mode">Build ▾</button>
-            <div id="mode-pop" class="pop up" hidden>
-              <button type="button" data-mode="build"><b data-i18n="mode.build">Build</b><small data-i18n="mode.buildDesc">全ツール使用可</small></button>
-              <button type="button" data-mode="plan"><b data-i18n="mode.plan">Plan</b><small data-i18n="mode.planDesc">読み取り専用ツール</small></button>
+            <button id="mode-chip" type="button" title="権限モード" data-i18n-title="chip.mode">編集を許可 ▾</button>
+            <div id="mode-pop" class="pop up mode-pop" hidden>
+              <button type="button" data-mode="plan">
+                <span class="mi">🛡</span>
+                <span class="mb"><b data-i18n="mode.plan">Plan</b><small data-i18n="mode.planDesc">読み取り専用。編集やコマンドは実行しません</small></span>
+              </button>
+              <button type="button" data-mode="ask">
+                <span class="mi">✋</span>
+                <span class="mb"><b data-i18n="mode.ask">承認を求める</b><small data-i18n="mode.askDesc">設定で許可されていない編集やコマンドの前に確認します</small></span>
+              </button>
+              <button type="button" data-mode="edit">
+                <span class="mi">📝</span>
+                <span class="mb"><b data-i18n="mode.edit">編集を許可</b><small data-i18n="mode.editDesc">ファイルの編集と操作を承認し、それ以外は確認します</small></span>
+              </button>
+              <button type="button" data-mode="yolo">
+                <span class="mi">🔓</span>
+                <span class="mb"><b data-i18n="mode.yolo">フルアクセス</b><small data-i18n="mode.yoloDesc">編集やコマンドの前に確認しません</small></span>
+              </button>
             </div>
           </div>
           <div class="menu-wrap">
@@ -160,6 +174,7 @@
               <div id="ctx-note" class="ctx-note"></div>
             </div>
           </div>
+          <button id="mic-btn" type="button" class="mic-btn" title="音声入力" data-i18n-title="mic.start" hidden>🎤</button>
           <button id="send" type="submit" title="送信 (Enter)" data-i18n-title="send.enter">↑</button>
         </div>
       </form>

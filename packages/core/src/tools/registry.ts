@@ -1,7 +1,7 @@
 import type { SessionRemote, ToolSchema } from "@familiar/protocol";
 import type { ResolvedConfig } from "../config.js";
 import type { ExecBackend } from "../exec/index.js";
-import type { ApprovalAdapter } from "./permissions.js";
+import type { ApprovalAdapter, PermissionMode } from "./permissions.js";
 
 export interface ToolContext {
   sessionId: string;
@@ -11,6 +11,12 @@ export interface ToolContext {
   /** the ssh target when backend.kind === "ssh" (for MCP/LSP over ssh) */
   remote?: SessionRemote | null;
   yolo: boolean;
+  /**
+   * Composer permission mode. When set it refines approvals:
+   * "edit" auto-approves filesystem writes (but not risky commands).
+   * Absent → the legacy yolo-only behavior.
+   */
+  permissionMode?: PermissionMode;
   config: ResolvedConfig;
   approval: ApprovalAdapter;
   /** M2: session todo store (absent in bare CLI contexts / subagents without one) */

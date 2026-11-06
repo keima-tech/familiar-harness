@@ -20,7 +20,7 @@ import {
   type ToolContext,
 } from "../tools/index.js";
 import { createBackend } from "../exec/index.js";
-import { DenyApprovalAdapter, type ApprovalAdapter } from "../tools/permissions.js";
+import { DenyApprovalAdapter, type ApprovalAdapter, type PermissionMode } from "../tools/permissions.js";
 import type { ToolOutput } from "../tools/registry.js";
 import { buildSystemPrompt, todoSection } from "./prompts.js";
 import type { SelfImproveContext } from "../selfimprove/context.js";
@@ -41,6 +41,8 @@ export interface RunTurnOptions {
   maxSteps?: number;
   /** M2: plan mode — read-only toolset only */
   plan?: boolean;
+  /** composer permission mode (ask | edit | yolo) — refines write approvals */
+  permissionMode?: PermissionMode;
   /** M2: injected prompt sections (todo state, memory later) */
   extraSystem?: string[];
   /** per-session dynamic tools (e.g. MCP servers spawned on an SSH host) */
@@ -381,6 +383,7 @@ export class AgentRunner {
           backend,
           remote: session.remote ?? null,
           yolo,
+          ...(opts.permissionMode ? { permissionMode: opts.permissionMode } : {}),
           config: this.cfg,
           approval: this.approval,
           todos: this.todos,

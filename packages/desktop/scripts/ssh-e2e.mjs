@@ -1412,6 +1412,79 @@ try {
     JSON.stringify(longWait),
   );
 
+  // ---- Orca-style permission modes + voice-input mic ----------------------
+  const modes = await evalOnce(`(() => {
+    const rows = [...document.querySelectorAll("#mode-pop button[data-mode]")].map((b) => ({
+      mode: b.dataset.mode,
+      hasIcon: !!b.querySelector(".mi"),
+      label: b.querySelector("b")?.textContent ?? "",
+      desc: b.querySelector("small")?.textContent ?? "",
+    }));
+    setMode("yolo");
+    const chipYolo = { text: document.querySelector("#mode-chip").textContent, yolo: document.querySelector("#mode-chip").classList.contains("yolo-mode") };
+    setMode("plan");
+    const chipPlan = { text: document.querySelector("#mode-chip").textContent, plan: document.querySelector("#mode-chip").classList.contains("plan-mode") };
+    const activePlan = document.querySelector('#mode-pop button[data-mode="plan"]').classList.contains("active");
+    const tabBack = state.lastEditMode;
+    setMode("edit");
+    return { rows, chipYolo, chipPlan, activePlan, tabBack };
+  })()`);
+  check(
+    modes?.rows?.length === 4 &&
+      modes.rows.map((r) => r.mode).join(",") === "plan,ask,edit,yolo" &&
+      modes.rows.every((r) => r.hasIcon && r.label && r.desc),
+    "the mode picker offers four described permission modes",
+    JSON.stringify(modes?.rows),
+  );
+  check(
+    String(modes?.chipYolo?.text).includes("フルアクセス") && modes?.chipYolo?.yolo === true,
+    "the chip reflects the full-access mode",
+    JSON.stringify(modes?.chipYolo),
+  );
+  check(
+    String(modes?.chipPlan?.text).includes("Plan") && modes?.chipPlan?.plan === true && modes?.activePlan === true,
+    "the chip and the active row reflect Plan mode",
+    JSON.stringify(modes?.chipPlan),
+  );
+
+  // the chosen mode travels with the turn: plan → read-only tools, permissionMode sent
+  const modeSend = await evalOnce(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const seen = [];
+    const real = window.rpc;
+    window.rpc = (method, params) => {
+      if (method === "session.send") seen.push(params);
+      return real(method, params);
+    };
+    const s = await rpc("session.create", { cwd: ${JSON.stringify(repoRoot)} });
+    await openSession(s.id);
+    setMode("plan");
+    document.querySelector("#input").value = "@hold 300 mode-probe";
+    await send();
+    await sleep(1500);
+    window.rpc = real;
+    await rpc("session.abort", { id: s.id }).catch(() => {});
+    return { count: seen.length, plan: seen[0]?.plan, permissionMode: seen[0]?.permissionMode };
+  })()`);
+  check(
+    modeSend?.count === 1 && modeSend?.plan === true && modeSend?.permissionMode === "plan",
+    "the permission mode is sent with the turn",
+    JSON.stringify(modeSend),
+  );
+
+  const mic = await evalOnce(`(() => {
+    const btn = document.querySelector("#mic-btn");
+    if (!btn) return { missing: true };
+    // the test page may expose the API or not; either way the button must be consistent
+    const supported = typeof (window.SpeechRecognition ?? window.webkitSpeechRecognition) === "function";
+    return { present: true, hidden: btn.hidden, supported, icon: btn.textContent.trim() };
+  })()`);
+  check(
+    mic?.present === true && (mic?.supported ? mic?.hidden === false : mic?.hidden === true),
+    "the mic button is shown only when speech recognition exists",
+    JSON.stringify(mic),
+  );
+
   // ---- EN mode: every new string is translated (no CJK fallback) -----------
   const cjk = await evalOnce(`(() => {
     setLang("en");
@@ -1425,6 +1498,8 @@ try {
       "ssh.testFail", "ssh.saved", "ssh.deleted", "ssh.deleteConfirm", "ssh.none", "ssh.errHost",
       "ssh.desktopOnly", "ssh.connectFail", "ssh.current", "nav.connections", "attach.remotePath",
       "turn.longWait", "turn.noteSteps", "turn.noteTodos", "turn.noteCeiling", "turn.retryNow",
+      "mode.plan", "mode.ask", "mode.edit", "mode.yolo", "mode.askDesc", "mode.editDesc",
+      "mode.yoloDesc", "mic.start", "mic.stop", "mic.unsupported", "mic.denied",
     ];
     const bad = /[\u3040-\u30ff\u3400-\u9fff\uff66-\uff9f]/;
     return keys.filter((k) => bad.test(t(k))).map((k) => k + "=" + t(k));

@@ -1215,6 +1215,87 @@ Familiar's own copy.
   );
 }
 
+// ---------------------------------------------------------------------------
+// Scenario T: office_create + permission modes
+// ---------------------------------------------------------------------------
+console.log("— scenario T: office_create + permission modes —");
+{
+  const { createOfficeCreateTool } = await import(
+    path.join(repoRoot, "packages/core/dist/tools/office.js")
+  );
+  const officeDir = path.join(project, "office");
+  fs.mkdirSync(officeDir, { recursive: true });
+
+  // gate that records whether it was asked
+  const mkCtx = (cwd, permissionMode, asked) => ({
+    sessionId: "s",
+    cwd,
+    yolo: false,
+    ...(permissionMode ? { permissionMode } : {}),
+    config: {},
+    approval: {
+      request: async () => {
+        asked.push(1);
+        return true;
+      },
+    },
+    backend: {
+      mkdirp: async (d) => fs.mkdirSync(d, { recursive: true }),
+      writeFile: async (f, data) => fs.writeFileSync(f, data),
+    },
+  });
+
+  const tool = createOfficeCreateTool();
+  const asked = [];
+
+  const docx = await tool.execute(
+    { kind: "docx", path: "memo.docx", title: "T", blocks: [{ heading: "見出し", level: 1 }, { text: "本文" }, { bullets: ["A", "B"] }, { table: [["k", "v"], ["a", "1"]] }] },
+    mkCtx(officeDir, "yolo", asked),
+  );
+  assert(docx.isError !== true && /wrote .*memo\.docx/.test(docx.content), "office_create writes a docx", docx.content);
+  const docxBuf = fs.readFileSync(path.join(officeDir, "memo.docx"));
+  assert(
+    docxBuf.subarray(0, 2).toString() === "PK" && docxBuf.includes(Buffer.from("word/document.xml")),
+    "the docx is a zip with the OOXML part",
+    `bytes=${docxBuf.length}`,
+  );
+
+  const xlsx = await tool.execute(
+    { kind: "xlsx", path: "sheet.xlsx", title: "T", sheets: [{ name: "S", headers: ["月", "値"], rows: [["1月", 10], ["2月", 20]] }] },
+    mkCtx(officeDir, "yolo", asked),
+  );
+  assert(
+    xlsx.isError !== true && fs.readFileSync(path.join(officeDir, "sheet.xlsx")).includes(Buffer.from("xl/worksheets/sheet1.xml")),
+    "office_create writes an xlsx",
+    xlsx.content,
+  );
+
+  const pptx = await tool.execute(
+    { kind: "pptx", path: "deck.pptx", title: "T", slides: [{ title: "S1", bullets: ["a", "b"] }, { title: "S2", bullets: ["c"] }] },
+    mkCtx(officeDir, "yolo", asked),
+  );
+  const pptxBuf = fs.readFileSync(path.join(officeDir, "deck.pptx"));
+  assert(
+    pptx.isError !== true && pptxBuf.includes(Buffer.from("ppt/slides/slide2.xml")),
+    "office_create writes a pptx with every slide",
+    pptx.content,
+  );
+
+  // the extension follows kind even when the path says otherwise
+  const coerced = await tool.execute({ kind: "xlsx", path: "wrong.docx", sheets: [{ rows: [[1]] }] }, mkCtx(officeDir, "yolo", asked));
+  assert(/wrote .*wrong\.xlsx/.test(coerced.content), "the extension is forced to match kind", coerced.content);
+
+  // permission modes: edit runs outside cwd without asking; ask asks;
+  // yolo (mode) never asks
+  asked.length = 0;
+  await tool.execute({ kind: "docx", path: path.join(tmpBase, "outside-edit.docx"), blocks: [{ text: "x" }] }, mkCtx(officeDir, "edit", asked));
+  assert(asked.length === 0, "'edit' mode writes outside cwd without approval", `asked=${asked.length}`);
+  await tool.execute({ kind: "docx", path: path.join(tmpBase, "outside-ask.docx"), blocks: [{ text: "x" }] }, mkCtx(officeDir, "ask", asked));
+  assert(asked.length === 1, "'ask' mode asks before writing outside cwd", `asked=${asked.length}`);
+  await tool.execute({ kind: "docx", path: path.join(tmpBase, "outside-yolo.docx"), blocks: [{ text: "x" }] }, mkCtx(officeDir, "yolo", asked));
+  assert(asked.length === 1, "'yolo' mode never asks", `asked=${asked.length}`);
+}
+
 console.log(
   failures === 0 ? "\nsmoke: all checks passed" : `\nsmoke: ${failures} failure(s)`,
 );

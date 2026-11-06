@@ -144,6 +144,30 @@ function pathApprovalSummary(absolute: string): string {
   return `write file: ${absolute}`;
 }
 
+/**
+ * Approval gate for filesystem writes. Inside cwd nothing asks unless the
+ * mode is "ask"; outside cwd the "edit" mode runs freely while "ask" asks.
+ * Headless callers leave permissionMode unset → legacy behavior (outside-cwd
+ * writes ask).
+ */
+async function approveWrite(
+  ctx: ToolContext,
+  absolute: string,
+  req: { tool: string; summary: string },
+): Promise<boolean> {
+  const inside = isInside(backendPath(ctx), ctx.cwd, absolute);
+  const mode = ctx.permissionMode;
+  if (mode === "yolo" || ctx.yolo) return true;
+  if (mode === "edit") return true;
+  if (mode === "ask") {
+    if (inside) return true;
+    return ctx.approval.request(req);
+  }
+  // unset: heredoc/CLI default — only outside-cwd writes ask
+  if (inside) return true;
+  return ctx.approval.request(req);
+}
+
 export function createWriteTool(): Tool {
   return {
     name: "write",
@@ -163,8 +187,8 @@ export function createWriteTool(): Tool {
       const content = typeof args.content === "string" ? args.content : "";
       if (!argPath) return { content: "argument 'path' is required", isError: true };
       const absolute = resolveInCwd(argPath, ctx);
-      if (!ctx.yolo && !isInside(backendPath(ctx), ctx.cwd, absolute)) {
-        const approved = await ctx.approval.request({
+      {
+        const approved = await approveWrite(ctx, absolute, {
           tool: "write",
           summary: pathApprovalSummary(absolute),
         });
@@ -221,8 +245,8 @@ export function createEditTool(): Tool {
         return { content: "old_string and new_string are identical", isError: true };
       }
       const absolute = resolveInCwd(argPath, ctx);
-      if (!ctx.yolo && !isInside(backendPath(ctx), ctx.cwd, absolute)) {
-        const approved = await ctx.approval.request({
+      {
+        const approved = await approveWrite(ctx, absolute, {
           tool: "edit",
           summary: `edit file: ${absolute}`,
         });

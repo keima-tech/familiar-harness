@@ -32,6 +32,7 @@ import {
   sanitizeConfigForApi,
   ProviderRegistry,
   SqliteSessionStore,
+  type PermissionMode,
   MemoryStore,
   PendingMemoryStore,
   SkillStore,
@@ -1643,6 +1644,7 @@ export class AgentServer {
         effort: str(params, "effort"),
         yolo: params["yolo"] === true,
         plan: params["plan"] === true,
+        permissionMode: permissionModeOf(params["permissionMode"]),
         maxSteps: num(params, "maxSteps"),
         signal: controller.signal,
         onEvent: events,
@@ -1893,6 +1895,11 @@ function str(params: Record<string, unknown>, key: string): string | undefined {
 function num(params: Record<string, unknown>, key: string): number | undefined {
   const v = params[key];
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+
+/** Composer permission mode: ask | edit | yolo (absent → keep legacy yolo/plan). */
+function permissionModeOf(raw: unknown): PermissionMode | undefined {
+  return raw === "ask" || raw === "edit" || raw === "yolo" ? raw : undefined;
 }
 
 function resolveDefaultModel(kind: string): string | undefined {

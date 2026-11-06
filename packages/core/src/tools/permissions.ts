@@ -13,6 +13,16 @@ export interface ApprovalAdapter {
   request(req: ApprovalRequest): Promise<boolean>;
 }
 
+/**
+ * Composer permission mode (the Orca-style 4-way switch):
+ * - "ask":  every write outside cwd and every ask-policy command needs approval
+ * - "edit": risky *filesystem* work (write/edit/office_create) runs freely;
+ *           dangerous commands (rm -rf, sudo, curl -d, …) still ask
+ * - "yolo": nothing asks (the legacy --yolo behavior)
+ * Plan mode is orthogonal and read-only, so it never reaches a write.
+ */
+export type PermissionMode = "ask" | "edit" | "yolo";
+
 /** Always allow (used by --yolo). Never used silently in non-interactive mode. */
 export class AllowAllApprovalAdapter implements ApprovalAdapter {
   async request(): Promise<boolean> {

@@ -919,6 +919,26 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
     シナリオ R(窓超えの自動継続 / 上限マーカー)を追加。ssh-e2e は 107 項目に
     (自動継続と上限のノート、停止後の再実行ボタン、長時間待ちの説明)。
 
+## v0.1.0 の実装メモ㊼(2026-11-06、権限モード4択・音声入力・Office 作成)
+
+- **権限モードを Orca 風の 4 択に**: コンポーザのチップを
+  `Plan(🛡) / 承認を求める(✋) / 編集を許可(📝) / フルアクセス(🔓)` の説明つき
+  ポップオーバーに変更(旧 Build/Plan の 2 択から拡張)。選択は
+  `session.send.permissionMode` としてターンごとに送られ、コアは `ctx.permissionMode` で
+  承認判定を変える。`ask` は cwd 外書き込みと危険コマンドを承認、`edit`(既定)は
+  ファイル操作を承認なし・危険コマンドのみ承認、`yolo` は無条件(ただし `bash.deny` は不変)。
+  Tab で Plan↔直前の編集モードをトグル、`/plan` `/ask` `/edit` `/yolo` コマンドも追加。
+- **音声入力**: コンポーザ右にマイクボタン。Web Speech API(`SpeechRecognition`)で
+  追加依存なしに dictation(continuous + interim)。未対応環境では自動的に非表示、
+  Electron は Chromium 実装を利用。権限拒否時はトーストで通知。
+- **Office ファイル作成**: 新ツール `office_create`(docx / xlsx / pptx)。OOXML を
+  自前の ZIP ライター(内蔵 zlib + CRC32)で組み立てるため**依存追加なし**。
+  docx は見出し・本文・箇条書き・表、xlsx は複数シート・ヘッダ・数値セル、
+  pptx はタイトル+本文のスライド。拡張子は kind に合わせて補正。
+- **テスト**: smoke シナリオ T(office_create の 3 形式・OOXML パート確認・拡張子補正・
+  権限モード別の承認有無)、ssh-e2e は 112 項目(4 択 UI の説明・チップ表示・
+  送信パラメータへの permissionMode・マイクボタンの表示条件)。
+
 ## v0.1.0 の実装メモ㊻(2026-11-04、共有 skills の併読)
 
 - **共有 agent-skills を読み取り専用で併読できるように**: `skills.include_global: true`(既定)で

@@ -25,7 +25,8 @@ type ToolOutput = { content: string; isError?: boolean };
 - JSON Schema 検証は簡易バリデータ(`required` / `type` / `enum` / `minLength`)。
   不備は isError メッセージとして LLM に返す(ループは継続)。
 - エラーも `role: "tool"` メッセージとしてセッションに保存される(LLM が自己修復できるように)。
-- 安全: 相対パスは `ctx.cwd` 基準。絶対パス可だが、`write/edit` は作業領域外の場合承認要求。
+- 安全: 相対パスは `ctx.cwd` 基準。絶対パス可だが、`write/edit/office_create` は
+  **権限モード**に従って承認要求(下記 2.6)。
 
 ## 2. M1 ツール一覧
 
@@ -46,6 +47,21 @@ type ToolOutput = { content: string; isError?: boolean };
 |---|---|---|
 | `path` | string | 対象ファイル(親ディレクトリは自動作成) |
 | `content` | string | 全文(既存は上書き) |
+
+### office_create
+
+| param | 型 | 説明 |
+|---|---|---|
+| `kind` | `docx` \| `xlsx` \| `pptx` | 出力形式 |
+| `path` | string | 出力パス(拡張子は kind に合わせて補正) |
+| `title` | string | タイトル/メタデータ |
+| `blocks` | array | docx: `{heading, level, text, bullets[], table[][]}` の配列 |
+| `sheets` | array | xlsx: `{name, headers[], rows[][]}` の配列 |
+| `slides` | array | pptx: `{title, bullets[]}` の配列 |
+
+- **依存パッケージなし**: OOXML 部品を自前で ZIP 構築(内蔵 zlib の STORE 方式 + CRC32)。
+  Word / Excel / PowerPoint、LibreOffice、Google ドキュメントで開ける。
+- 権限は `write` と同じゲート(権限モード + cwd 内外)。
 
 ### edit
 
@@ -93,6 +109,24 @@ type ToolOutput = { content: string; isError?: boolean };
 
 - シェル: `resolveShellCommand()`(Windows: PowerShell / それ以外: bash)。
 - stdout+stderr 結合、上限 256KB(超過で末尾を残す)。
+### 2.6 権限モード(コンポーザの 4 択)
+
+GUI の権限チップは 4 択で、**ターンごとに `session.send.permissionMode` として送られる**
+(CLI/headless は未指定 = 従来挙動)。
+
+| モード | 書き込み(cwd 内) | 書き込み(cwd 外) | 危険コマンド |
+|---|---|---|---|
+| `plan` | 不可(読み取り専用ツールのみ) | 不可 | 不可 |
+| `ask` | 承認不要 | **承認** | 承認 |
+| `edit`(既定) | 承認不要 | 承認不要 | **承認** |
+| `yolo` | 承認不要 | 承認不要 | 承認不要 |
+
+- `ask` は危険コマンドでも承認を求める(設定 `permissions.bash` の allowlist が優先)。
+- `edit` はファイル操作のみ緩め、`rm -rf` / `sudo` / 情報送信系は従来どおり承認。
+- `yolo` は `permissions.bash.deny`(ルート全削除等)だけは回避できない。
+- 権限モードは `ctx.permissionMode` として各ツールに渡り、`write/edit/office_create` が
+  共通の `approveWrite` ゲートで判定する。
+
 - **承認(3 層)**: `deny`(無条件ブロック。`yolo` でも不可) → `ask`(ApprovalAdapter 経由:
   desktop はダイアログ、CLI は y/n、非対話は拒否) → `allow`(承認なしで実行)。
   `permissions.bash.mode` は `allow`(既定: ask/deny 以外はそのまま実行)または

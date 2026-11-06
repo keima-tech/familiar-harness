@@ -270,7 +270,7 @@ const STR = {
     "mode.yoloDesc": "編集やコマンドの前に確認しません",
     "mic.start": "音声入力を開始",
     "mic.stop": "音声入力を停止",
-    "mic.unsupported": "この環境では音声入力を使えません",
+    "mic.unsupported": "この環境では音声入力を使えません(デスクトップアプリでは未対応。ブラウザ版 Web UI でご利用ください)",
     "mic.denied": "マイクの使用が許可されませんでした",
     "chip.modelLabel": "モデル",
     "mp.search": "モデルを検索…",
@@ -754,7 +754,7 @@ const STR = {
     "mode.yoloDesc": "never ask before edits or commands",
     "mic.start": "start voice input",
     "mic.stop": "stop voice input",
-    "mic.unsupported": "voice input is not available in this environment",
+    "mic.unsupported": "voice input is not available here (the desktop app has no speech service; use the browser Web UI)",
     "mic.denied": "microphone permission was denied",
     "chip.modelLabel": "model",
     "mp.search": "Search models…",
@@ -6428,11 +6428,23 @@ function speechRecognitionCtor() {
   return window.SpeechRecognition ?? window.webkitSpeechRecognition ?? null;
 }
 
+/**
+ * Voice input needs the browser's Web Speech API. Electron builds Chromium
+ * without Google's speech service (recognition errors with "not-allowed"),
+ * so the mic is only offered in a real browser — including an Electron
+ * renderer that somehow gets a working implementation.
+ */
+function speechSupported() {
+  if (typeof (window.SpeechRecognition ?? window.webkitSpeechRecognition) !== "function") return false;
+  const isElectron = typeof window.familiarDesktop === "object" && window.familiarDesktop !== null;
+  return !isElectron;
+}
+
 /** Feature-detect once at startup; hide the button when unsupported. */
 function setupMic() {
   const btn = $("#mic-btn");
   if (!btn) return;
-  if (!speechRecognitionCtor()) {
+  if (!speechSupported()) {
     btn.hidden = true;
     return;
   }
@@ -6463,6 +6475,10 @@ function micStop() {
 }
 
 function micStart() {
+  if (!speechSupported()) {
+    toast(t("mic.unsupported"), "err");
+    return;
+  }
   const Ctor = speechRecognitionCtor();
   if (!Ctor) {
     toast(t("mic.unsupported"), "err");

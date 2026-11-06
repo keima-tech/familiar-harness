@@ -929,8 +929,10 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   ファイル操作を承認なし・危険コマンドのみ承認、`yolo` は無条件(ただし `bash.deny` は不変)。
   Tab で Plan↔直前の編集モードをトグル、`/plan` `/ask` `/edit` `/yolo` コマンドも追加。
 - **音声入力**: コンポーザ右にマイクボタン。Web Speech API(`SpeechRecognition`)で
-  追加依存なしに dictation(continuous + interim)。未対応環境では自動的に非表示、
-  Electron は Chromium 実装を利用。権限拒否時はトーストで通知。
+  追加依存なしに dictation(continuous + interim)。ただし **Electron ビルドの Chromium は
+  Google の音声認識サービスを同梱しない**ため、デスクトップアプリでは `error: not-allowed`
+  となり動作しない(実機で確認)。デスクトップでは API があっても**ボタンを自動的に非表示**にし、
+  ブラウザ版 Web UI(Chrome/Edge)でのみ表示する。権限拒否時はトーストで通知。
 - **Office ファイル作成**: 新ツール `office_create`(docx / xlsx / pptx)。OOXML を
   自前の ZIP ライター(内蔵 zlib + CRC32)で組み立てるため**依存追加なし**。
   docx は見出し・本文・箇条書き・表、xlsx は複数シート・ヘッダ・数値セル、

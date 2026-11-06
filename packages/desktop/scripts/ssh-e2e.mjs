@@ -1475,13 +1475,16 @@ try {
   const mic = await evalOnce(`(() => {
     const btn = document.querySelector("#mic-btn");
     if (!btn) return { missing: true };
-    // the test page may expose the API or not; either way the button must be consistent
-    const supported = typeof (window.SpeechRecognition ?? window.webkitSpeechRecognition) === "function";
-    return { present: true, hidden: btn.hidden, supported, icon: btn.textContent.trim() };
+    // the mic is offered only where speech recognition actually works: a real
+    // browser without the electron bridge
+    const hasApi = typeof (window.SpeechRecognition ?? window.webkitSpeechRecognition) === "function";
+    const isElectron = typeof window.familiarDesktop === "object" && window.familiarDesktop !== null;
+    const expected = hasApi && !isElectron;
+    return { present: true, hidden: btn.hidden, hasApi, isElectron, expected, icon: btn.textContent.trim() };
   })()`);
   check(
-    mic?.present === true && (mic?.supported ? mic?.hidden === false : mic?.hidden === true),
-    "the mic button is shown only when speech recognition exists",
+    mic?.present === true && mic?.hidden === !mic?.expected,
+    "the mic button is shown only where speech recognition works",
     JSON.stringify(mic),
   );
 

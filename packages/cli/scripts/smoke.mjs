@@ -659,6 +659,36 @@ console.log("— scenario I: web ui transport —");
     !(after.result ?? []).some((s) => s.id === created.result.id),
     "deleted session disappears from session.list",
   );
+  // "Full access" (permissionMode: yolo) must also stop risky commands from
+  // asking: the loop folds the mode into the yolo flag the bash tool reads.
+  const throwaway = path.join(tmpBase, "yolo-throwaway.txt");
+  fs.writeFileSync(throwaway, "x");
+  const yoloSession = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 6, method: "session.create", params: {} }),
+  }).then((r) => r.json());
+  const yoloSend = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 7,
+      method: "session.send",
+      params: {
+        id: yoloSession.result.id,
+        text: `@bash rm -f ${throwaway}`,
+        permissionMode: "yolo",
+      },
+    }),
+  }).then((r) => r.json());
+  const yoloRan = yoloSend.result?.toolCalls === 1 && !fs.existsSync(throwaway);
+  assert(
+    yoloRan,
+    "permissionMode yolo runs a risky command without asking",
+    JSON.stringify(yoloSend.result ?? yoloSend.error ?? {}).slice(0, 160),
+  );
+
   ws.close();
   serve.kill("SIGTERM");
   await new Promise((r) => setTimeout(r, 300));
@@ -1081,6 +1111,25 @@ console.log("— scenario Q: bash approval tiers —");
     ["rm a.txt", "allow"],
     ["npm test", "allow"],
   ];
+  // a user's own bash policy list must UNION with the built-in one: writing a
+  // custom deny pattern used to drop the filesystem-wipe guards entirely
+  const customHome = path.join(tmpBase, "home-custom-policy");
+  fs.mkdirSync(customHome, { recursive: true });
+  fs.writeFileSync(
+    path.join(customHome, "config.yaml"),
+    `version: 1\npermissions:\n  bash:\n    deny:\n      - "^echo MY_CUSTOM_DENY$"\n`,
+  );
+  const { loadConfig } = await import(path.join(repoRoot, "packages/core/dist/config.js"));
+  const customCfg = loadConfig({ configFile: path.join(customHome, "config.yaml") }).permissions.bash;
+  assert(
+    commandDecision("echo MY_CUSTOM_DENY", customCfg).action === "deny" &&
+      commandDecision("rm -rf /", customCfg).action === "deny" &&
+      commandDecision("mkfs.ext4 /dev/sda1", customCfg).action === "deny" &&
+      commandDecision("rm -rf /tmp/build", customCfg).action === "ask",
+    "a custom policy list unions with the built-in one (wipes stay blocked)",
+    JSON.stringify(customCfg.deny).slice(0, 200),
+  );
+
   const bad = table.filter(([cmd, want]) => commandDecision(cmd, bcfg).action !== want);
   assert(
     bad.length === 0,
@@ -1243,6 +1292,7 @@ console.log("— scenario T: office_create + permission modes —");
       },
     },
     backend: {
+      path,
       mkdirp: async (d) => fs.mkdirSync(d, { recursive: true }),
       writeFile: async (f, data) => fs.writeFileSync(f, data),
     },
@@ -1388,6 +1438,18 @@ console.log("— scenario U: truncated tool arguments —");
   }
   assert(changed === 1 && parses, "the store repairs a poisoned message", `changed=${changed} after=${after}`);
   assert(store.repairToolCallArguments(sess.id) === 0, "the repair is idempotent", "");
+
+  // truncation undoes the messages a failed attempt appended (auto-retry path)
+  store.appendMessage(sess.id, { id: "m2", role: "user", content: "second", createdAt: Date.now() });
+  store.appendMessage(sess.id, { id: "m3", role: "assistant", content: "third", createdAt: Date.now() });
+  assert(store.getMessages(sess.id).length === 3, "three messages before truncation", "");
+  const removed = store.truncateMessages(sess.id, 1);
+  const left = store.getMessages(sess.id);
+  assert(
+    removed === 2 && left.length === 1 && left[0].id === "m1",
+    "truncateMessages keeps only the first N messages",
+    `removed=${removed} left=${left.length}`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1415,6 +1477,7 @@ console.log("— scenario V: office templates —");
     config: { homeDir: home },
     approval: { request: async () => true },
     backend: {
+      path,
       mkdirp: async (d) => fs.mkdirSync(d, { recursive: true }),
       writeFile: async (f, data) => fs.writeFileSync(f, data),
     },
@@ -1553,6 +1616,30 @@ console.log("— scenario V: office templates —");
     pptxSlides.length === 1 && pptxSlides[0]?.title === "表紙" && pptxSlides[0]?.bullets.length === 2,
     "the pptx content is ours",
     JSON.stringify(pptxSlides).slice(0, 160),
+  );
+
+  // --- more input sheets than worksheets: reported, never silent
+  const dropped = await make("xlsx", "dropped.xlsx", {
+    template: "brand",
+    title: "Familiar",
+    sheets: [{ name: "first", rows: [["a"]] }, { name: "second", rows: [["b"]] }],
+  });
+  assert(
+    /note:.*second.*not written/.test(dropped.content),
+    "extra sheets beyond the template are reported",
+    dropped.content,
+  );
+
+  // --- an unknown template name is an error, not a silent plain document
+  const unknown = await make("docx", "unknown.docx", {
+    template: "no-such-template",
+    title: "T",
+    blocks: [{ text: "x" }],
+  });
+  assert(
+    unknown.isError === true && /template not found/.test(unknown.content),
+    "an unknown template name is rejected",
+    unknown.content,
   );
 
   // --- a `default.<ext>` template is used without the parameter

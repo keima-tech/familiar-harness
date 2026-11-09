@@ -150,20 +150,17 @@ function pathApprovalSummary(absolute: string): string {
  * Headless callers leave permissionMode unset → legacy behavior (outside-cwd
  * writes ask).
  */
-async function approveWrite(
+export async function approveWrite(
   ctx: ToolContext,
   absolute: string,
   req: { tool: string; summary: string },
 ): Promise<boolean> {
-  const inside = isInside(backendPath(ctx), ctx.cwd, absolute);
   const mode = ctx.permissionMode;
+  // no approval is needed at all in these modes — return before touching the
+  // backend's path API (a bare tool context may not carry one)
   if (mode === "yolo" || ctx.yolo) return true;
   if (mode === "edit") return true;
-  if (mode === "ask") {
-    if (inside) return true;
-    return ctx.approval.request(req);
-  }
-  // unset: heredoc/CLI default — only outside-cwd writes ask
+  const inside = isInside(backendPath(ctx), ctx.cwd, absolute);
   if (inside) return true;
   return ctx.approval.request(req);
 }

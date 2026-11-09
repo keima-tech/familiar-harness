@@ -35,6 +35,9 @@ export interface OfficeTemplate {
   size: number;
 }
 
+/** Refuse absurd uploads before they reach the disk (also bounds the RPC body). */
+const MAX_TEMPLATE_BYTES = 64 * 1024 * 1024;
+
 export function templatesDir(home: string): string {
   return path.join(home, "templates");
 }
@@ -101,6 +104,9 @@ export function importOfficeTemplate(
     if (!fs.existsSync(from)) throw new Error(`template not found: ${from}`);
     const stat = fs.statSync(from);
     if (!stat.isFile()) throw new Error(`not a file: ${from}`);
+    if (stat.size > MAX_TEMPLATE_BYTES) {
+      throw new Error(`template is too large (${Math.round(stat.size / 1_048_576)} MB; limit ${MAX_TEMPLATE_BYTES / 1_048_576} MB)`);
+    }
     kind = officeKindOf(from);
     stem = templateStem(source.name ?? from);
     const buf = fs.readFileSync(from);
@@ -118,6 +124,9 @@ export function importOfficeTemplate(
   }
   if (bytes.length < 4 || bytes.readUInt32LE(0) !== 0x04034b50) {
     throw new Error("not an Office file (zip)");
+  }
+  if (bytes.length > MAX_TEMPLATE_BYTES) {
+    throw new Error(`template is too large (${Math.round(bytes.length / 1_048_576)} MB; limit ${MAX_TEMPLATE_BYTES / 1_048_576} MB)`);
   }
   if (!stem) throw new Error("template name is required");
 

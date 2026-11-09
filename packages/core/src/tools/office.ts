@@ -4,6 +4,7 @@ import path from "node:path";
 import { unzip } from "./ooxml-read.js";
 import { zipArchive, type ZipEntry } from "./zip.js";
 import { OFFICE_EXT, resolveOfficeTemplate, type OfficeKind } from "./office-templates.js";
+import { approveWrite } from "./fs-tools.js";
 import { familiarPaths } from "../paths.js";
 
 /**
@@ -53,9 +54,19 @@ interface DocBlock {
   table?: string[][];
 }
 
-function docxParagraph(text: string, opts: { heading?: number; bullet?: boolean } = {}): string {
+function docxParagraph(
+  text: string,
+  opts: { heading?: number; bullet?: boolean; numId?: number } = {},
+): string {
   const runs = `<w:r><w:t xml:space="preserve">${xmlEscape(text)}</w:t></w:r>`;
-  const style = opts.heading ? `<w:pStyle w:val="Heading${opts.heading}"/>` : opts.bullet ? `<w:pStyle w:val="ListParagraph"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr>` : "";
+  const bulletStyle =
+    `<w:pStyle w:val="ListParagraph"/>` +
+    `<w:numPr><w:ilvl w:val="0"/><w:numId w:val="${opts.numId ?? 1}"/></w:numPr>`;
+  const style = opts.heading
+    ? `<w:pStyle w:val="Heading${opts.heading}"/>`
+    : opts.bullet
+      ? bulletStyle
+      : "";
   return `<w:p><w:pPr>${style}</w:pPr>${runs}</w:p>`;
 }
 
@@ -78,12 +89,12 @@ function docxTable(rows: string[][]): string {
 }
 
 /** Body XML for the given blocks (shared by the from-scratch and template paths). */
-function docxBodyXml(blocks: DocBlock[]): string {
+function docxBodyXml(blocks: DocBlock[], numId = 1): string {
   return blocks
     .map((b) => {
       if (b.table && b.table.length > 0) return docxTable(b.table);
       if (b.bullets && b.bullets.length > 0) {
-        return b.bullets.map((t) => docxParagraph(String(t), { bullet: true })).join("");
+        return b.bullets.map((t) => docxParagraph(String(t), { bullet: true, numId })).join("");
       }
       if (b.heading) {
         return docxParagraph(b.heading, { heading: Math.min(6, Math.max(1, b.level ?? 1)) });
@@ -93,13 +104,34 @@ function docxBodyXml(blocks: DocBlock[]): string {
     .join("");
 }
 
-/** The numbering definition our bullet paragraphs reference (numId=1). */
-const DOCX_NUMBERING_XML =
-  `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
-  `<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
-  `<w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="bullet"/>` +
-  `<w:lvlText w:val="•"/><w:pPr><w:ind w:left="720" w:hanging="360"/></w:pPr></w:lvl></w:abstractNum>` +
-  `<w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num></w:numbering>`;
+/** A bullet list definition (numId/abstractNumId picked so they do not clash). */
+function docxBulletDefs(abstractId: number, numId: number): string {
+  return (
+    `<w:abstractNum w:abstractNumId="${abstractId}"><w:lvl w:ilvl="0"><w:start w:val="1"/>` +
+    `<w:numFmt w:val="bullet"/><w:lvlText w:val="•"/>` +
+    `<w:pPr><w:ind w:left="720" w:hanging="360"/></w:pPr></w:lvl></w:abstractNum>` +
+    `<w:num w:numId="${numId}"><w:abstractNumId w:val="${abstractId}"/></w:num>`
+  );
+}
+
+/** The numbering part used when there is no template (numId=1). */
+function docxNumberingXml(): string {
+  return (
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+    docxBulletDefs(0, 1) +
+    `</w:numbering>`
+  );
+}
+
+/** Highest `attr="N"` seen on `<tag …>`; -1 when absent. */
+function maxAttrValue(xml: string, tag: string, attr: string): number {
+  let max = -1;
+  const re = new RegExp(`<${tag}\\b[^>]*\\b${attr}="(\\d+)"`, "g");
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(xml)) !== null) max = Math.max(max, Number(m[1]));
+  return max;
+}
 
 /** The paragraph/table style definitions our content relies on. */
 function docxStyleDefs(): { heading: string; list: string; table: string } {
@@ -145,7 +177,7 @@ function buildDocx(title: string, blocks: DocBlock[]): Buffer {
   const bodyXml = docxBodyXml(blocks);
   const documentXml = docxDocumentXml(bodyXml);
   const stylesXml = docxStylesXml();
-  const numberingXml = DOCX_NUMBERING_XML;
+  const numberingXml = docxNumberingXml();
 
   return buildZip([
     {
@@ -608,24 +640,38 @@ function buildDocxFromTemplate(template: Buffer, title: string, blocks: DocBlock
   // keep the template's page setup (size, margins, headers) when present
   const sectPr = /<w:sectPr\b[\s\S]*?<\/w:sectPr>/.exec(original)?.[0];
   const open = /^([\s\S]*?<w:document\b[^>]*>)/.exec(original)?.[1];
-  const bodyXml = docxBodyXml(blocks);
-  const doc = open
-    ? `${open}<w:body>${bodyXml}${sectPr ?? ""}</w:body></w:document>`
-    : docxDocumentXml(bodyXml, sectPr);
-  parts.set("word/document.xml", Buffer.from(doc, "utf8"));
 
   const need = {
     headings: blocks.some((b) => typeof b.heading === "string" && b.heading !== ""),
     bullets: blocks.some((b) => (b.bullets?.length ?? 0) > 0),
     table: blocks.some((b) => (b.table?.length ?? 0) > 0),
   };
+
+  // bullets: never reuse a numId the template already defines (it would render
+  // as that list); append our own definition with free ids
+  let numId = 1;
+  const numXml = parts.get("word/numbering.xml")?.toString("utf8");
+  if (need.bullets && numXml && /<\/w:numbering>/.test(numXml)) {
+    const abstractId = maxAttrValue(numXml, "w:abstractNum", "w:abstractNumId") + 1;
+    numId = maxAttrValue(numXml, "w:num", "w:numId") + 1;
+    parts.set(
+      "word/numbering.xml",
+      Buffer.from(numXml.replace("</w:numbering>", `${docxBulletDefs(abstractId, numId)}</w:numbering>`), "utf8"),
+    );
+  } else if (need.bullets && !numXml) {
+    parts.set("word/numbering.xml", Buffer.from(docxNumberingXml(), "utf8"));
+  }
+
+  const bodyXml = docxBodyXml(blocks, numId);
+  const doc = open
+    ? `${open}<w:body>${bodyXml}${sectPr ?? ""}</w:body></w:document>`
+    : docxDocumentXml(bodyXml, sectPr);
+  parts.set("word/document.xml", Buffer.from(doc, "utf8"));
+
   parts.set(
     "word/styles.xml",
     Buffer.from(mergeDocxStyles(parts.get("word/styles.xml")?.toString("utf8"), need), "utf8"),
   );
-  if (need.bullets && !parts.has("word/numbering.xml")) {
-    parts.set("word/numbering.xml", Buffer.from(DOCX_NUMBERING_XML, "utf8"));
-  }
 
   let rels = parts.get("word/_rels/document.xml.rels")?.toString("utf8");
   rels = ensureRel(rels, `${REL_NS}/styles`, "styles.xml", "rIdFamiliarStyles");
@@ -712,20 +758,25 @@ function appendSheetRows(xml: string, sheet: SheetInput): string {
   return out;
 }
 
-function buildXlsxFromTemplate(template: Buffer, title: string, sheets: SheetInput[]): Buffer {
+function buildXlsxFromTemplate(
+  template: Buffer,
+  title: string,
+  sheets: SheetInput[],
+  notes: string[],
+): Buffer {
   const parts = unzip(template);
   const targets = workbookSheetParts(parts);
-  const extras: SheetInput[] = [];
   sheets.forEach((sheet, i) => {
     const part = targets[i];
     if (!part) {
-      extras.push(sheet); // more input sheets than the template has worksheets
+      // more input sheets than the template has worksheets: say so instead of
+      // dropping data silently
+      notes.push(`sheet "${sheet.name ?? i + 1}" was not written (the template has ${targets.length} worksheet(s))`);
       return;
     }
     const xml = parts.get(part)?.toString("utf8") ?? "";
     parts.set(part, Buffer.from(appendSheetRows(xml, sheet), "utf8"));
   });
-  void extras; // extra sheets beyond the template are ignored (kept simple + predictable)
   return zipOf(parts);
 }
 
@@ -773,7 +824,7 @@ function layoutPlaceholders(layoutXml: string): PptxPlaceholder[] {
   return out;
 }
 
-function pptxSlideXml(placeholders: PptxPlaceholder[], slide: SlideInput, seq: number, bodyStyle?: string): string {
+function pptxSlideXml(placeholders: PptxPlaceholder[], slide: SlideInput, seq: number): string {
   const titlePh = placeholders.find((p) => p.type === "title" || p.type === "ctrTitle");
   const bodyPh = placeholders.find((p) => p.type === "body" || p.type === "subTitle" || p.type === "obj");
   const shapes: string[] = [];
@@ -783,7 +834,7 @@ function pptxSlideXml(placeholders: PptxPlaceholder[], slide: SlideInput, seq: n
     return (
       `<p:sp><p:nvSpPr><p:cNvPr id="${id++}" name="${name}"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>` +
       `<p:nvPr><p:ph type="${ph.type}"${idxAttr}/></p:nvPr></p:nvSpPr>${ph.spPr}` +
-      `<p:txBody><a:bodyPr/>${bodyStyle ?? "<a:lstStyle/>"}${paras}</p:txBody></p:sp>`
+      `<p:txBody><a:bodyPr/><a:lstStyle/>${paras}</p:txBody></p:sp>`
     );
   };
   if (titlePh) {
@@ -826,9 +877,15 @@ function buildPptxFromTemplate(template: Buffer, title: string, slides: SlideInp
   const placeholders = layoutPlaceholders(layout.xml);
   const layoutTarget = `../${layout.target.replace(/^ppt\//, "")}`; // from ppt/slides/
 
-  // replace the template's slides with ours (the master/layouts/theme stay)
+  // replace the template's slides with ours (the master/layouts/theme stay);
+  // speaker notes belong to the old slides, so drop them too rather than
+  // leaving parts nothing references
   for (const key of [...parts.keys()]) {
-    if (/^ppt\/slides\/slide\d+\.xml$/.test(key) || /^ppt\/slides\/_rels\/slide\d+\.xml\.rels$/.test(key)) {
+    if (
+      /^ppt\/slides\/slide\d+\.xml$/.test(key) ||
+      /^ppt\/slides\/_rels\/slide\d+\.xml\.rels$/.test(key) ||
+      /^ppt\/notesSlides\//.test(key)
+    ) {
       parts.delete(key);
     }
   }
@@ -850,9 +907,17 @@ function buildPptxFromTemplate(template: Buffer, title: string, slides: SlideInp
 
   // presentation.xml: swap the slide list, keep the master list
   let pres = parts.get("ppt/presentation.xml")?.toString("utf8") ?? "";
-  pres = /<p:sldIdLst>[\s\S]*?<\/p:sldIdLst>/.test(pres)
-    ? pres.replace(/<p:sldIdLst>[\s\S]*?<\/p:sldIdLst>/, `<p:sldIdLst>${sldIds.join("")}</p:sldIdLst>`)
-    : pres.replace(/(<p:sldMasterIdLst>[\s\S]*?<\/p:sldMasterIdLst>)/, `$1<p:sldIdLst>${sldIds.join("")}</p:sldIdLst>`);
+  const list = `<p:sldIdLst>${sldIds.join("")}</p:sldIdLst>`;
+  if (/<p:sldIdLst>[\s\S]*?<\/p:sldIdLst>/.test(pres)) {
+    pres = pres.replace(/<p:sldIdLst>[\s\S]*?<\/p:sldIdLst>/, list);
+  } else if (/<p:sldIdLst\s*\/>/.test(pres)) {
+    // a template with no slides yet keeps an empty self-closing list
+    pres = pres.replace(/<p:sldIdLst\s*\/>/, list);
+  } else if (/<p:sldMasterIdLst>[\s\S]*?<\/p:sldMasterIdLst>/.test(pres)) {
+    pres = pres.replace(/(<p:sldMasterIdLst>[\s\S]*?<\/p:sldMasterIdLst>)/, `$1${list}`);
+  } else {
+    throw new Error("presentation.xml has no place for the slide list");
+  }
   parts.set("ppt/presentation.xml", Buffer.from(pres, "utf8"));
 
   // presentation rels: drop old slide rels, add ours
@@ -868,7 +933,7 @@ function buildPptxFromTemplate(template: Buffer, title: string, slides: SlideInp
 
   // content types: drop old slide overrides, add ours
   let ct = dropContentTypeOverrides(parts.get("[Content_Types].xml")?.toString("utf8") ?? "", (part) =>
-    /^\/ppt\/slides\/slide\d+\.xml$/.test(part),
+    /^\/ppt\/slides\/slide\d+\.xml$/.test(part) || /^\/ppt\/notesSlides\//.test(part),
   );
   ct = ensureContentTypes(
     ct,
@@ -890,13 +955,16 @@ function buildFromTemplate(
   template: Buffer,
   title: string,
   input: { blocks?: DocBlock[]; sheets?: SheetInput[]; slides?: SlideInput[] },
+  notes: string[],
 ): Buffer | undefined {
   try {
     if (kind === "docx") return buildDocxFromTemplate(template, title, input.blocks ?? []);
-    if (kind === "xlsx") return buildXlsxFromTemplate(template, title, input.sheets ?? []);
+    if (kind === "xlsx") return buildXlsxFromTemplate(template, title, input.sheets ?? [], notes);
     return buildPptxFromTemplate(template, title, input.slides ?? []);
-  } catch {
-    return undefined; // any structural surprise → fall back to a plain document
+  } catch (err) {
+    // any structural surprise → fall back to a plain document, but tell the user
+    notes.push(`the template could not be applied (${err instanceof Error ? err.message : String(err)}) — wrote a plain ${kind}`);
+    return undefined;
   }
 }
 
@@ -984,7 +1052,10 @@ export function createOfficeCreateTool(): Tool {
       }
 
       // the same gate as write: worth an approval only outside cwd in ask mode
-      const approved = await approveOfficeWrite(ctx, absolute);
+      const approved = await approveWrite(ctx, absolute, {
+        tool: "office_create",
+        summary: `write file: ${absolute}`,
+      });
       if (!approved) return { content: "[denied by user]", isError: true };
 
       const kinds = kind as OfficeKind;
@@ -997,7 +1068,16 @@ export function createOfficeCreateTool(): Tool {
 
       // a registered template (explicit name, or an implicit `default.<ext>`)
       const home = ctx.config.homeDir || familiarPaths.home();
-      const templatePath = resolveOfficeTemplate(home, typeof args.template === "string" ? args.template : undefined, kinds);
+      const templateRef = typeof args.template === "string" ? args.template.trim() : "";
+      const templatePath = resolveOfficeTemplate(home, templateRef === "" ? undefined : templateRef, kinds);
+      if (templatePath === undefined && templateRef !== "") {
+        // naming a template that does not exist is a mistake worth surfacing,
+        // not something to paper over with a plain document
+        return {
+          content: `template not found: "${templateRef}" — register it in Settings → Templates (or pass a file path)`,
+          isError: true,
+        };
+      }
       let usedTemplate: string | undefined;
       let templateBuf: Buffer | undefined;
       if (templatePath) {
@@ -1006,16 +1086,16 @@ export function createOfficeCreateTool(): Tool {
           usedTemplate = path.basename(templatePath, path.extname(templatePath));
         } catch {
           templateBuf = undefined;
-          if (typeof args.template === "string" && args.template.trim() !== "") {
-            return { content: `cannot read the template: ${templatePath}`, isError: true };
-          }
+          if (templateRef !== "") return { content: `cannot read the template: ${templatePath}`, isError: true };
         }
       }
 
+      const notes: string[] = [];
       let buf: Buffer;
       try {
         buf = templateBuf
-          ? (buildFromTemplate(kinds, templateBuf, title, { blocks, sheets, slides }) ?? baseBuild(kinds, title, blocks, sheets, slides))
+          ? (buildFromTemplate(kinds, templateBuf, title, { blocks, sheets, slides }, notes) ??
+             baseBuild(kinds, title, blocks, sheets, slides))
           : baseBuild(kinds, title, blocks, sheets, slides);
       } catch (err) {
         return {
@@ -1030,7 +1110,8 @@ export function createOfficeCreateTool(): Tool {
         return {
           content:
             `wrote ${absolute} (${kind}, ${buf.length} bytes)` +
-            (usedTemplate ? ` using the template "${usedTemplate}"` : ""),
+            (usedTemplate ? ` using the template "${usedTemplate}"` : "") +
+            (notes.length > 0 ? `\nnote: ${notes.join("; ")}` : ""),
           isError: false,
         };
       } catch (err) {
@@ -1050,14 +1131,4 @@ function baseBuild(kind: OfficeKind, title: string, blocks: DocBlock[], sheets: 
   return buildPptx(title, slides);
 }
 
-/** Write-approval gate shared with the write tool (kept local to avoid a cycle). */
-async function approveOfficeWrite(ctx: ToolContext, absolute: string): Promise<boolean> {
-  const mode = ctx.permissionMode;
-  if (mode === "yolo" || mode === "edit" || ctx.yolo) return true;
-  const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "");
-  const root = norm(ctx.cwd);
-  const target = norm(absolute);
-  const inside = target === root || target.startsWith(`${root}/`);
-  if (inside) return true;
-  return ctx.approval.request({ tool: "office_create", summary: `write file: ${absolute}` });
-}
+

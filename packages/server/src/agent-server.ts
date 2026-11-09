@@ -1779,6 +1779,9 @@ export class AgentServer {
       if (/HTTP 40[0-9]/.test(message)) {
         const fixed = this.store.repairToolCallArguments(sessionId);
         if (fixed > 0) {
+          // the failed attempt already appended the user message (and possibly
+          // a step or two): drop them, or the retry would store the request twice
+          this.store.truncateMessages(sessionId, msgCountBefore);
           log.warn(`turn failed (${message}); repaired ${fixed} message(s) — retrying once`);
           try {
             const retry = await this.runner.runTurn({

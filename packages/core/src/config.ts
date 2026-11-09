@@ -722,6 +722,23 @@ export function loadConfig(options: LoadConfigOptions = {}): ResolvedConfig {
   const cfg = merged as ResolvedConfig;
   cfg.configFile = file;
 
+  // Bash command policy: a list in the user's config is UNIONed with the
+  // built-in one, never a replacement. Writing one custom `deny` pattern used
+  // to drop the whole default set (including the filesystem-wipe guards) —
+  // a silent way to weaken --yolo protection.
+  {
+    const builtin = DEFAULT_CONFIG.permissions.bash;
+    const user = cfg.permissions.bash;
+    const union = (a: string[], b: string[] | undefined): string[] => {
+      const out = [...a];
+      for (const p of b ?? []) if (!out.includes(p)) out.push(p);
+      return out;
+    };
+    user.allow = union(builtin.allow, user.allow);
+    user.ask = union(builtin.ask, user.ask);
+    user.deny = union(builtin.deny, user.deny);
+  }
+
   // Provider entries: kind defaults to openai_compatible when only base_url is given.
   for (const [id, pc] of Object.entries(cfg.providers)) {
     pc.kind = pc.kind ?? "openai_compatible";

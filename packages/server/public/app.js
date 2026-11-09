@@ -1646,6 +1646,20 @@ function sessionTarget(s) {
 
 async function refreshSessions() {
   state.sessions = await rpc("session.list");
+  renderSessions();
+  if (!state.sessionId && state.sessions.length > 0) {
+    // reopen the session the user was last viewing (falls back to the newest)
+    let target = state.sessions[0].id;
+    try {
+      const last = localStorage.getItem("familiar.lastSession");
+      if (last && state.sessions.some((x) => x.id === last)) target = last;
+    } catch { /* ignore */ }
+    await openSession(target);
+  }
+}
+
+/** Draw the sidebar from state.sessions (no RPC) — also used while filtering. */
+function renderSessions() {
   const ul = $("#sessions");
   ul.innerHTML = "";
   // Claude-desktop-style grouping: one collapsible folder (cwd) section,
@@ -1665,9 +1679,12 @@ async function refreshSessions() {
       Math.max(...a[1].list.map((x) => x.updatedAt ?? 0)),
   );
   const folds = loadFolderFolds();
+  // while filtering, folders are always shown open: expanding to reveal a hit
+  // must not overwrite the user's saved fold state
+  const filtering = ($("#session-filter")?.value ?? "").trim() !== "";
   for (const [key, group] of sorted) {
     group.list.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
-    const collapsed = folds[key] === true;
+    const collapsed = filtering ? false : folds[key] === true;
     const badge =
       group.target === "local"
         ? `<span class="ftarget local" title="${esc(t("side.local"))}">💻 ${esc(t("side.local"))}</span>`
@@ -1693,15 +1710,6 @@ async function refreshSessions() {
   }
   renderFoldAllButton();
   applySessionFilter();
-  if (!state.sessionId && state.sessions.length > 0) {
-    // reopen the session the user was last viewing (falls back to the newest)
-    let target = state.sessions[0].id;
-    try {
-      const last = localStorage.getItem("familiar.lastSession");
-      if (last && state.sessions.some((x) => x.id === last)) target = last;
-    } catch { /* ignore */ }
-    await openSession(target);
-  }
 }
 
 function esc(text) {
@@ -1728,10 +1736,6 @@ function applySessionFilter() {
       (s) => (s.cwd || "") === row.dataset.cwd && sessionTarget(s) === row.dataset.target && matchesQuery(s),
     );
     row.classList.toggle("filtered", query !== "" && matches.length === 0);
-    if (query !== "" && matches.length > 0) {
-      const chev = row.querySelector(".chev");
-      if (chev && chev.textContent === "▸") row.querySelector(".folder-toggle")?.click();
-    }
   }
   let none = document.querySelector("#sessions .filter-none");
   if (query !== "" && visible === 0 && state.sessions.length > 0) {
@@ -3030,6 +3034,9 @@ function onEvent(sessionId, e) {
     }
     return;
   }
+  // was this turn started from here? a turn another client owns must not offer
+  // "retry" later (state.lastUserText would belong to a different request)
+  const oursTurn = state.busySessionId === sessionId;
   // busy is global but turns are per session: release it even when the turn
   // belongs to a session we are no longer looking at (otherwise wedged forever)
   if (e.type === "turn.end" || e.type === "turn.error" || e.type === "turn.aborted") {
@@ -3186,7 +3193,9 @@ function onEvent(sessionId, e) {
       appendTurnNote(t("turn.noteCeiling", String(e.step)));
       // one click to keep the work going, like typing 続けて
       addLabelButton(`▶ ${t("turn.continueNow")}`, () => {
-        if (!state.busy) void sendTurn(t("turn.continueWord"), []);
+        const word = t("turn.continueWord");
+        if (state.busy) enqueueMessage(word, []);
+        else void sendTurn(word, []);
       });
       break;
     case "turn.aborted":
@@ -3194,7 +3203,7 @@ function onEvent(sessionId, e) {
       state.turnBubbles = [];
       setTurnEndLabel(t("turn.stopped"));
       // a stopped turn leaves no answer: make the instruction one click away
-      if (state.lastUserText) {
+      if (oursTurn && state.lastUserText) {
         addLabelButton(`↻ ${t("turn.retryNow")}`, () => retryLastTurn(), state.lastUserText);
       }
       void refreshTodo();
@@ -7170,7 +7179,7 @@ function boot() {
     $("#img-overlay-img").src = "";
   });
 
-  $("#session-filter").addEventListener("input", applySessionFilter);
+  $("#session-filter").addEventListener("input", () => renderSessions());
   $("#fold-all-btn")?.addEventListener("click", () => toggleAllFolds());
   ulSessionsClick();
 

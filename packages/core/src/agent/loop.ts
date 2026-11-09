@@ -147,7 +147,10 @@ export class AgentRunner {
     let pendingNudge: string | undefined;
     /** true when the model finished on its own (no tool calls) */
     let finishedNaturally = false;
-    const yolo = opts.yolo ?? false;
+    // "Full access" on the composer is the same thing as --yolo for tools:
+    // both file writes and risky commands must stop asking (bash only looks at
+    // `ctx.yolo`, so the permission mode has to fold into it here).
+    const yolo = (opts.yolo ?? false) || opts.permissionMode === "yolo";
 
     const turnId = crypto.randomUUID();
     const usage: Usage = {};

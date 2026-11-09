@@ -160,6 +160,10 @@ needsApproval → required でない → 実行
 
 - UI アダプタ: CLI は readline y/n(headless は deny 既定、desktop は M4 ダイアログ + `permission.respond`)。
 - **deny パターンは allow より優先**。
+- `permissions.bash.{allow,ask,deny}` に書いたリストは**組み込みと union**(追加のみ)。
+  `deny` は `yolo`(フルアクセス)より先に判定されるため、**フルアクセスでもルート
+  全削除・デバイス書込は実行できない**(CLI `--yolo` と GUI の `permissionMode: yolo` の
+  双方で実測済み)。
 - plan モード時は read_only 以外のツールがそもそも広告されず、呼ばれても実行拒否(§5)。
 
 ## 4. M2 ツール(webfetch / websearch / todo / task)と plan モード

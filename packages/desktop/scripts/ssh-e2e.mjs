@@ -1375,6 +1375,7 @@ try {
   const retryBtn = await evalOnce(`(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     state.lastUserText = "retry target text";
+    state.busySessionId = state.sessionId; // the turn was started from here
     onEvent(state.sessionId, { type: "turn.aborted", turnId: "t3" });
     await sleep(100);
     const btn = document.querySelector("#turn-label .label-action");
@@ -1412,6 +1413,40 @@ try {
     JSON.stringify(longWait),
   );
 
+  // ---- filtering must not rewrite the saved fold state ---------------------
+  const filterFolds = await evalOnce(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    localStorage.removeItem("familiar.folderFolds");
+    await refreshSessions();
+    await sleep(400);
+    const rows = () => [...document.querySelectorAll("#sessions .folder-row")];
+    document.querySelector("#fold-all-btn").click();
+    await sleep(700);
+    const collapsed = rows().length > 0 && rows().every((r) => r.querySelector(".chev").textContent === "\u25b8");
+    const before = localStorage.getItem("familiar.folderFolds");
+    const filter = document.querySelector("#session-filter");
+    filter.value = "e";
+    filter.dispatchEvent(new Event("input", { bubbles: true }));
+    await sleep(500);
+    const openWhileFiltering = rows().every((r) => r.querySelector(".chev").textContent === "\u25be");
+    const after = localStorage.getItem("familiar.folderFolds");
+    filter.value = "";
+    filter.dispatchEvent(new Event("input", { bubbles: true }));
+    await sleep(400);
+    const back = rows().every((r) => r.querySelector(".chev").textContent === "\u25b8");
+    localStorage.removeItem("familiar.folderFolds");
+    await refreshSessions();
+    return { collapsed, openWhileFiltering, unchanged: before === after, back };
+  })()`);
+  check(
+    filterFolds?.collapsed === true &&
+      filterFolds?.openWhileFiltering === true &&
+      filterFolds?.unchanged === true &&
+      filterFolds?.back === true,
+    "filtering opens folders without rewriting the saved fold state",
+    JSON.stringify(filterFolds),
+  );
+
   // ---- settings: Office templates -----------------------------------------
   {
     const tplDir = path.join(localHome, "templates");
@@ -1428,6 +1463,7 @@ try {
         config: { homeDir: localHome },
         approval: { request: async () => true },
         backend: {
+          path,
           mkdirp: async (d) => fs.mkdirSync(d, { recursive: true }),
           writeFile: async (f, data) => fs.writeFileSync(f, data),
         },

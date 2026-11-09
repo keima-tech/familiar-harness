@@ -33,6 +33,12 @@ export interface SessionStore {
    * session that a truncated stream left unable to reach the provider).
    */
   repairToolCallArguments(sessionId: string): number;
+  /**
+   * Drop every message after the first `keep` ones (seq >= keep). Used to undo
+   * the messages an attempt appended before it failed — e.g. the user message
+   * of a turn that a provider 400 aborted before any answer.
+   */
+  truncateMessages(sessionId: string, keep: number): number;
   /** Set/update the title (used for first user message). */
   renameSession(id: string, title: string): void;
   /** Patch session options (title / provider / model / profile / cwd / effort). Returns the updated record. */
@@ -287,6 +293,14 @@ export class SqliteSessionStore implements SessionStore {
       }
     }
     return changed;
+  }
+
+  truncateMessages(sessionId: string, keep: number): number {
+    const res = this.db
+      .prepare(`DELETE FROM messages WHERE session_id = ? AND seq >= ?`)
+      .run(sessionId, keep);
+    this.db.prepare(`UPDATE sessions SET updated_at = ? WHERE id = ?`).run(Date.now(), sessionId);
+    return Number(res.changes ?? 0);
   }
 
   getMessages(sessionId: string): ChatMessage[] {

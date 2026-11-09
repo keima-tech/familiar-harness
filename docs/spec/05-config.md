@@ -91,6 +91,7 @@ permissions:
       # 既定の deny には加えて、rm の /・/*・システムディレクトリそのもの(/etc 等)・
       # ~・$HOME・Windows ドライブルート、--no-preserve-root、find / -delete /
       # -exec rm、dd of=/dev/sd*、mkfs(デバイス)が入る(承認でも実行不可)
+      # ここに書いたリストは組み込みと union(追加のみ)。1つ足しても既定の保護は消えない。
     max_timeout_ms: 600000
   files:
     bounds: cwd            # cwd | unrestricted(write/edit の系団・制限)

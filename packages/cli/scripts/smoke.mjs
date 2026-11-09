@@ -1390,6 +1390,184 @@ console.log("— scenario U: truncated tool arguments —");
   assert(store.repairToolCallArguments(sess.id) === 0, "the repair is idempotent", "");
 }
 
+// ---------------------------------------------------------------------------
+// Scenario V: registered office templates drive the design
+// ---------------------------------------------------------------------------
+console.log("— scenario V: office templates —");
+{
+  const { createOfficeCreateTool } = await import(path.join(repoRoot, "packages/core/dist/tools/office.js"));
+  const { readDocx, readXlsx, readPptx, unzip } = await import(
+    path.join(repoRoot, "packages/core/dist/tools/ooxml-read.js")
+  );
+  const { zipArchive } = await import(path.join(repoRoot, "packages/core/dist/tools/zip.js"));
+  const { importOfficeTemplate, listOfficeTemplates, resolveOfficeTemplate, deleteOfficeTemplate } =
+    await import(path.join(repoRoot, "packages/core/dist/tools/office-templates.js"));
+
+  const home = path.join(tmpBase, "tpl-home");
+  fs.mkdirSync(home, { recursive: true });
+  const work = path.join(tmpBase, "tpl-work");
+  fs.mkdirSync(work, { recursive: true });
+
+  const tool = createOfficeCreateTool();
+  const ctx = {
+    cwd: work,
+    yolo: true,
+    config: { homeDir: home },
+    approval: { request: async () => true },
+    backend: {
+      mkdirp: async (d) => fs.mkdirSync(d, { recursive: true }),
+      writeFile: async (f, data) => fs.writeFileSync(f, data),
+    },
+  };
+  const make = async (kind, file, args) =>
+    tool.execute({ kind, path: file, ...args }, ctx);
+
+  // --- build synthetic templates from our own output, then add design markers
+  const repack = (file, mutate) => {
+    const parts = unzip(fs.readFileSync(file));
+    mutate(parts);
+    fs.writeFileSync(file, zipArchive([...parts.entries()].map(([name, data]) => ({ name, data })), { compress: true }));
+  };
+
+  // docx: a sentinel style + a distinctive page size
+  const tplDocx = path.join(work, "tpl.docx");
+  await make("docx", tplDocx, { title: "tpl", blocks: [{ text: "template body" }] });
+  repack(tplDocx, (parts) => {
+    const styles = parts.get("word/styles.xml").toString().replace(
+      "</w:styles>",
+      '<w:style w:type="paragraph" w:styleId="FamiliarSentinel"><w:name w:val="FamiliarSentinel"/></w:style></w:styles>',
+    );
+    parts.set("word/styles.xml", Buffer.from(styles));
+    // replace the page setup (do not add a second sectPr — a real template has one)
+    const doc = parts
+      .get("word/document.xml")
+      .toString()
+      .replace(/<w:sectPr\b[\s\S]*?<\/w:sectPr>/, '<w:sectPr><w:pgSz w:w="5000" w:h="7000"/></w:sectPr>');
+    parts.set("word/document.xml", Buffer.from(doc));
+  });
+
+  // xlsx: a column width + a styled data row (s="7")
+  const tplXlsx = path.join(work, "tpl.xlsx");
+  await make("xlsx", tplXlsx, { title: "tpl", sheets: [{ name: "S", rows: [["keep", "me"]] }] });
+  repack(tplXlsx, (parts) => {
+    const sh = parts.get("xl/worksheets/sheet1.xml").toString()
+      .replace(/(<worksheet[^>]*>)/, '$1<cols><col min="1" max="2" width="42"/></cols>')
+      .replace(/<c r="A1"/, '<c r="A1" s="7"');
+    parts.set("xl/worksheets/sheet1.xml", Buffer.from(sh));
+  });
+
+  // pptx: a named layout with title/body placeholders + a sentinel theme colour
+  const tplPptx = path.join(work, "tpl.pptx");
+  await make("pptx", tplPptx, { title: "tpl", slides: [{ title: "x", bullets: ["y"] }] });
+  repack(tplPptx, (parts) => {
+    let layout = parts.get("ppt/slideLayouts/slideLayout1.xml").toString()
+      .replace(/name="Blank"/, 'name="Title and Content"')
+      .replace(
+        "<p:grpSpPr/>",
+        '<p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id="2" name="Title 1"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="1" y="1"/><a:ext cx="100" cy="100"/></a:xfrm></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p/></p:txBody></p:sp>' +
+          '<p:sp><p:nvSpPr><p:cNvPr id="3" name="Content 1"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="1" y="1"/><a:ext cx="100" cy="100"/></a:xfrm></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p/></p:txBody></p:sp>',
+      );
+    parts.set("ppt/slideLayouts/slideLayout1.xml", Buffer.from(layout));
+  });
+
+  // --- register
+  const reg = importOfficeTemplate(home, { path: tplDocx, name: "brand" });
+  assert(reg.kind === "docx" && reg.name === "brand", "a template is registered", JSON.stringify(reg));
+  importOfficeTemplate(home, { path: tplXlsx, name: "brand" });
+  importOfficeTemplate(home, { path: tplPptx, name: "brand" });
+  const catalog = listOfficeTemplates(home);
+  assert(
+    catalog.length === 3 && catalog.every((t) => t.name === "brand"),
+    "templates are listed per kind",
+    JSON.stringify(catalog.map((t) => `${t.name}.${t.kind}`)),
+  );
+  let rejected = false;
+  try {
+    importOfficeTemplate(home, { dataBase64: Buffer.from("not a zip").toString("base64"), name: "bad.docx" });
+  } catch {
+    rejected = true;
+  }
+  assert(rejected, "a non-Office file is rejected", "");
+
+  // --- docx: template styles and page setup survive, our content is there
+  const outDocx = await make("docx", "out.docx", {
+    template: "brand",
+    title: "Familiar",
+    blocks: [{ heading: "章", level: 1 }, { text: "本文" }, { bullets: ["A"] }, { table: [["k", "v"]] }],
+  });
+  assert(/using the template "brand"/.test(outDocx.content), "office_create reports the template used", outDocx.content);
+  const docxParts = unzip(fs.readFileSync(path.join(work, "out.docx")));
+  assert(
+    docxParts.get("word/styles.xml").toString().includes("FamiliarSentinel"),
+    "the docx keeps the template's styles",
+    "",
+  );
+  assert(
+    docxParts.get("word/document.xml").toString().includes('w:w="5000"'),
+    "the docx keeps the template's page setup",
+    "",
+  );
+  const docxBlocks = readDocx(fs.readFileSync(path.join(work, "out.docx")));
+  assert(
+    docxBlocks[0]?.heading === "章" && docxBlocks.some((b) => JSON.stringify(b.table) === JSON.stringify([["k", "v"]])),
+    "the docx content is ours",
+    JSON.stringify(docxBlocks).slice(0, 160),
+  );
+
+  // --- xlsx: existing rows kept, appended rows inherit the template style
+  await make("xlsx", "out.xlsx", {
+    template: "brand",
+    title: "Familiar",
+    sheets: [{ name: "S", rows: [["added", 1]] }],
+  });
+  const xlsxParts = unzip(fs.readFileSync(path.join(work, "out.xlsx")));
+  const sheetXml = xlsxParts.get("xl/worksheets/sheet1.xml").toString();
+  assert(sheetXml.includes('<col min="1" max="2" width="42"/>'), "the xlsx keeps the template's column widths", "");
+  assert(sheetXml.includes("keep"), "the xlsx keeps the template's existing rows", "");
+  assert(
+    /<row r="2"><c r="A2" s="7"/.test(sheetXml),
+    "appended rows inherit the template's cell style",
+    sheetXml.slice(sheetXml.indexOf('<row r="2"'), 160),
+  );
+
+  // --- pptx: slides clone the layout's placeholders, theme kept
+  await make("pptx", "out.pptx", {
+    template: "brand",
+    title: "Familiar",
+    slides: [{ title: "表紙", bullets: ["背景", "課題"] }],
+  });
+  const pptxParts = unzip(fs.readFileSync(path.join(work, "out.pptx")));
+  const slide = pptxParts.get("ppt/slides/slide1.xml").toString();
+  assert(
+    slide.includes('<p:ph type="title"') && slide.includes('<p:ph type="body" idx="1"'),
+    "pptx slides use the template layout's placeholders",
+    slide.slice(0, 200),
+  );
+  assert(
+    pptxParts.get("ppt/theme/theme1.xml") !== undefined,
+    "the pptx keeps the template's theme",
+    "",
+  );
+  const pptxSlides = readPptx(fs.readFileSync(path.join(work, "out.pptx")));
+  assert(
+    pptxSlides.length === 1 && pptxSlides[0]?.title === "表紙" && pptxSlides[0]?.bullets.length === 2,
+    "the pptx content is ours",
+    JSON.stringify(pptxSlides).slice(0, 160),
+  );
+
+  // --- a `default.<ext>` template is used without the parameter
+  assert(resolveOfficeTemplate(home, undefined, "docx") === undefined, "no implicit template without a default", "");
+  importOfficeTemplate(home, { path: tplDocx, name: "default" });
+  const implicit = resolveOfficeTemplate(home, undefined, "docx");
+  assert(
+    implicit !== undefined && implicit.endsWith("default.docx"),
+    "a template named default is picked up automatically",
+    String(implicit),
+  );
+  deleteOfficeTemplate(home, "default");
+  assert(resolveOfficeTemplate(home, undefined, "docx") === undefined, "deleting a template removes it", "");
+}
+
 console.log(
   failures === 0 ? "\nsmoke: all checks passed" : `\nsmoke: ${failures} failure(s)`,
 );

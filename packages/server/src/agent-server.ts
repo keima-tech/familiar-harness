@@ -25,6 +25,9 @@ import {
   readDocx,
   readXlsx,
   readPptx,
+  listOfficeTemplates,
+  importOfficeTemplate,
+  deleteOfficeTemplate,
   loadConfig,
   configFilePath,
   writeConnectorsToDisk,
@@ -592,6 +595,30 @@ export class AgentServer {
         return this.memoryReject(params);
       case "memory.approval":
         return this.memoryApproval(params);
+      case "office.templates":
+        return { templates: listOfficeTemplates(this.cfg.homeDir || familiarPaths.home()) };
+      case "office.templates.import": {
+        // `path` (desktop) or `dataBase64` + `name` (browser uploads)
+        const source: { path?: string; dataBase64?: string; name?: string } = {};
+        const pathArg = str(params, "path");
+        if (pathArg) source.path = pathArg;
+        const dataArg = str(params, "dataBase64");
+        if (dataArg) source.dataBase64 = dataArg;
+        const nameArg = str(params, "name");
+        if (nameArg) source.name = nameArg;
+        try {
+          const template = importOfficeTemplate(this.cfg.homeDir || familiarPaths.home(), source);
+          return { template, templates: listOfficeTemplates(this.cfg.homeDir || familiarPaths.home()) };
+        } catch (err) {
+          throw new RpcError(RPC_ERROR_INVALID_PARAMS, err instanceof Error ? err.message : String(err));
+        }
+      }
+      case "office.templates.delete": {
+        const name = str(params, "name");
+        if (!name) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "name is required");
+        const removed = deleteOfficeTemplate(this.cfg.homeDir || familiarPaths.home(), name);
+        return { removed, templates: listOfficeTemplates(this.cfg.homeDir || familiarPaths.home()) };
+      }
       case "skills.list":
         return this.skillsList();
       case "skills.view":

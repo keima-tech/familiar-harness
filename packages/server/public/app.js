@@ -210,6 +210,15 @@ const STR = {
     "files.sheet": "シート: {0}",
     "files.slide": "スライド {0}",
     "files.docxEmpty": "(内容がありません)",
+    "tpl.intro": "Word / Excel / PowerPoint のテンプレートを登録すると、office_create がそのデザイン(スタイル・テーマ・レイアウト・用紙設定)を引き継いでファイルを作成します。",
+    "tpl.add": "テンプレートを追加",
+    "tpl.empty": "まだテンプレートが登録されていません",
+    "tpl.delete": "削除",
+    "tpl.confirm": "テンプレート「{0}」を削除しますか?",
+    "tpl.deleted": "削除しました",
+    "tpl.added": "テンプレート「{0}」を登録しました",
+    "tpl.importFailed": "登録できませんでした: {0}",
+    "tpl.how": "使い方: office_create に template: \"<名前>\" を渡します。「default」という名前で登録すると、指定なしで自動的に使われます。",
     "files.copyMd": "Markdown でコピー",
     "files.copied": "コピーしました",
     "notify.approvalTitle": "Familiar Harness — 承認が必要",
@@ -302,6 +311,7 @@ const STR = {
     "nav.shortcuts": "ショートカット",
     "nav.providers": "プロバイダー",
     "nav.extensions": "拡張機能",
+    "nav.templates": "テンプレート",
     "nav.connectors": "コネクタ",
     "nav.connections": "接続",
     "nav.system": "このアプリについて",
@@ -702,6 +712,15 @@ const STR = {
     "files.sheet": "sheet: {0}",
     "files.slide": "slide {0}",
     "files.docxEmpty": "(no content)",
+    "tpl.intro": "Register Word / Excel / PowerPoint templates and office_create will follow their design (styles, theme, layouts, page setup).",
+    "tpl.add": "Add a template",
+    "tpl.empty": "no templates registered yet",
+    "tpl.delete": "delete",
+    "tpl.confirm": "Delete the template \"{0}\"?",
+    "tpl.deleted": "deleted",
+    "tpl.added": "registered the template \"{0}\"",
+    "tpl.importFailed": "could not register: {0}",
+    "tpl.how": "Usage: pass template: \"<name>\" to office_create. A template named \"default\" is used automatically.",
     "files.copyMd": "copy as Markdown",
     "files.copied": "copied",
     "notify.approvalTitle": "Familiar Harness — approval needed",
@@ -794,6 +813,7 @@ const STR = {
     "nav.shortcuts": "Shortcuts",
     "nav.providers": "Providers",
     "nav.extensions": "Extensions",
+    "nav.templates": "Templates",
     "nav.connectors": "Connectors",
     "nav.connections": "Connections",
     "nav.system": "About",
@@ -4081,6 +4101,7 @@ const SETTINGS_SECTIONS = [
   { id: "shortcuts", labelKey: "nav.shortcuts", icon: "⌘" },
   { id: "providers", labelKey: "nav.providers", icon: "▣" },
   { id: "extensions", labelKey: "nav.extensions", icon: "↯" },
+  { id: "templates", labelKey: "nav.templates", icon: "📄" },
   { id: "connectors", labelKey: "nav.connectors", icon: "🔗" },
   { id: "connections", labelKey: "nav.connections", icon: "🖥" },
   { id: "system", labelKey: "nav.system", icon: "◍" },
@@ -4130,6 +4151,7 @@ function renderSettingsSection(id) {
   else if (id === "shortcuts") renderShortcutsSection(content);
   else if (id === "providers") void renderProvidersSection(content, stale);
   else if (id === "extensions") void renderExtensionsSection(content, stale);
+  else if (id === "templates") void renderTemplatesSection(content, stale);
   else if (id === "connectors") void renderConnectorsSection(content, stale);
   else if (id === "connections") void renderConnectionsSection(content, stale);
   else if (id === "system") void renderSystemSection(content, stale);
@@ -5284,6 +5306,113 @@ async function renderConnectionsSection(content, stale = () => false) {
   if (pw.wrap.parentElement) pw.wrap.parentElement.insertBefore(pwNote, pw.wrap.nextSibling);
   form.appendChild(hostKeyBox);
   put(form);
+}
+
+/** Settings → templates: register Office files whose design office_create reuses. */
+async function renderTemplatesSection(content, stale = () => false) {
+  const put = (node) => { if (!stale()) content.appendChild(node); };
+  let templates = [];
+  try {
+    templates = (await rpc("office.templates")).templates ?? [];
+  } catch (err) {
+    put(sectionError(t("nav.templates"), err));
+    return;
+  }
+  if (stale()) return;
+
+  const intro = card(t("nav.templates"), t("tpl.intro"));
+  intro.appendChild(howNote(t("tpl.how")));
+
+  const kindIcon = { docx: "📘", xlsx: "📗", pptx: "📙" };
+  if (templates.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "note";
+    empty.textContent = t("tpl.empty");
+    intro.appendChild(empty);
+  } else {
+    for (const tpl of templates) {
+      const row = document.createElement("div");
+      row.className = "setting-row";
+      const text = document.createElement("div");
+      text.className = "setting-text";
+      text.innerHTML = `<b>${kindIcon[tpl.kind] ?? "📄"} ${esc(tpl.name)}</b><span>${esc(tpl.kind)} · ${esc(formatBytes(tpl.size ?? 0))}</span>`;
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "ghost tpl-del";
+      del.textContent = t("tpl.delete");
+      del.addEventListener("click", () => {
+        if (!confirm(t("tpl.confirm", tpl.name))) return;
+        void (async () => {
+          try {
+            await rpc("office.templates.delete", { name: tpl.name });
+            toast(t("tpl.deleted"), "ok");
+          } catch (err) {
+            toast(t("tpl.importFailed", err.message), "err");
+          }
+          renderSettingsSection("templates");
+        })();
+      });
+      row.append(text, del);
+      intro.appendChild(row);
+    }
+  }
+
+  // file picking: the desktop exposes a native dialog; a browser uploads bytes
+  const picker = document.createElement("input");
+  picker.type = "file";
+  picker.accept = ".docx,.dotx,.xlsx,.xltx,.pptx,.potx";
+  picker.style.display = "none";
+  picker.addEventListener("change", () => {
+    const file = picker.files?.[0];
+    picker.value = "";
+    if (!file) return;
+    void importTemplateFromFile(file);
+  });
+  intro.appendChild(picker);
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "tpl-add";
+  add.textContent = `＋ ${t("tpl.add")}`;
+  add.addEventListener("click", () => picker.click());
+  intro.appendChild(add);
+  put(intro);
+}
+
+/** Register a template from a picked file (path on the desktop, bytes in a browser). */
+async function importTemplateFromFile(file) {
+  const name = file.name;
+  try {
+    let params = null;
+    const pickFile = window.familiarDesktop?.filePathFor;
+    if (typeof pickFile === "function") {
+      try {
+        const p = pickFile(file);
+        if (typeof p === "string" && p !== "") params = { path: p, name };
+      } catch { /* fall back to uploading the bytes */ }
+    }
+    if (!params) {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error("read failed"));
+        reader.onload = () => resolve(String(reader.result ?? ""));
+        reader.readAsDataURL(file);
+      });
+      params = { name, dataBase64: dataUrl };
+    }
+    await rpc("office.templates.import", params);
+    toast(t("tpl.added", name.replace(/\.[^.]+$/, "")), "ok");
+  } catch (err) {
+    toast(t("tpl.importFailed", err.message), "err");
+  }
+  renderSettingsSection("templates");
+}
+
+/** Small hint paragraph used inside cards. */
+function howNote(text) {
+  const el = document.createElement("div");
+  el.className = "note";
+  el.textContent = text;
+  return el;
 }
 
 async function renderConnectorsSection(content, stale = () => false) {

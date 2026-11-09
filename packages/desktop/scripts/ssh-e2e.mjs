@@ -1412,6 +1412,50 @@ try {
     JSON.stringify(longWait),
   );
 
+  // ---- settings: Office templates -----------------------------------------
+  {
+    const tplDir = path.join(localHome, "templates");
+    fs.mkdirSync(tplDir, { recursive: true });
+    const { createOfficeCreateTool } = await import(
+      path.join(repoRoot, "packages/core/dist/tools/office.js")
+    );
+    await createOfficeCreateTool().execute(
+      { kind: "docx", path: path.join(tplDir, "house.docx"), title: "house", blocks: [{ text: "t" }] },
+      {
+        sessionId: "e2e",
+        cwd: tplDir,
+        yolo: true,
+        config: { homeDir: localHome },
+        approval: { request: async () => true },
+        backend: {
+          mkdirp: async (d) => fs.mkdirSync(d, { recursive: true }),
+          writeFile: async (f, data) => fs.writeFileSync(f, data),
+        },
+      },
+    );
+  }
+  const tplSettings = await evalOnce(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    openSettingsModal("templates");
+    await sleep(700);
+    const content = document.querySelector("#settings-content");
+    return {
+      hasAdd: content.querySelector(".tpl-add") !== null,
+      rows: [...content.querySelectorAll(".setting-row")].map((r) => r.textContent),
+      how: content.querySelector(".note")?.textContent ?? "",
+    };
+  })()`);
+  check(
+    tplSettings?.hasAdd === true && (tplSettings?.rows ?? []).some((r) => r.includes("house")),
+    "the templates settings section lists registered templates",
+    JSON.stringify(tplSettings),
+  );
+  check(
+    String(tplSettings?.how).includes("office_create"),
+    "the templates section explains how they are used",
+    String(tplSettings?.how),
+  );
+
   // ---- rich file previews (csv / json / office) ---------------------------
   // generate sample files in a temp dir, then open each in the viewer
   const previewDir = path.join(base, "preview");
@@ -1634,6 +1678,8 @@ try {
       "mode.yoloDesc", "mic.start", "mic.stop", "mic.unsupported", "mic.denied",
       "side.foldAll", "side.unfoldAll",
       "files.csvRows", "files.sheet", "files.slide", "files.docxEmpty",
+      "nav.templates", "tpl.intro", "tpl.add", "tpl.empty", "tpl.delete", "tpl.how",
+      "tpl.importFailed", "tpl.added", "tpl.deleted", "tpl.confirm",
     ];
     const bad = /[\u3040-\u30ff\u3400-\u9fff\uff66-\uff9f]/;
     return keys.filter((k) => bad.test(t(k))).map((k) => k + "=" + t(k));

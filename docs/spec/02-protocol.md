@@ -44,6 +44,9 @@ POST /rpc
 | `session.delete` | `{ id }` | `{ deleted: true }` |
 | `session.send` | `{ id, text, provider?, model?, effort?, maxSteps?, yolo?, plan?, permissionMode? }` | `{ turnId, steps, toolCalls, usage }`(イベントは WS / onEvent で流れる) |
 | `session.repair` | `{ id }` | `{ repaired: n }` — 壊れた tool_call 引数(切り詰め JSON)を修復 |
+| `office.templates` | `{}` | `{ templates: [{ name, kind, file, size }] }` — 登録済み Office テンプレート |
+| `office.templates.import` | `{ path }` または `{ name, dataBase64 }` | `{ template, templates }` — テンプレートを `~/.familiar/templates/` に登録 |
+| `office.templates.delete` | `{ name }` | `{ removed, templates }` |
 | `fs.preview` | `{ path, session? }` | 種別に応じたプレビュー。`kind`=image/audio/video/pdf/markdown/text/csv/json/docx/xlsx/pptx/binary。csv は `rows`、docx は `blocks`、xlsx は `sheets`、pptx は `slides`(office_create の入力と同形) |
 | `session.abort` | `{ id }` | `{ aborting: boolean }` — 実行中 turn を中断(API 呼び出しを abort。実行中ツールはそのステップ完了後に停止) |
 | `permission.respond`(M2) | `{ requestId, approved }` | `{ resolved: true }` — serve モードの動的承認 |

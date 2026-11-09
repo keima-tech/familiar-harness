@@ -202,6 +202,9 @@ html[data-mode="light"] { color-scheme: light; }
 .theme-card .tname { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card .note { color: var(--dim); font-size: 11.5px; margin-bottom: 8px; line-height: 1.5; }
 button.small { padding: 5px 12px; font-size: 12px; }
+/* templates settings */
+.tpl-add { margin-top: 10px; padding: 7px 14px; font-size: 12.5px; }
+.tpl-del { padding: 4px 10px; font-size: 12px; flex: none; }
 .rawmsg {
   font-family: var(--mono); font-size: 11px; color: var(--dim);
   padding: 3px 0; border-bottom: 1px solid var(--border);

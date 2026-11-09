@@ -22,6 +22,8 @@ export * from "./todo.js";
 export * from "./task.js";
 export * from "./lsp.js";
 export * from "./office.js";
+export * from "./office-templates.js";
+export * from "./zip.js";
 export * from "./ooxml-read.js";
 
 /** Tool names managed by the self-improvement loop (M3). */

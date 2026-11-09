@@ -55,13 +55,25 @@ type ToolOutput = { content: string; isError?: boolean };
 | `kind` | `docx` \| `xlsx` \| `pptx` | 出力形式 |
 | `path` | string | 出力パス(拡張子は kind に合わせて補正) |
 | `title` | string | タイトル/メタデータ |
+| `template` | string | 任意。登録済みテンプレート名(またはパス)。デザインを引き継ぐ |
 | `blocks` | array | docx: `{heading, level, text, bullets[], table[][]}` の配列 |
 | `sheets` | array | xlsx: `{name, headers[], rows[][]}` の配列 |
 | `slides` | array | pptx: `{title, bullets[]}` の配列 |
 
-- **依存パッケージなし**: OOXML 部品を自前で ZIP 構築(内蔵 zlib の STORE 方式 + CRC32)。
+- **依存パッケージなし**: OOXML 部品を自前で ZIP 構築(内蔵 zlib、`tools/zip.ts`)。
   Word / Excel / PowerPoint、LibreOffice、Google ドキュメントで開ける。
 - 権限は `write` と同じゲート(権限モード + cwd 内外)。
+- **テンプレート**: `~/.familiar/templates/<name>.docx|xlsx|pptx` に置いたファイル
+  (設定 → テンプレート で登録)を土台にできる。`template: "<name>"` を渡すか、
+  `default.<ext>` という名前で登録しておくと自動で使われる。適用方法:
+  - **docx**: テンプレートの styles/theme/numbering/ヘッダー/フッター/用紙設定を
+    保持し、本文のみ差し替え。不足するスタイル(Heading/ListParagraph/TableGrid)は
+    styles.xml に追記。
+  - **xlsx**: 既存のシート・列幅・スタイル・他シートを保持し、**最終行の書式を継承して
+    行を追記**(dimension も更新)。
+  - **pptx**: マスター/レイアウト/テーマを保持し、選んだレイアウトの
+    **プレースホルダを複製してスライドを生成**(タイトル+本文)。
+  テンプレートが壊れている/構造が想定外なら、テンプレートなしの生成に自動フォールバック。
 
 ### edit
 

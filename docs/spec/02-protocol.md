@@ -42,7 +42,9 @@ POST /rpc
 | `session.get` | `{ id }` | `{ session, messages }` |
 | `session.update` | `{ id, title?, provider?, model?, profile?, effort?, cwd? }` | `SessionRecord` |
 | `session.delete` | `{ id }` | `{ deleted: true }` |
-| `session.send` | `{ id, text, provider?, model?, effort?, maxSteps?, yolo?, plan? }` | `{ turnId, steps, toolCalls, usage }`(イベントは WS / onEvent で流れる) |
+| `session.send` | `{ id, text, provider?, model?, effort?, maxSteps?, yolo?, plan?, permissionMode? }` | `{ turnId, steps, toolCalls, usage }`(イベントは WS / onEvent で流れる) |
+| `session.repair` | `{ id }` | `{ repaired: n }` — 壊れた tool_call 引数(切り詰め JSON)を修復 |
+| `fs.preview` | `{ path, session? }` | 種別に応じたプレビュー。`kind`=image/audio/video/pdf/markdown/text/csv/json/docx/xlsx/pptx/binary。csv は `rows`、docx は `blocks`、xlsx は `sheets`、pptx は `slides`(office_create の入力と同形) |
 | `session.abort` | `{ id }` | `{ aborting: boolean }` — 実行中 turn を中断(API 呼び出しを abort。実行中ツールはそのステップ完了後に停止) |
 | `permission.respond`(M2) | `{ requestId, approved }` | `{ resolved: true }` — serve モードの動的承認 |
 | `memory.list`(M3) | `{}` | `{ memories: MemoryEntry[], pendingCount }` |

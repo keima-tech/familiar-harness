@@ -919,6 +919,26 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
     シナリオ R(窓超えの自動継続 / 上限マーカー)を追加。ssh-e2e は 107 項目に
     (自動継続と上限のノート、停止後の再実行ボタン、長時間待ちの説明)。
 
+## v0.1.0 の実装メモ㊿(2026-11-09、ファイルプレビューの拡張)
+
+- **既存**: 右ペインのファイルタブは画像・音声・動画・PDF・Markdown・テキストに
+  対応していたが、**CSV は生テキスト、JSON は非整形、Office は「バイナリ — プレビュー
+  不可」**だった。
+- **追加**:
+  - `packages/core/src/tools/ooxml-read.ts` を新設。**依存パッケージなし**で ZIP を
+    読み(内蔵 zlib の inflateRaw + CRC 不要の中央ディレクトリ走査)、docx は
+    `word/document.xml` から見出し/本文/箇条書き/表、xlsx は sharedStrings を考慮して
+    シート名とセル行列、pptx はスライド順にタイトル/本文を抽出する。返す形は
+    `office_create` の入力と対称なので、プレビューは同じ描画系を再利用できる。
+  - `fs.preview` に `csv`/`json`/`docx`/`xlsx`/`pptx` を追加(サイズ上限・バイナリ sniff つき)。
+  - GUI は CSV と Word の表を罫線テーブル、Excel をシート見出し+表、PowerPoint を
+    スライドカードで描画。JSON は整形表示。
+- **確認**: `office_create` で生成 → 読み戻しが一致(DOCX のブロック、XLSX の
+  シート名・ヘッダ・数値セル、PPTX の全スライド)。実機のスクリーンショットで
+  PowerPoint プレビューを確認。
+- **テスト**: smoke シナリオ T に往復テスト、ssh-e2e を 120 項目に
+  (CSV=表 / JSON=整形 / Word=ブロック / Excel=シート表 / PowerPoint=スライドカード)。
+
 ## v0.1.0 の実装メモ㊾(2026-11-06、HTTP 400 の原因と自動復旧)
 
 - **症状**: あるセッションで `session.send` が必ず `HTTP 400` で失敗する

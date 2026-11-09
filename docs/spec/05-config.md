@@ -280,7 +280,9 @@ ssh -L 46210:127.0.0.1:46210 <user>@<server-host>
 - セッションはローカルに保存され(`session.remote` に ssh 先を記録)、GUI の
   セッションメタに `ssh: user@host` と表示されます。`task` サブエージェントにも継承されます。
 - ファイル関連 RPC(`fs.list` / `fs.read` / `fs.preview` / `fs.dirs` / `fs.suggest` /
-  `fs.upload`)は `session` を渡すと同じバックエンドを通ります。セッション作成前の
+  `fs.upload`)は `session` を渡すと同じバックエンドを通ります。`fs.preview` は
+  画像/音声/動画/PDF/Markdown/テキストに加え、**CSV/TSV(表)・JSON(整形)・
+  Office(docx/xlsx/pptx を OOXML から抽出)** のプレビューを返します。セッション作成前の
   リモートフォルダー閲覧は `ssh` パラメータで行います。
 - **非画像ファイルの添付**: `fs.upload` がリモートの
   `<ホーム>/.familiar/uploads/<session-id>/` へ書き込み、`@<リモートパス>` を挿入します

@@ -206,6 +206,12 @@ const STR = {
     "files.openExternal": "外部アプリで開く",
     "files.binary": "バイナリファイルです({0})— プレビューできません",
     "files.tooLarge": "ファイルが大きすぎるためプレビューできません({0})— 外部アプリで開いてください",
+    "files.csvRows": "{0} 行 × {1} 列",
+    "files.sheet": "シート: {0}",
+    "files.slide": "スライド {0}",
+    "files.docxEmpty": "(内容がありません)",
+    "files.copyMd": "Markdown でコピー",
+    "files.copied": "コピーしました",
     "notify.approvalTitle": "Familiar Harness — 承認が必要",
     "notify.turnDone": "Familiar Harness — ターン完了",
     "notify.turnFailed": "Familiar Harness — ターン失敗",
@@ -692,6 +698,12 @@ const STR = {
     "files.openExternal": "open with the OS default app",
     "files.binary": "binary file ({0}) — cannot preview",
     "files.tooLarge": "too large to preview ({0}) — open it externally",
+    "files.csvRows": "{0} rows × {1} columns",
+    "files.sheet": "sheet: {0}",
+    "files.slide": "slide {0}",
+    "files.docxEmpty": "(no content)",
+    "files.copyMd": "copy as Markdown",
+    "files.copied": "copied",
     "notify.approvalTitle": "Familiar Harness — approval needed",
     "notify.turnDone": "Familiar Harness — turn completed",
     "notify.turnFailed": "Familiar Harness — turn failed",
@@ -3654,6 +3666,118 @@ async function filesRowFor(entry, depth, parentBox) {
   return row;
 }
 
+/** Simple bordered table for CSV sheets and Word tables. */
+function buildTable(rows) {
+  const wrap = document.createElement("div");
+  wrap.className = "files-table-wrap";
+  const table = document.createElement("table");
+  table.className = "files-table";
+  rows.forEach((cells, ri) => {
+    const tr = document.createElement("tr");
+    if (ri === 0) tr.className = "head";
+    const list = Array.isArray(cells) ? cells : [];
+    for (const cell of list) {
+      const td = document.createElement(ri === 0 ? "th" : "td");
+      td.textContent = String(cell ?? "");
+      tr.appendChild(td);
+    }
+    table.appendChild(tr);
+  });
+  wrap.appendChild(table);
+  return wrap;
+}
+
+/** Word document: the same block list office_create accepts. */
+function renderDocxPreview(view, blocks) {
+  if (blocks.length === 0) {
+    const note = document.createElement("div");
+    note.className = "files-note files-info";
+    note.textContent = t("files.docxEmpty");
+    view.appendChild(note);
+    return;
+  }
+  const body = document.createElement("div");
+  body.className = "files-doc";
+  for (const b of blocks) {
+    if (b?.table && b.table.length > 0) {
+      body.appendChild(buildTable(b.table));
+    } else if (Array.isArray(b?.bullets) && b.bullets.length > 0) {
+      const ul = document.createElement("ul");
+      for (const item of b.bullets) {
+        const li = document.createElement("li");
+        li.textContent = String(item ?? "");
+        ul.appendChild(li);
+      }
+      body.appendChild(ul);
+    } else if (b?.heading) {
+      const level = Math.min(6, Math.max(1, Number(b.level) || 1));
+      const h = document.createElement(`h${level + 1}`);
+      h.textContent = String(b.heading);
+      body.appendChild(h);
+    } else if (b?.text) {
+      const p = document.createElement("p");
+      p.textContent = String(b.text);
+      body.appendChild(p);
+    }
+  }
+  view.appendChild(body);
+}
+
+/** Excel workbook: one table per sheet, in tab order. */
+function renderXlsxPreview(view, sheets) {
+  if (sheets.length === 0) {
+    const note = document.createElement("div");
+    note.className = "files-note files-info";
+    note.textContent = t("files.docxEmpty");
+    view.appendChild(note);
+    return;
+  }
+  sheets.forEach((sheet, i) => {
+    if (sheets.length > 1 || (sheet?.name && sheet.name !== "Sheet1")) {
+      const head = document.createElement("div");
+      head.className = "files-sheet-head";
+      head.textContent = t("files.sheet", String(sheet?.name ?? i + 1));
+      view.appendChild(head);
+    }
+    view.appendChild(buildTable(Array.isArray(sheet?.rows) ? sheet.rows : []));
+  });
+}
+
+/** PowerPoint: a card per slide with its title and body. */
+function renderPptxPreview(view, slides) {
+  if (slides.length === 0) {
+    const note = document.createElement("div");
+    note.className = "files-note files-info";
+    note.textContent = t("files.docxEmpty");
+    view.appendChild(note);
+    return;
+  }
+  slides.forEach((slide, i) => {
+    const card = document.createElement("div");
+    card.className = "files-slide";
+    const num = document.createElement("div");
+    num.className = "files-slide-num";
+    num.textContent = t("files.slide", String(i + 1));
+    card.appendChild(num);
+    if (slide?.title) {
+      const h = document.createElement("h3");
+      h.textContent = String(slide.title);
+      card.appendChild(h);
+    }
+    const bullets = Array.isArray(slide?.bullets) ? slide.bullets : [];
+    if (bullets.length > 0) {
+      const ul = document.createElement("ul");
+      for (const item of bullets) {
+        const li = document.createElement("li");
+        li.textContent = String(item ?? "");
+        ul.appendChild(li);
+      }
+      card.appendChild(ul);
+    }
+    view.appendChild(card);
+  });
+}
+
 /** In-app file preview: images / audio / video / pdf inline, markdown
  * rendered with the safe renderer, everything else as text or an info stub
  * with an "open externally" escape hatch on the desktop. */
@@ -3674,7 +3798,9 @@ async function openFileViewer(filePath) {
 
   const head = document.createElement("div");
   head.className = "files-head";
-  const kindIcon = { image: "🖼", audio: "🎧", video: "🎬", pdf: "📄", markdown: "📝", text: "📄", binary: "📦" }[res.kind] ?? "📄";
+  const kindIcon =
+    { image: "🖼", audio: "🎧", video: "🎬", pdf: "📄", markdown: "📝", text: "📄", binary: "📦",
+      csv: "📊", json: "🧩", docx: "📘", xlsx: "📗", pptx: "📙" }[res.kind] ?? "📄";
   head.innerHTML =
     `<button type="button" class="ghost" id="files-back" title="${esc(t("files.back"))}">⬅</button>` +
     `<span class="files-root" title="${esc(res.path)}">${kindIcon} ${esc(baseName(res.path))}</span>`;
@@ -3773,6 +3899,40 @@ async function openFileViewer(filePath) {
     previewBtn.addEventListener("click", () => { mode = "preview"; render(); });
     rawBtn.addEventListener("click", () => { mode = "raw"; render(); });
     render();
+    return;
+  }
+
+  if (res.kind === "csv") {
+    const rows = Array.isArray(res.rows) ? res.rows : [];
+    const cols = rows.reduce((n, r) => Math.max(n, Array.isArray(r) ? r.length : 0), 0);
+    const note = document.createElement("div");
+    note.className = "files-note";
+    note.textContent = t("files.csvRows", String(rows.length), String(cols));
+    view.appendChild(note);
+    view.appendChild(buildTable(rows));
+    return;
+  }
+
+  if (res.kind === "json") {
+    const pre = document.createElement("pre");
+    pre.className = "files-pre";
+    pre.textContent = res.content ?? "";
+    view.appendChild(pre);
+    return;
+  }
+
+  if (res.kind === "docx") {
+    renderDocxPreview(view, Array.isArray(res.blocks) ? res.blocks : []);
+    return;
+  }
+
+  if (res.kind === "xlsx") {
+    renderXlsxPreview(view, Array.isArray(res.sheets) ? res.sheets : []);
+    return;
+  }
+
+  if (res.kind === "pptx") {
+    renderPptxPreview(view, Array.isArray(res.slides) ? res.slides : []);
     return;
   }
 

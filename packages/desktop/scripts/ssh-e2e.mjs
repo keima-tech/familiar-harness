@@ -1412,6 +1412,83 @@ try {
     JSON.stringify(longWait),
   );
 
+  // ---- rich file previews (csv / json / office) ---------------------------
+  // generate sample files in a temp dir, then open each in the viewer
+  const previewDir = path.join(base, "preview");
+  fs.mkdirSync(previewDir, { recursive: true });
+  fs.writeFileSync(path.join(previewDir, "preview.csv"), "name,qty\nalpha,3\nbeta,5\n");
+  fs.writeFileSync(path.join(previewDir, "preview.json"), '{"a":1,"b":[2,3]}');
+  {
+    const { createOfficeCreateTool } = await import(
+      path.join(repoRoot, "packages/core/dist/tools/office.js")
+    );
+    const tool = createOfficeCreateTool();
+    const ctx = {
+      sessionId: "e2e",
+      cwd: previewDir,
+      yolo: true,
+      config: {},
+      approval: { request: async () => true },
+      backend: {
+        mkdirp: async (d) => fs.mkdirSync(d, { recursive: true }),
+        writeFile: async (f, data) => fs.writeFileSync(f, data),
+      },
+    };
+    await tool.execute(
+      { kind: "docx", path: path.join(previewDir, "preview.docx"), title: "T", blocks: [{ heading: "見出し", level: 1 }, { text: "本文" }, { bullets: ["A", "B"] }] },
+      ctx,
+    );
+    await tool.execute(
+      { kind: "xlsx", path: path.join(previewDir, "preview.xlsx"), title: "T", sheets: [{ name: "S1", headers: ["月", "値"], rows: [["1月", 10], ["2月", 20]] }] },
+      ctx,
+    );
+    await tool.execute(
+      { kind: "pptx", path: path.join(previewDir, "preview.pptx"), title: "T", slides: [{ title: "S1", bullets: ["a"] }, { title: "S2", bullets: ["b"] }] },
+      ctx,
+    );
+  }
+
+  const officePreview = await evalOnce(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const out = {};
+    for (const [name, f] of [["csv", "preview.csv"], ["json", "preview.json"], ["docx", "preview.docx"], ["xlsx", "preview.xlsx"], ["pptx", "preview.pptx"]]) {
+      await openFileViewer(${JSON.stringify(previewDir)} + "/" + f);
+      await sleep(400);
+      const v = document.querySelector("#files-view");
+      out[name] = {
+        tables: v.querySelectorAll(".files-table").length,
+        slides: v.querySelectorAll(".files-slide").length,
+        sheetHeads: v.querySelectorAll(".files-sheet-head").length,
+        docHeadings: v.querySelectorAll(".files-doc h2, .files-doc h3").length,
+        pre: v.querySelector(".files-pre") !== null,
+        binary: v.querySelector(".files-info") !== null,
+      };
+    }
+    document.querySelector("#files-view").hidden = true;
+    document.querySelector("#files-tree").hidden = false;
+    return out;
+  })()`);
+  check(
+    officePreview?.csv?.tables === 1 && officePreview?.json?.pre === true,
+    "csv renders as a table and json is pretty-printed",
+    JSON.stringify(officePreview),
+  );
+  check(
+    officePreview?.docx?.docHeadings >= 1 && officePreview?.docx?.binary === false,
+    "a Word document previews its blocks instead of a binary stub",
+    JSON.stringify(officePreview?.docx),
+  );
+  check(
+    officePreview?.xlsx?.tables === 1 && officePreview?.xlsx?.sheetHeads >= 1,
+    "an Excel workbook previews as a sheet table",
+    JSON.stringify(officePreview?.xlsx),
+  );
+  check(
+    officePreview?.pptx?.slides === 2,
+    "a PowerPoint previews one card per slide",
+    JSON.stringify(officePreview?.pptx),
+  );
+
   // ---- collapsible session folders ----------------------------------------
   const folds = await evalOnce(`(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -1556,6 +1633,7 @@ try {
       "mode.plan", "mode.ask", "mode.edit", "mode.yolo", "mode.askDesc", "mode.editDesc",
       "mode.yoloDesc", "mic.start", "mic.stop", "mic.unsupported", "mic.denied",
       "side.foldAll", "side.unfoldAll",
+      "files.csvRows", "files.sheet", "files.slide", "files.docxEmpty",
     ];
     const bad = /[\u3040-\u30ff\u3400-\u9fff\uff66-\uff9f]/;
     return keys.filter((k) => bad.test(t(k))).map((k) => k + "=" + t(k));

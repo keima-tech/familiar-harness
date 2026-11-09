@@ -1223,6 +1223,9 @@ console.log("— scenario T: office_create + permission modes —");
   const { createOfficeCreateTool } = await import(
     path.join(repoRoot, "packages/core/dist/tools/office.js")
   );
+  const { readDocx, readXlsx, readPptx } = await import(
+    path.join(repoRoot, "packages/core/dist/tools/ooxml-read.js")
+  );
   const officeDir = path.join(project, "office");
   fs.mkdirSync(officeDir, { recursive: true });
 
@@ -1259,6 +1262,14 @@ console.log("— scenario T: office_create + permission modes —");
     "the docx is a zip with the OOXML part",
     `bytes=${docxBuf.length}`,
   );
+  // reading it back (the GUI preview path) must reproduce the same structure
+  const docxBack = readDocx(docxBuf);
+  assert(
+    docxBack[0]?.heading === "見出し" &&
+      docxBack.some((b) => JSON.stringify(b.table) === JSON.stringify([["k", "v"], ["a", "1"]])),
+    "the docx reads back as the same blocks",
+    JSON.stringify(docxBack).slice(0, 200),
+  );
 
   const xlsx = await tool.execute(
     { kind: "xlsx", path: "sheet.xlsx", title: "T", sheets: [{ name: "S", headers: ["月", "値"], rows: [["1月", 10], ["2月", 20]] }] },
@@ -1268,6 +1279,13 @@ console.log("— scenario T: office_create + permission modes —");
     xlsx.isError !== true && fs.readFileSync(path.join(officeDir, "sheet.xlsx")).includes(Buffer.from("xl/worksheets/sheet1.xml")),
     "office_create writes an xlsx",
     xlsx.content,
+  );
+  const sheetsBack = readXlsx(fs.readFileSync(path.join(officeDir, "sheet.xlsx")));
+  assert(
+    sheetsBack[0]?.name === "S" &&
+      JSON.stringify(sheetsBack[0]?.rows) === JSON.stringify([["月", "値"], ["1月", "10"], ["2月", "20"]]),
+    "the xlsx reads back with its sheet, headers and numeric cells",
+    JSON.stringify(sheetsBack).slice(0, 200),
   );
 
   const pptx = await tool.execute(
@@ -1279,6 +1297,13 @@ console.log("— scenario T: office_create + permission modes —");
     pptx.isError !== true && pptxBuf.includes(Buffer.from("ppt/slides/slide2.xml")),
     "office_create writes a pptx with every slide",
     pptx.content,
+  );
+  const slidesBack = readPptx(pptxBuf);
+  assert(
+    slidesBack.length === 2 && slidesBack[0]?.title === "S1" &&
+      JSON.stringify(slidesBack[1]) === JSON.stringify({ title: "S2", bullets: ["c"] }),
+    "the pptx reads back with every slide",
+    JSON.stringify(slidesBack).slice(0, 200),
   );
 
   // the extension follows kind even when the path says otherwise

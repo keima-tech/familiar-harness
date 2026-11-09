@@ -22,6 +22,7 @@ export * from "./todo.js";
 export * from "./task.js";
 export * from "./lsp.js";
 export * from "./office.js";
+export * from "./ooxml-read.js";
 
 /** Tool names managed by the self-improvement loop (M3). */
 export const SELF_IMPROVE_TOOLS = ["memory_manage", "skill_view", "skill_manage"] as const;

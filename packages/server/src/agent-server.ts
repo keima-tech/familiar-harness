@@ -22,6 +22,9 @@ import {
   AgentRunner,
   createBackend,
   type ExecBackend,
+  readDocx,
+  readXlsx,
+  readPptx,
   loadConfig,
   configFilePath,
   writeConnectorsToDisk,
@@ -851,10 +854,29 @@ export class AgentServer {
    */
   private async fsPreview(params: Record<string, unknown>): Promise<{
     path: string;
-    kind: "image" | "audio" | "video" | "pdf" | "markdown" | "text" | "binary";
+    kind:
+      | "image"
+      | "audio"
+      | "video"
+      | "pdf"
+      | "markdown"
+      | "text"
+      | "csv"
+      | "json"
+      | "docx"
+      | "xlsx"
+      | "pptx"
+      | "binary";
     mime?: string;
     dataBase64?: string;
     content?: string;
+    /** csv: parsed rows (first row is usually the header) */
+    rows?: string[][];
+    /** docx / pptx: parsed content (mirrors office_create input) */
+    blocks?: unknown;
+    slides?: unknown;
+    /** xlsx: worksheets */
+    sheets?: unknown;
     truncated?: boolean;
     size: number;
     tooLarge?: boolean;
@@ -879,6 +901,50 @@ export class AgentServer {
       return {
         path: target, kind: "markdown",
         content: buf.subarray(0, CAP).toString("utf8"),
+        truncated: buf.length > CAP || size > CAP, size,
+      };
+    }
+
+    // Office documents: unzip the OOXML parts and return the parsed content so
+    // the viewer can render a real preview (no temp file, no external app)
+    if (ext === "docx" || ext === "xlsx" || ext === "pptx") {
+      const CAP = 32 * 1024 * 1024;
+      if (size > CAP) return { path: target, kind: ext, size, tooLarge: true };
+      const buf = await backend.readFile(target, CAP);
+      try {
+        if (ext === "docx") return { path: target, kind: "docx", blocks: readDocx(buf), size };
+        if (ext === "xlsx") return { path: target, kind: "xlsx", sheets: readXlsx(buf), size };
+        return { path: target, kind: "pptx", slides: readPptx(buf), size };
+      } catch {
+        return { path: target, kind: "binary", size };
+      }
+    }
+
+    // delimited text and JSON get structured rendering
+    if (ext === "csv" || ext === "tsv") {
+      const CAP = 1024 * 1024;
+      const buf = await backend.readFile(target, CAP + 1);
+      if (buf.subarray(0, 8192).includes(0)) return { path: target, kind: "binary", size };
+      const text = buf.subarray(0, CAP).toString("utf8");
+      const delim = ext === "tsv" ? "\t" : (text.split("\n")[0] ?? "").includes(",") ? "," : "\t";
+      return {
+        path: target, kind: "csv", rows: parseDelimited(text, delim),
+        truncated: buf.length > CAP || size > CAP, size,
+      };
+    }
+    if (ext === "json") {
+      const CAP = 512 * 1024;
+      const buf = await backend.readFile(target, CAP + 1);
+      if (buf.subarray(0, 8192).includes(0)) return { path: target, kind: "binary", size };
+      const raw = buf.subarray(0, CAP).toString("utf8");
+      let pretty = raw;
+      try {
+        pretty = JSON.stringify(JSON.parse(raw), null, 2);
+      } catch {
+        /* not valid JSON — show it as-is */
+      }
+      return {
+        path: target, kind: "json", content: pretty,
         truncated: buf.length > CAP || size > CAP, size,
       };
     }
@@ -1924,6 +1990,45 @@ export class RpcError extends Error {
     super(message);
     this.name = "RpcError";
   }
+}
+
+/** Parse CSV/TSV (RFC4180-style quoting) into a row matrix for the viewer. */
+function parseDelimited(text: string, delim: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let quoted = false;
+  const pushField = (): void => {
+    row.push(field);
+    field = "";
+  };
+  const pushRow = (): void => {
+    pushField();
+    rows.push(row);
+    row = [];
+  };
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
+    if (quoted) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i += 1;
+        } else {
+          quoted = false;
+        }
+      } else {
+        field += ch;
+      }
+      continue;
+    }
+    if (ch === '"') quoted = true;
+    else if (ch === delim) pushField();
+    else if (ch === "\n") pushRow();
+    else if (ch !== "\r") field += ch;
+  }
+  if (field !== "" || row.length > 0) pushRow();
+  return rows.slice(0, 1000).map((r) => r.slice(0, 100));
 }
 
 function str(params: Record<string, unknown>, key: string): string | undefined {

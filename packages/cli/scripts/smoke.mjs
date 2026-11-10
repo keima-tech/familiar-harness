@@ -438,6 +438,14 @@ console.log("— scenario I: web ui transport —");
   assert(page.includes("app.js"), "web UI index served", page.slice(0, 120));
   const appJs = await fetch(`http://127.0.0.1:${PORT}/app.js`).then((r) => r.text());
   assert(appJs.includes("session.send"), "web UI app.js served");
+  assert(
+    page.includes('id="file-menu"') && page.includes('id="file-submenu"'),
+    "web UI ships the files-tab context menu",
+  );
+  assert(
+    appJs.includes("openFileMenu") && appJs.includes("showFileSubmenu") && appJs.includes("runFileOpen"),
+    "web UI app.js wires the files-tab context menu",
+  );
 
   const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
   const frames = [];

@@ -1569,6 +1569,63 @@ try {
     JSON.stringify(officePreview?.pptx),
   );
 
+  // ---- files-tab right-click menu (open / copy / add to context) ----------
+  const fileCtx = await evalOnce(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const dir = ${JSON.stringify(previewDir)};
+    const file = dir + "/preview.csv";
+    const box = document.querySelector("#files-tree");
+    const saved = box.innerHTML;
+    box.innerHTML = "";
+    const row = await filesRowFor({ name: "preview.csv", path: file, dir: false, size: 30 }, 0, box);
+    box.appendChild(row);
+    row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 60, clientY: 60 }));
+    await sleep(60);
+    const menu = document.querySelector("#file-menu");
+    const sub = document.querySelector("#file-submenu");
+    const openVisible = menu.hidden === false;
+    const topItems = [...menu.querySelectorAll("button[data-act]")].filter((b) => !b.hidden).map((b) => b.dataset.act);
+    menu.querySelector('[data-act="open"]').click();
+    await sleep(60);
+    const subVisible = sub.hidden === false;
+    const subItems = [...sub.querySelectorAll("button[data-act]")].map((b) => b.dataset.act);
+    // "add to context" writes the @path into the composer and closes the menu
+    const input = document.querySelector("#input");
+    input.value = "";
+    menu.querySelector('[data-act="addContext"]').click();
+    await sleep(30);
+    const composer = input.value;
+    const menuClosed = menu.hidden === true;
+    // relativeToCwd strips only the session-folder prefix
+    const savedCwd = state.currentSession ? state.currentSession.cwd : undefined;
+    state.currentSession = { cwd: dir };
+    const rel = relativeToCwd(file);
+    const outside = relativeToCwd("/somewhere/else.txt");
+    if (savedCwd === undefined) state.currentSession = null; else state.currentSession.cwd = savedCwd;
+    box.innerHTML = saved;
+    return { openVisible, topItems, subVisible, subItems, composer, menuClosed, rel, outside };
+  })()`);
+  check(
+    fileCtx?.openVisible === true && ["open", "copyPath", "addContext"].every((a) => (fileCtx?.topItems ?? []).includes(a)),
+    "right-clicking a file row opens the files-tab menu",
+    JSON.stringify(fileCtx?.topItems),
+  );
+  check(
+    fileCtx?.subVisible === true && (fileCtx?.subItems ?? []).includes("openApp"),
+    "the open entry flies out a submenu with the available open actions",
+    JSON.stringify(fileCtx?.subItems),
+  );
+  check(
+    fileCtx?.composer === `@${path.join(previewDir, "preview.csv")} ` && fileCtx?.menuClosed === true,
+    "add-to-context inserts the @path and closes the menu",
+    JSON.stringify({ composer: fileCtx?.composer, menuClosed: fileCtx?.menuClosed }),
+  );
+  check(
+    fileCtx?.rel === "preview.csv" && fileCtx?.outside === "/somewhere/else.txt",
+    "relativeToCwd strips only the session folder prefix",
+    JSON.stringify({ rel: fileCtx?.rel, outside: fileCtx?.outside }),
+  );
+
   // ---- collapsible session folders ----------------------------------------
   const folds = await evalOnce(`(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

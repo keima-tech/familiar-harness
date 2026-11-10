@@ -276,6 +276,16 @@
     <hr />
     <button data-act="delete" class="danger" data-i18n="menu.deleteShort">削除…</button>
   </div>
+  <div id="file-menu" class="pop ctx" hidden>
+    <button type="button" data-act="open" class="has-sub">
+      <span data-i18n="fmenu.open">開く</span><span class="sub-caret">▸</span>
+    </button>
+    <hr />
+    <button type="button" data-act="copyPath" data-i18n="fmenu.copyPath">パスをコピー</button>
+    <button type="button" data-act="copyRel" data-i18n="fmenu.copyRel">相対パスをコピー</button>
+    <button type="button" data-act="addContext" data-i18n="fmenu.addContext">コンテキストに追加</button>
+  </div>
+  <div id="file-submenu" class="pop ctx" hidden></div>
   <input id="file-attach" type="file" multiple hidden />
   <div id="img-overlay" hidden><img id="img-overlay-img" alt="" /></div>
   <div id="toasts"></div>

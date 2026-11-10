@@ -210,6 +210,15 @@ const STR = {
     "files.sheet": "シート: {0}",
     "files.slide": "スライド {0}",
     "files.docxEmpty": "(内容がありません)",
+    "fmenu.open": "開く",
+    "fmenu.openApp": "アプリ内で開く",
+    "fmenu.openOs": "既定のアプリで開く",
+    "fmenu.openFolder": "フォルダを開く",
+    "fmenu.copyPath": "パスをコピー",
+    "fmenu.copyRel": "相対パスをコピー",
+    "fmenu.addContext": "コンテキストに追加",
+    "fmenu.copied": "パスをコピーしました",
+    "fmenu.copyFailed": "コピーできませんでした",
     "tpl.intro": "Word / Excel / PowerPoint のテンプレートを登録すると、office_create がそのデザイン(スタイル・テーマ・レイアウト・用紙設定)を引き継いでファイルを作成します。",
     "tpl.add": "テンプレートを追加",
     "tpl.empty": "まだテンプレートが登録されていません",
@@ -712,6 +721,15 @@ const STR = {
     "files.sheet": "sheet: {0}",
     "files.slide": "slide {0}",
     "files.docxEmpty": "(no content)",
+    "fmenu.open": "Open",
+    "fmenu.openApp": "Open in app",
+    "fmenu.openOs": "Open with OS default app",
+    "fmenu.openFolder": "Open folder",
+    "fmenu.copyPath": "Copy path",
+    "fmenu.copyRel": "Copy relative path",
+    "fmenu.addContext": "Add to context",
+    "fmenu.copied": "Path copied",
+    "fmenu.copyFailed": "Could not copy",
     "tpl.intro": "Register Word / Excel / PowerPoint templates and office_create will follow their design (styles, theme, layouts, page setup).",
     "tpl.add": "Add a template",
     "tpl.empty": "no templates registered yet",
@@ -3671,6 +3689,7 @@ async function filesRowFor(entry, depth, parentBox) {
     (entry.dir
       ? `<span class="f-chev">▸</span>`
       : `<span class="f-size">${formatBytes(entry.size)}</span>`);
+  row.addEventListener("contextmenu", (ev) => openFileMenu(ev, entry));
   if (entry.dir) {
     let childBox = null;
     row.addEventListener("click", async () => {
@@ -3693,6 +3712,143 @@ async function filesRowFor(entry, depth, parentBox) {
     });
   }
   return row;
+}
+
+// ---------------------------------------------------------------------------
+// files tab: right-click menu (open / copy path / add to the composer)
+// ---------------------------------------------------------------------------
+let fileMenuTarget = null; // { path, dir, name } the menu currently acts on
+
+function hideFileMenu() {
+  const menu = $("#file-menu");
+  if (menu) menu.hidden = true;
+  hideFileSubmenu();
+}
+
+function hideFileSubmenu() {
+  const sub = $("#file-submenu");
+  if (sub) sub.hidden = true;
+}
+
+/** The target path relative to the session folder, when it lives underneath
+ *  it — otherwise the path is returned unchanged (its own folder elsewhere). */
+function relativeToCwd(p) {
+  const cwd = state.currentSession?.cwd ?? "";
+  if (!cwd) return p;
+  const norm = (s) => s.replace(/[\\/]+/g, "/").replace(/\/+$/, "");
+  const base = norm(cwd);
+  const full = norm(p);
+  if (full === base) return ".";
+  if (full.startsWith(`${base}/`)) return full.slice(base.length + 1);
+  return p;
+}
+
+/** Build + place the menu for a row. The "open" submenu only offers the
+ *  actions that can actually run here: the in-app viewer always works, the
+ *  OS hand-off needs the desktop bridge and a local file (a remote file cannot
+ *  be opened by an app on this machine). */
+function openFileMenu(ev, entry) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  hideCtxMenu();
+  fileMenuTarget = { path: entry.path, dir: !!entry.dir, name: entry.name };
+  const menu = $("#file-menu");
+  const sub = $("#file-submenu");
+  hideFileSubmenu();
+
+  const canOs =
+    !remoteBoot.isRemote && typeof window.familiarDesktop?.openPath === "function";
+  const acts = entry.dir
+    ? (canOs ? ["openFolder"] : [])
+    : ["openApp", ...(canOs ? ["openOs"] : [])];
+  const openBtn = menu.querySelector('[data-act="open"]');
+  openBtn.hidden = acts.length === 0;
+  menu.querySelector("hr").hidden = acts.length === 0;
+  sub.innerHTML = "";
+  for (const act of acts) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.dataset.act = act;
+    b.textContent = t(`fmenu.${act}`);
+    sub.appendChild(b);
+  }
+  // relative copy is only meaningful while the target sits under the cwd
+  menu.querySelector('[data-act="copyRel"]').hidden = relativeToCwd(entry.path) === entry.path;
+
+  menu.hidden = false;
+  const pad = 4;
+  const x = Math.min(ev.clientX, window.innerWidth - menu.offsetWidth - pad);
+  const y = Math.min(ev.clientY, window.innerHeight - menu.offsetHeight - pad);
+  menu.style.left = `${Math.max(pad, x)}px`;
+  menu.style.top = `${Math.max(pad, y)}px`;
+}
+
+/** Fly the submenu out beside its parent item, flipping to the left when it
+ *  would run off the right edge of the window. */
+function showFileSubmenu() {
+  const sub = $("#file-submenu");
+  const openBtn = $("#file-menu")?.querySelector('[data-act="open"]');
+  if (!sub || !openBtn || openBtn.hidden || sub.children.length === 0) return;
+  sub.hidden = false;
+  const r = openBtn.getBoundingClientRect();
+  const pad = 4;
+  let left = r.right + 2;
+  if (left + sub.offsetWidth > window.innerWidth - pad) left = r.left - sub.offsetWidth - 2;
+  let top = r.top;
+  if (top + sub.offsetHeight > window.innerHeight - pad) top = window.innerHeight - sub.offsetHeight - pad;
+  sub.style.left = `${Math.max(pad, left)}px`;
+  sub.style.top = `${Math.max(pad, top)}px`;
+}
+
+/** Run the open action for the current target (shared by the submenu items). */
+function runFileOpen(act) {
+  const entry = fileMenuTarget;
+  if (!entry) return;
+  if (act === "openApp") {
+    filesSelectedPath = entry.path;
+    void openFileViewer(entry.path);
+  } else if ((act === "openOs" || act === "openFolder") && window.familiarDesktop?.openPath) {
+    void window.familiarDesktop.openPath(entry.path);
+  }
+}
+
+function initFileMenu() {
+  const menu = $("#file-menu");
+  const sub = $("#file-submenu");
+  if (!menu || !sub) return;
+  sub.addEventListener("click", (ev) => {
+    const btn = ev.target.closest("button[data-act]");
+    if (!btn) return;
+    const act = btn.dataset.act;
+    hideFileMenu();
+    runFileOpen(act);
+  });
+  menu.addEventListener("click", (ev) => {
+    const btn = ev.target.closest("button[data-act]");
+    if (!btn) return;
+    const act = btn.dataset.act;
+    if (act === "open") {
+      if (sub.hidden) showFileSubmenu();
+      else hideFileSubmenu();
+      return;
+    }
+    const entry = fileMenuTarget;
+    hideFileMenu();
+    if (!entry) return;
+    if (act === "copyPath" || act === "copyRel") {
+      const text = act === "copyRel" ? relativeToCwd(entry.path) : entry.path;
+      void copyText(text).then((ok) =>
+        toast(ok ? t("fmenu.copied") : t("fmenu.copyFailed"), ok ? "info" : "err"),
+      );
+    } else if (act === "addContext") {
+      insertIntoComposer(`@${entry.path} `);
+    }
+  });
+  // hovering the "open" row flies its submenu out; other rows tuck it away
+  menu.addEventListener("mouseover", (ev) => {
+    if (ev.target.closest('button[data-act="open"]')) showFileSubmenu();
+    else hideFileSubmenu();
+  });
 }
 
 /** Simple bordered table for CSV sheets and Word tables. */
@@ -5717,6 +5873,7 @@ function hideCtxMenu() {
 
 function openCtxMenu(ev, sessionId) {
   ev.preventDefault();
+  hideFileMenu();
   const menu = $("#ctx-menu");
   menu.dataset.id = sessionId ?? "";
   menu.hidden = false;
@@ -7182,6 +7339,7 @@ function boot() {
   $("#session-filter").addEventListener("input", () => renderSessions());
   $("#fold-all-btn")?.addEventListener("click", () => toggleAllFolds());
   ulSessionsClick();
+  initFileMenu();
 
   // topbar: search + gauge + settings + session menu
   $("#search-toggle").addEventListener("click", () => toggleSearch());
@@ -7235,10 +7393,16 @@ function boot() {
   document.addEventListener("click", (ev) => {
     if (!ev.target.closest(".menu-wrap")) closeAllPops();
     if (!ev.target.closest("#ctx-menu")) hideCtxMenu();
+    if (!ev.target.closest("#file-menu") && !ev.target.closest("#file-submenu")) hideFileMenu();
   });
   for (const evt of ["scroll", "resize"]) {
     $("#transcript").addEventListener(evt, hideCtxMenu, { passive: true });
-    window.addEventListener(evt, hideCtxMenu, { passive: true });
+    $("#files-tree").addEventListener(evt, hideFileMenu, { passive: true });
+    $("#files-view").addEventListener(evt, hideFileMenu, { passive: true });
+    window.addEventListener(evt, () => {
+      hideCtxMenu();
+      hideFileMenu();
+    }, { passive: true });
   }
 
   $("#composer").addEventListener("submit", (ev) => {

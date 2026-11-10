@@ -65,6 +65,17 @@ npm run -w packages/desktop pack:linux   # deb + AppImage
 npm run -w packages/desktop pack:win     # NSIS (needs wine when cross-built on Linux)
 ```
 
+**Desktop app (Tauri — the smaller installer):** `packages/desktop-tauri` is an
+alternative shell that uses the OS webview instead of bundling Chromium and
+carries its own Node runtime, so it needs no Node install and no Electron. Same
+functionality core (spawns `familiar serve` and renders the Web UI); the native
+`window.familiarDesktop` bridge (open-with-OS / native folder picker / clipboard)
+is not wired yet. Measured on Linux x86_64: **deb 49 MB vs 90 MB** for Electron.
+
+```bash
+npm run -w packages/desktop-tauri build   # needs the Rust toolchain + cargo tauri
+```
+
 ### Updating
 
 - **release installs** (via the one-liner): `familiar update` — checks the Forgejo releases, downloads the newest `familiar-*.tar.gz` and swaps it in place (`--check` for a dry run, `--forgejo`/`--repo` to override the registry). Requires Node's fetch to trust the endpoint's certificate; self-signed instances get an automatic unverified retry with a warning (`FAMILIAR_TLS_STRICT=1` to abort instead).
@@ -181,6 +192,7 @@ packages/
   server/     JSON-RPC over HTTP+WebSocket daemon + static Web UI
   cli/        familiar command (TUI, REPL, headless run, serve)
   desktop/    Electron shell for the same core
+  desktop-tauri/  Tauri shell (system webview + bundled Node; smaller installer)
 docs/spec/    detailed specs (architecture, protocol, tools, config, roadmap)
 ```
 

@@ -1,0 +1,30 @@
+[package]
+name = "familiar-desktop"
+version = "0.1.0"
+edition = "2021"
+description = "Familiar Harness desktop shell (Tauri): system webview + bundled Node sidecar"
+license = "MIT"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# plain-HTTP client for the local /healthz probe and token file discovery.
+# No TLS: the sidecar only listens on 127.0.0.1.
+ureq = { version = "2", default-features = false, features = ["json"] }
+
+# PR_SET_PDEATHSIG, so the spawned `familiar serve` dies with the shell even on an
+# abrupt exit (the Electron shell can leave the server running).
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+opt-level = "s"
+panic = "abort"

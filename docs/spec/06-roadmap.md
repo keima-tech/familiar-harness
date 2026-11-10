@@ -919,6 +919,34 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
     シナリオ R(窓超えの自動継続 / 上限マーカー)を追加。ssh-e2e は 107 項目に
     (自動継続と上限のノート、停止後の再実行ボタン、長時間待ちの説明)。
 
+## v0.1.0 の実装メモ 54(2026-11-11、Tauri シェル + Node 同梱 = 小型インストーラ)
+
+- **動機**: 現行デスクトップ(`packages/desktop`)は Electron のため Chromium を同梱し、
+  Linux deb が **90MB**。サイズの主因は「Chromium 285MB + 自分のコード 9MB」で、実装
+  言語ではなく GUI シェルの選択だった。Rust に書き直す前に、**Electron シェルだけを
+  Tauri(システム WebView)に替え、バックエンド(TS/Node)はそのまま**にする方針を実測で
+  詰めた(会話メモ: サイズを決めるのは「Node 121MB を同梱するか否か」)。
+- **構成**: `packages/desktop-tauri`(新規、任意ビルド)。Rust 側は
+  `node resources/familiar/packages/cli/dist/familiar.js serve` を spawn して **システム WebView**
+  に http://127.0.0.1 の Web UI を読ませるだけ(`packages/desktop/main.js` の
+  「live な serve を再利用、無ければ spawn」戦略と同じ。`/healthz` の `tokenFile` を読んで
+  `?token=` を渡す)。**Node.js 公式バイナリと familiar ランタイムはリソースとして同梱**するので
+  ユーザーに Node のインストールを求めない(`scripts/stage.mjs` が実行中の node と
+  `packages/*/dist` + `yaml`/`ws` をステージ、`src-tauri/resources/` は gitignore)。
+- **計測(本機、Linux x86_64)**: Tauri deb **49MB**(シェル本体 4.6MB + 同梱 Node 121MB
+  非圧縮 + familiar 6.7MB)vs Electron deb **90MB**。抽出 deb を実行し、**同梱 node**
+  (`usr/lib/Familiar Harness/node/node`)が `familiar.js serve` を起動して `/healthz` が応答する
+  ことを実測(`FAMILIAR_HOME` / `FAMILIAR_PORTS` / `FAMILIAR_SPAWN_PORT` で隔離して検証)。
+- **改善点**: Linux は `PR_SET_PDEATHSIG` でサイドカーをシェルに道連れにする
+  (Electron 版は異常終了時に `familiar serve` が残り「古い serve が原因の unknown method」を
+  招いていた)。`FAMILIAR_PORTS` / `FAMILIAR_SPAWN_PORT` は Electron 版と同じ env を受ける。
+- **今回のスコープと繰り越し**: 本版は「起動 + 同梱 Node で serve + Web UI 表示」まで。
+  `window.familiarDesktop` ブリッジ(**OS 既定アプリで開く / ネイティブのフォルダ選択 /
+  クリップボード / 通知**)と、接続プロファイル管理・自動更新は**未実装**(Web UI 側は
+  ブリッジ不在時にブラウザ API / サーバ RPC `conn.*` へフォールバックするため、
+  基本操作と SSH は動く)。リリースは `scripts/release.sh --tauri` で deb を成果物に追加。
+  Windows/macOS ターゲットと AppImage、ブリッジ parity は次段。
+
 ## v0.1.0 の実装メモ 53(2026-11-11、ファイルタブの右クリックメニュー)
 
 - **右ペインのファイル一覧で行を右クリックするとメニュー**が出る

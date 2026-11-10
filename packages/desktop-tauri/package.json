@@ -1,0 +1,12 @@
+{
+  "name": "@familiar/desktop-tauri",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Familiar desktop shell (Tauri): the system webview + a bundled Node sidecar. A size-optimized alternative to the Electron shell (packages/desktop); see docs/spec/06-roadmap.md.",
+  "scripts": {
+    "stage": "node scripts/stage.mjs",
+    "dev": "node scripts/stage.mjs && cargo tauri dev",
+    "build": "node scripts/stage.mjs && cargo tauri build",
+    "build:debug": "node scripts/stage.mjs && cargo tauri build --debug"
+  }
+}

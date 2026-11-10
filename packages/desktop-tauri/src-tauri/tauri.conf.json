@@ -1,0 +1,33 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Familiar Harness",
+  "version": "0.1.0",
+  "identifier": "dev.familiar.harness",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb"],
+    "icon": ["icons/icon.png"],
+    "category": "DeveloperTool",
+    "shortDescription": "Familiar Harness — client/server agent harness",
+    "longDescription": "Familiar Harness desktop shell: an agent harness client. The shell bundles the Node.js runtime and the familiar server, spawns `familiar serve` locally and renders the Web UI in the system webview.",
+    "resources": {
+      "resources/node": "node",
+      "resources/familiar": "familiar"
+    },
+    "linux": {
+      "deb": {
+        "depends": []
+      }
+    }
+  }
+}

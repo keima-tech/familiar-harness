@@ -5,6 +5,7 @@
 #   scripts/release.sh --desktop              # also build deb + AppImage
 #   scripts/release.sh --publish              # release = tarball + desktop
 #   scripts/release.sh --publish --no-desktop # tarball-only release
+#   scripts/release.sh --publish --tauri      # also build the Tauri deb
 #   scripts/release.sh --publish --attach EXTRA.exe   # attach extra assets
 #
 # Publishing needs a token with repo write access:
@@ -19,6 +20,7 @@ REPO_HOST="${FAMILIAR_FORGEJO:-https://example.invalid:3000}"
 REPO_SLUG="${FAMILIAR_REPO:-owner/familiar-harness}"
 PUBLISH=0
 DESKTOP=-1 # unset — decided by --publish below
+TAURI=0    # opt-in: the size-optimized Tauri shell (needs the Rust toolchain)
 ATTACH_FILES=""
 PENDING_ATTACH=0
 for arg in "$@"; do
@@ -26,6 +28,7 @@ for arg in "$@"; do
     --publish) PUBLISH=1 ;;
     --desktop) DESKTOP=1 ;;
     --no-desktop) DESKTOP=0 ;;
+    --tauri) TAURI=1 ;;
     --attach) PENDING_ATTACH=1 ;;
     *)
       if [ "$PENDING_ATTACH" -eq 1 ]; then
@@ -76,6 +79,19 @@ if [ "$DESKTOP" -eq 1 ]; then
     [ -f "$f" ] || continue
     ARTIFACTS="$ARTIFACTS $f"
   done
+fi
+
+if [ "$TAURI" -eq 1 ]; then
+  echo "== tauri installer (deb; system webview + bundled Node) =="
+  # stages the Node runtime + familiar tree, then cargo tauri build (needs cargo)
+  npm run -w packages/desktop-tauri build >/dev/null 2>&1
+  debdir="packages/desktop-tauri/src-tauri/target/release/bundle/deb"
+  src="$(ls "$debdir"/*.deb 2>/dev/null | head -1)"
+  if [ -n "$src" ]; then
+    out="familiar-${VERSION}-linux-tauri-amd64.deb"
+    cp "$src" "$out" # rename away the spaces in "Familiar Harness_….deb"
+    ARTIFACTS="$ARTIFACTS $out"
+  fi
 fi
 
 tar -czf "$TARBALL" -C "$STAGING" .

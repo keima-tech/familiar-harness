@@ -69,6 +69,17 @@ npm run -w packages/desktop pack:linux   # deb + AppImage
 npm run -w packages/desktop pack:win     # NSIS(Linux でクロスビルドする場合は wine が必要)
 ```
 
+**デスクトップアプリ(Tauri — 小型インストーラ):** `packages/desktop-tauri` は
+Chromium を同梱せず **OS の WebView** を使い、**Node ランタイムを同梱**する別シェルです
+(ユーザー側の Node インストール不要・Electron 不要)。中身は同じで `familiar serve` を起動して
+Web UI を表示します。ネイティブブリッジ(`window.familiarDesktop`: OS 既定アプリで開く /
+ネイティブのフォルダ選択 / クリップボード)は未接続です。Linux x86_64 の実測で
+**deb 49MB(Electron 版は 90MB)**。
+
+```bash
+npm run -w packages/desktop-tauri build   # Rust ツールチェーン + cargo tauri が必要
+```
+
 ### アップデート
 
 - **リリース版(ワンライナーで導入)**: `familiar update` — Forgejo の最新 Release を確認し、`familiar-*.tar.gz` をダウンロードしてインストール先を入れ替えます(`--check` でドライラン、`--forgejo` / `--repo` で接続先変更)。自己署名証明書のインスタンスでは検証をスキップする再試行が行われます(警告表示。`FAMILIAR_TLS_STRICT=1` で中止)。

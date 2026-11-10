@@ -1,0 +1,10 @@
+# App-level ACL for the `window.familiarDesktop` bridge commands.
+#
+# Custom commands are allowed for local origins by default, but a page served
+# from http://127.0.0.1 (the local `familiar serve` the shell renders) counts as a
+# *remote* origin, so the commands must be granted explicitly to that origin
+# (see capabilities/remote.json).
+[[permission]]
+identifier = "allow-familiar-bridge"
+description = "Allow the injected Web UI bridge: open-with-OS, native folder picker, clipboard and notifications."
+commands.allow = ["write_clipboard", "open_path", "notify", "bridge_ready"]

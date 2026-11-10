@@ -940,12 +940,23 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
 - **改善点**: Linux は `PR_SET_PDEATHSIG` でサイドカーをシェルに道連れにする
   (Electron 版は異常終了時に `familiar serve` が残り「古い serve が原因の unknown method」を
   招いていた)。`FAMILIAR_PORTS` / `FAMILIAR_SPAWN_PORT` は Electron 版と同じ env を受ける。
-- **今回のスコープと繰り越し**: 本版は「起動 + 同梱 Node で serve + Web UI 表示」まで。
-  `window.familiarDesktop` ブリッジ(**OS 既定アプリで開く / ネイティブのフォルダ選択 /
-  クリップボード / 通知**)と、接続プロファイル管理・自動更新は**未実装**(Web UI 側は
-  ブリッジ不在時にブラウザ API / サーバ RPC `conn.*` へフォールバックするため、
-  基本操作と SSH は動く)。リリースは `scripts/release.sh --tauri` で deb を成果物に追加。
-  Windows/macOS ターゲットと AppImage、ブリッジ parity は次段。
+- **ブリッジ parity(実装・実機検証済み)**: `window.familiarDesktop` を
+  `initialization_script` で Web UI に注入し、**OS 既定アプリで開く / ネイティブの
+  フォルダ選択 / クリップボード / 通知**を Tauri コマンドで実装(`open_path` /
+  `write_clipboard` / `notify` + `tauri-plugin-dialog` のフォルダ選択)。ブリッジは
+  `window.__TAURI__` の注入順に依存しないよう**遅延解決**(呼び出し時に参照)。
+  ※ remote 由来(127.0.0.1)のページではアプリコマンドが ACL で**既定拒否**されるため、
+  `permissions/bridge.toml` に `allow-familiar-bridge` を定義し、
+  `capabilities/remote.json`(`remote.urls: http://127.0.0.1:*`)で付与している
+  (これが無いと `invoke` が静かに拒否される)。実機で `bridge ready`(IPC 到達)を確認。
+- **配布ターゲット**: `bundle.targets: "all"`(ホスト既定)+ `windows.nsis`
+  (`installMode: currentUser`)。`npm run -w packages/desktop-tauri build:linux` /
+  `build:win`。**AppImage は圧縮の都合で Electron 版より大きい(122MB vs 113MB)** ため
+  リリース既定には含めず、**deb(50MB)を採用**。
+- **繰り越し**: 自動更新(Electron シェル専用。Web UI はブリッジ不在時にボタンを隠し
+  `familiar update` を案内)、Windows インストーラの実機ビルド検証、および Web UI の
+  自動 e2e(`packages/desktop/scripts/ssh-e2e.mjs` は Electron レンダラを駆動するため
+  Electron シェルに依存)。リリースは `scripts/release.sh --tauri` で deb を成果物に追加。
 
 ## v0.1.0 の実装メモ 53(2026-11-11、ファイルタブの右クリックメニュー)
 

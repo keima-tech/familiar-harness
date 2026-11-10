@@ -71,13 +71,16 @@ npm run -w packages/desktop pack:win     # NSIS(Linux でクロスビルドす�
 
 **デスクトップアプリ(Tauri — 小型インストーラ):** `packages/desktop-tauri` は
 Chromium を同梱せず **OS の WebView** を使い、**Node ランタイムを同梱**する別シェルです
-(ユーザー側の Node インストール不要・Electron 不要)。中身は同じで `familiar serve` を起動して
-Web UI を表示します。ネイティブブリッジ(`window.familiarDesktop`: OS 既定アプリで開く /
-ネイティブのフォルダ選択 / クリップボード)は未接続です。Linux x86_64 の実測で
-**deb 49MB(Electron 版は 90MB)**。
+(ユーザー側の Node インストール不要・Electron 不要)。`familiar serve` を起動して Web UI を
+表示し、Electron の preload と同じ `window.familiarDesktop` ブリッジ(OS 既定アプリで開く /
+ネイティブのフォルダ選択 / クリップボード / 通知)を注入します。Linux x86_64 の実測で
+**deb 50MB(Electron 版は 90MB)**(AppImage は圧縮の都合で 122MB と小さくならないため、
+配布は deb を採用)。
 
 ```bash
-npm run -w packages/desktop-tauri build   # Rust ツールチェーン + cargo tauri が必要
+npm run -w packages/desktop-tauri build:linux   # deb(+ AppImage)
+npm run -w packages/desktop-tauri build:win     # NSIS(Windows 上でビルド)
+# Rust ツールチェーン + cargo tauri が必要
 ```
 
 ### アップデート

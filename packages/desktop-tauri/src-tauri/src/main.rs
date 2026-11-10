@@ -6,6 +6,10 @@
 // counterpart of the Electron shell in packages/desktop: same "talk to a live
 // familiar serve, or spawn one" strategy, but without bundling Chromium.
 //
+// A small `window.familiarDesktop` bridge is injected into every page (the same
+// shape the Web UI expects from the Electron preload): open-with-OS,
+// native folder picker, clipboard and notifications.
+//
 // See docs/spec/06-roadmap.md for the rationale and the current scope.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -20,6 +24,49 @@ use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 /// Electron shell). `FAMILIAR_PORTS` overrides the list; `FAMILIAR_SPAWN_PORT`
 /// overrides the port a fresh server is spawned on.
 const DEFAULT_PORTS: [u16; 3] = [46210, 46211, 46212];
+
+/// Injected into the webview on every load (including the navigation to the
+/// local server). Defines the same `window.familiarDesktop` surface the Electron
+/// preload exposes, so the Web UI keeps its native affordances. Only the
+/// functions it can honour here are defined; anything else stays undefined and
+/// the UI falls back to browser APIs / server RPCs.
+const BRIDGE: &str = r#"(function () {
+  function api() { return window.__TAURI__ || null; }
+  function invoke(cmd, args) {
+    var a = api();
+    if (!a || !a.core || typeof a.core.invoke !== "function") {
+      return Promise.reject(new Error("familiar: tauri IPC unavailable"));
+    }
+    return a.core.invoke(cmd, args);
+  }
+  window.familiarDesktop = {
+    writeClipboard: function (text) { return invoke("write_clipboard", { text: String(text == null ? "" : text) }); },
+    openPath: function (target) { return invoke("open_path", { path: String(target == null ? "" : target) }); },
+    notify: function (payload) { return invoke("notify", { payload: payload || {} }); },
+    pickDirectory: function () {
+      var a = api();
+      if (!a || !a.dialog || typeof a.dialog.open !== "function") return Promise.resolve("");
+      return a.dialog.open({ directory: true, multiple: false }).then(function (res) {
+        return typeof res === "string" ? res : "";
+      });
+    }
+  };
+  // Tauri's own global may be injected after this script runs — poll for it
+  // before reporting readiness (which also proves IPC across the origin).
+  var tries = 0;
+  (function ping() {
+    var a = api();
+    if (a && a.core && typeof a.core.invoke === "function") {
+      invoke("bridge_ready", { origin: location.origin }).catch(function () {});
+      return;
+    }
+    if (++tries < 100) setTimeout(ping, 100);
+  })();
+})();"#;
+
+/// Holds the child `familiar serve` process (if this shell spawned one) so it can
+/// be terminated when the last window closes.
+struct ServeState(Mutex<Option<Child>>);
 
 fn env_ports() -> Vec<u16> {
     let raw = std::env::var("FAMILIAR_PORTS").unwrap_or_default();
@@ -40,10 +87,6 @@ fn spawn_port(ports: &[u16]) -> u16 {
         .and_then(|s| s.trim().parse().ok())
         .unwrap_or_else(|| ports[0])
 }
-
-/// Holds the child `familiar serve` process (if this shell spawned one) so it can
-/// be terminated when the last window closes.
-struct ServeState(Mutex<Option<Child>>);
 
 /// Ask `/healthz` for liveness + the path of the bearer-token file (the token
 /// value itself is never exposed by the endpoint).
@@ -138,7 +181,14 @@ fn start_serve(app: &tauri::AppHandle) -> Option<(String, u16)> {
             Ok(())
         });
     }
-    let child = cmd.spawn().ok()?;
+    let child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[familiar] spawn failed ({node:?}): {e}");
+            return None;
+        }
+    };
+    eprintln!("[familiar] spawned familiar serve on port {port}");
     if let Some(state) = app.try_state::<ServeState>() {
         *state.0.lock().unwrap() = Some(child);
     }
@@ -157,14 +207,79 @@ fn wait_token(port: u16) -> String {
     String::new()
 }
 
+// ---------------------------------------------------------------------------
+// window.familiarDesktop bridge commands
+// ---------------------------------------------------------------------------
+
+/// Clipboard for the code-block copy button (navigator.clipboard is also
+/// available on the 127.0.0.1 secure origin, but this always works).
+#[tauri::command]
+fn write_clipboard(text: String) -> Result<bool, String> {
+    let mut cb = arboard::Clipboard::new().map_err(|e| e.to_string())?;
+    cb.set_text(text).map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+/// Open a file/folder with the OS default application (file viewer's
+/// "open with the OS default app" and the tree's "open folder").
+#[tauri::command]
+fn open_path(path: String) -> Result<(), String> {
+    if path.is_empty() {
+        return Err("empty path".into());
+    }
+    opener::open(&path).map_err(|e| e.to_string())
+}
+
+#[derive(serde::Deserialize, Default)]
+struct NotifyPayload {
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    body: String,
+}
+
+/// Turn-complete / approval notifications.
+#[tauri::command]
+fn notify(app: tauri::AppHandle, payload: NotifyPayload) -> Result<(), String> {
+    use tauri_plugin_notification::NotificationExt;
+    let title = if payload.title.is_empty() {
+        "Familiar Harness".to_string()
+    } else {
+        payload.title
+    };
+    app.notification()
+        .builder()
+        .title(title)
+        .body(payload.body)
+        .show()
+        .map_err(|e| e.to_string())
+}
+
+/// Emitted by the injected bridge once it is wired. Logs the origin (never the
+/// token-bearing URL) and doubles as an end-to-end check that IPC works on the
+/// remote page.
+#[tauri::command]
+fn bridge_ready(origin: String) {
+    eprintln!("[familiar] bridge ready: {origin}");
+}
+
 fn main() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(ServeState(Mutex::new(None)))
+        .invoke_handler(tauri::generate_handler![
+            write_clipboard,
+            open_path,
+            notify,
+            bridge_ready
+        ])
         .setup(|app| {
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("Familiar Harness")
                 .inner_size(1280.0, 840.0)
                 .min_inner_size(900.0, 600.0)
+                .initialization_script(BRIDGE)
                 .build()?;
             let handle = app.handle().clone();
             std::thread::spawn(move || {
@@ -187,12 +302,20 @@ fn main() {
                         let _ = w.navigate(parsed);
                     });
                 }
+                // Keep this thread alive for the process lifetime:
+                // PR_SET_PDEATHSIG binds to the *creating thread*, so returning
+                // here would signal the sidecar immediately (nothing is lost —
+                // the process exits and the thread dies with it).
+                loop {
+                    std::thread::park();
+                }
             });
             Ok(())
-        })
+        });
+    let app = builder
         .build(tauri::generate_context!())
-        .expect("error while building the Familiar shell")
-        .run(|app, event| {
+        .expect("error while building the Familiar shell");
+    app.run(|app, event| {
             if let RunEvent::ExitRequested { .. } = event {
                 if let Some(state) = app.try_state::<ServeState>() {
                     if let Some(mut child) = state.0.lock().unwrap().take() {

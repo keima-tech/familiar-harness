@@ -83,8 +83,11 @@ fi
 
 if [ "$TAURI" -eq 1 ]; then
   echo "== tauri installer (deb; system webview + bundled Node) =="
-  # stages the Node runtime + familiar tree, then cargo tauri build (needs cargo)
-  npm run -w packages/desktop-tauri build >/dev/null 2>&1
+  # stages the Node runtime + familiar tree, then cargo tauri build (needs cargo).
+  # deb only: the AppImage is not smaller than Electron's (its compression
+  # leaves the bundled Node ~uncompressed), so it is not shipped by default.
+  node packages/desktop-tauri/scripts/stage.mjs >/dev/null 2>&1
+  ( cd packages/desktop-tauri && cargo tauri build --bundles deb >/dev/null 2>&1 )
   debdir="packages/desktop-tauri/src-tauri/target/release/bundle/deb"
   src="$(ls "$debdir"/*.deb 2>/dev/null | head -1)"
   if [ -n "$src" ]; then

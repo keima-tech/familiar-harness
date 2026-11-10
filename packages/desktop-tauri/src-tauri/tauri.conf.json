@@ -15,7 +15,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["deb"],
+    "targets": "all",
     "icon": ["icons/icon.png"],
     "category": "DeveloperTool",
     "shortDescription": "Familiar Harness — client/server agent harness",
@@ -26,7 +26,12 @@
     },
     "linux": {
       "deb": {
-        "depends": []
+        "section": "devel"
+      }
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
       }
     }
   }

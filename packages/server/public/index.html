@@ -195,6 +195,18 @@
       </div>
     </div>
 
+    <div id="file-rename-overlay" class="overlay" hidden>
+      <div class="modal cwd-modal">
+        <h3 data-i18n="fmenu.renameTitle">名前を変更</h3>
+        <input id="file-rename-input" type="text" spellcheck="false" autocomplete="off" />
+        <div id="file-rename-error" class="form-error" hidden></div>
+        <div class="pop-actions">
+          <button id="file-rename-ok" type="button" data-i18n="fmenu.renameOk">変更</button>
+          <button id="file-rename-cancel" type="button" class="ghost" data-i18n="cwd.cancel">キャンセル</button>
+        </div>
+      </div>
+    </div>
+
     <div id="new-session-overlay" class="overlay" hidden>
       <div class="modal new-session-modal">
         <div class="modal-head">
@@ -280,10 +292,13 @@
     <button type="button" data-act="open" class="has-sub">
       <span data-i18n="fmenu.open">開く</span><span class="sub-caret">▸</span>
     </button>
+    <button type="button" data-act="rename" data-i18n="fmenu.rename">名前を変更…</button>
     <hr />
     <button type="button" data-act="copyPath" data-i18n="fmenu.copyPath">パスをコピー</button>
     <button type="button" data-act="copyRel" data-i18n="fmenu.copyRel">相対パスをコピー</button>
     <button type="button" data-act="addContext" data-i18n="fmenu.addContext">コンテキストに追加</button>
+    <hr />
+    <button type="button" data-act="delete" class="danger" data-i18n="fmenu.delete">削除…</button>
   </div>
   <div id="file-submenu" class="pop ctx" hidden></div>
   <input id="file-attach" type="file" multiple hidden />

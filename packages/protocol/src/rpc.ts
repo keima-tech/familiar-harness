@@ -113,6 +113,8 @@ export const RPC_METHODS = [
   "fs.list",
   "fs.read",
   "fs.preview",
+  "fs.rename",
+  "fs.delete",
   "curator.run",
   "mcp.status",
   "cron.status",

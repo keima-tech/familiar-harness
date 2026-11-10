@@ -149,6 +149,14 @@ export class LocalBackend implements ExecBackend {
     await fsp.rm(dir, { recursive: true, force: true });
   }
 
+  async rename(from: string, to: string): Promise<void> {
+    await fsp.rename(from, to);
+  }
+
+  async remove(target: string): Promise<void> {
+    await fsp.rm(target, { recursive: true, force: true });
+  }
+
   async home(): Promise<string> {
     return os.homedir();
   }

@@ -55,6 +55,10 @@ export interface ExecBackend {
   readMany(files: string[], maxBytes: number): Promise<Map<string, Buffer>>;
   /** Recursively delete a directory (best-effort callers pass safe paths). */
   removeTree(dir: string): Promise<void>;
+  /** Rename/move a file or directory on the backend's host. */
+  rename(from: string, to: string): Promise<void>;
+  /** Delete a file or directory (recursive); throws if the target is gone. */
+  remove(target: string): Promise<void>;
   /** Host home directory (remote $HOME for ssh). */
   home(): Promise<string>;
   dispose(): Promise<void>;

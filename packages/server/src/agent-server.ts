@@ -527,6 +527,10 @@ export class AgentServer {
         return this.fsSuggest(params);
       case "fs.upload":
         return this.fsUpload(params);
+      case "fs.rename":
+        return this.fsRename(params);
+      case "fs.delete":
+        return this.fsDelete(params);
       case "todo.list":
         return this.todoList(params);
       case "session.create":
@@ -1501,6 +1505,68 @@ export class AgentServer {
     const target = p.join(dir, unique);
     await backend.writeFile(target, buf);
     return { path: target, size: buf.length };
+  }
+
+  /**
+   * Rename a file/folder inside its own directory (GUI file tree). The new
+   * name is a bare base name — separators are refused — so a rename cannot
+   * move the entry elsewhere, and an existing destination is rejected rather
+   * than silently overwritten. The GUI asks the user to confirm first.
+   */
+  private async fsRename(params: Record<string, unknown>): Promise<{ path: string }> {
+    const backend = this.backendFor(params);
+    const raw = (str(params, "path") ?? "").trim();
+    if (raw === "") throw new RpcError(RPC_ERROR_INVALID_PARAMS, "path is required");
+    const name = (str(params, "name") ?? "").trim();
+    if (name === "" || name === "." || name === ".." || /[\\/]/.test(name)) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, `invalid name: ${name}`);
+    }
+    const target = await this.resolveOnBackend(backend, raw);
+    await this.guardProtected(backend, target);
+    const next = backend.path.join(backend.path.dirname(target), name);
+    if (next === target) return { path: target };
+    if (await backend.exists(next)) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, `already exists: ${name}`);
+    }
+    try {
+      await backend.rename(target, next);
+    } catch (err) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, `cannot rename: ${(err as Error).message}`);
+    }
+    return { path: next };
+  }
+
+  /** Delete a file or folder (recursive) from the GUI file tree. */
+  private async fsDelete(params: Record<string, unknown>): Promise<{ deleted: true }> {
+    const backend = this.backendFor(params);
+    const raw = (str(params, "path") ?? "").trim();
+    if (raw === "") throw new RpcError(RPC_ERROR_INVALID_PARAMS, "path is required");
+    const target = await this.resolveOnBackend(backend, raw);
+    await this.guardProtected(backend, target);
+    try {
+      await backend.remove(target);
+    } catch (err) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, `cannot delete: ${(err as Error).message}`);
+    }
+    return { deleted: true };
+  }
+
+  /** Refuse to rename/delete a filesystem root or the host home directory. */
+  private async guardProtected(backend: ExecBackend, target: string): Promise<void> {
+    const p = backend.path;
+    const norm = p.resolve(target);
+    if (norm === p.parse(norm).root) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, "refusing to modify a filesystem root");
+    }
+    let home = "";
+    try {
+      home = await backend.home();
+    } catch {
+      home = "";
+    }
+    if (home !== "" && norm === p.resolve(home)) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, "refusing to modify the home directory");
+    }
   }
 
   private async fsDirs(params: Record<string, unknown>): Promise<{ dirs: string[]; home: string }> {

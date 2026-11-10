@@ -48,6 +48,8 @@ POST /rpc
 | `office.templates.import` | `{ path }` または `{ name, dataBase64 }` | `{ template, templates }` — テンプレートを `~/.familiar/templates/` に登録 |
 | `office.templates.delete` | `{ name }` | `{ removed, templates }` |
 | `fs.preview` | `{ path, session? }` | 種別に応じたプレビュー。`kind`=image/audio/video/pdf/markdown/text/csv/json/docx/xlsx/pptx/binary。csv は `rows`、docx は `blocks`、xlsx は `sheets`、pptx は `slides`(office_create の入力と同形) |
+| `fs.rename` | `{ path, name, session? }` | `{ path }` — 同一ディレクトリ内で改名。`name` は区切り文字を含まない基底名のみ(移動不可)、既存先は拒否、ファイルシステムのルート/ホームは保護 |
+| `fs.delete` | `{ path, session? }` | `{ deleted: true }` — ファイル/フォルダを再帰削除(GUI が事前確認。ルート/ホームは保護) |
 | `session.abort` | `{ id }` | `{ aborting: boolean }` — 実行中 turn を中断(API 呼び出しを abort。実行中ツールはそのステップ完了後に停止) |
 | `permission.respond`(M2) | `{ requestId, approved }` | `{ resolved: true }` — serve モードの動的承認 |
 | `memory.list`(M3) | `{}` | `{ memories: MemoryEntry[], pendingCount }` |

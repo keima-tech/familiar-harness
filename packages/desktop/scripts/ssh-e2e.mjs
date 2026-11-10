@@ -1626,6 +1626,42 @@ try {
     JSON.stringify({ rel: fileCtx?.rel, outside: fileCtx?.outside }),
   );
 
+  // ---- files-tab rename + delete (round trip through the menu) -----------
+  const opsSrc = path.join(previewDir, "ops.txt");
+  const opsDst = path.join(previewDir, "ops-renamed.txt");
+  fs.writeFileSync(opsSrc, "hello\n");
+  const renameOpened = await evalOnce(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    openFileRename({ name: "ops.txt", path: ${JSON.stringify(opsSrc)}, dir: false });
+    await sleep(60);
+    const overlay = document.querySelector("#file-rename-overlay");
+    const opened = overlay.hidden === false;
+    document.querySelector("#file-rename-input").value = "ops-renamed.txt";
+    document.querySelector("#file-rename-ok").click();
+    await sleep(500);
+    return { opened, closed: overlay.hidden === true };
+  })()`);
+  check(
+    renameOpened?.opened === true && renameOpened?.closed === true,
+    "the rename modal opens and closes on submit",
+    JSON.stringify(renameOpened),
+  );
+  check(
+    fs.existsSync(opsDst) && !fs.existsSync(opsSrc),
+    "renaming through the menu reaches the filesystem",
+    `src=${fs.existsSync(opsSrc)} dst=${fs.existsSync(opsDst)}`,
+  );
+  await evalOnce(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const realConfirm = window.confirm;
+    window.confirm = () => true;
+    await deleteFileEntry({ name: "ops-renamed.txt", path: ${JSON.stringify(opsDst)}, dir: false });
+    window.confirm = realConfirm;
+    await sleep(300);
+    return 1;
+  })()`);
+  check(!fs.existsSync(opsDst), "deleting through the menu reaches the filesystem", `exists=${fs.existsSync(opsDst)}`);
+
   // ---- collapsible session folders ----------------------------------------
   const folds = await evalOnce(`(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

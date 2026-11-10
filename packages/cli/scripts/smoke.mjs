@@ -439,11 +439,13 @@ console.log("— scenario I: web ui transport —");
   const appJs = await fetch(`http://127.0.0.1:${PORT}/app.js`).then((r) => r.text());
   assert(appJs.includes("session.send"), "web UI app.js served");
   assert(
-    page.includes('id="file-menu"') && page.includes('id="file-submenu"'),
-    "web UI ships the files-tab context menu",
+    page.includes('id="file-menu"') && page.includes('id="file-submenu"') &&
+      page.includes('data-act="rename"') && page.includes('data-act="delete"'),
+    "web UI ships the files-tab context menu (open/rename/delete)",
   );
   assert(
-    appJs.includes("openFileMenu") && appJs.includes("showFileSubmenu") && appJs.includes("runFileOpen"),
+    appJs.includes("openFileMenu") && appJs.includes("showFileSubmenu") && appJs.includes("runFileOpen") &&
+      appJs.includes("commitFileRename") && appJs.includes("deleteFileEntry"),
     "web UI app.js wires the files-tab context menu",
   );
 
@@ -529,6 +531,38 @@ console.log("— scenario I: web ui transport —");
     "fs.suggest returns matching paths",
     JSON.stringify(sug).slice(0, 140),
   );
+  // v1.1: fs.rename / fs.delete (GUI file tree) + their safety guards
+  const opsDir = fs.mkdtempSync(path.join(os.tmpdir(), "familiar-fsops-"));
+  const origFile = path.join(opsDir, "before.txt");
+  fs.writeFileSync(origFile, "hi\n");
+  const rpcCall = (id, method, params) =>
+    fetch(`http://127.0.0.1:${PORT}/rpc`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
+    }).then((r) => r.json());
+  const renamedFile = path.join(opsDir, "after.txt");
+  const renameRes = await rpcCall(34, "fs.rename", { path: origFile, name: "after.txt" });
+  assert(
+    renameRes.result?.path === renamedFile && !fs.existsSync(origFile) && fs.existsSync(renamedFile),
+    "fs.rename renames a file within its directory",
+    JSON.stringify(renameRes).slice(0, 140),
+  );
+  const renameSep = await rpcCall(35, "fs.rename", { path: renamedFile, name: "../escape.txt" });
+  assert(!!renameSep.error, "fs.rename refuses a name with separators", JSON.stringify(renameSep).slice(0, 140));
+  const delRoot = await rpcCall(36, "fs.delete", { path: "/" });
+  assert(
+    /filesystem root/.test(String(delRoot.error?.message)),
+    "fs.delete refuses a filesystem root",
+    JSON.stringify(delRoot).slice(0, 140),
+  );
+  const deleteRes = await rpcCall(37, "fs.delete", { path: renamedFile });
+  assert(
+    deleteRes.result?.deleted === true && !fs.existsSync(renamedFile),
+    "fs.delete removes a file",
+    JSON.stringify(deleteRes).slice(0, 140),
+  );
+  fs.rmSync(opsDir, { recursive: true, force: true });
   const todos = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

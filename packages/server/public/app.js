@@ -219,6 +219,15 @@ const STR = {
     "fmenu.addContext": "コンテキストに追加",
     "fmenu.copied": "パスをコピーしました",
     "fmenu.copyFailed": "コピーできませんでした",
+    "fmenu.rename": "名前を変更…",
+    "fmenu.renameTitle": "名前を変更",
+    "fmenu.renameOk": "変更",
+    "fmenu.renameFailed": "名前を変更できませんでした: {0}",
+    "fmenu.delete": "削除…",
+    "fmenu.deleteConfirm": "「{0}」を削除しますか?(元に戻せません)",
+    "fmenu.renamed": "名前を変更しました",
+    "fmenu.deleted": "削除しました",
+    "fmenu.deleteFailed": "削除できませんでした: {0}",
     "tpl.intro": "Word / Excel / PowerPoint のテンプレートを登録すると、office_create がそのデザイン(スタイル・テーマ・レイアウト・用紙設定)を引き継いでファイルを作成します。",
     "tpl.add": "テンプレートを追加",
     "tpl.empty": "まだテンプレートが登録されていません",
@@ -730,6 +739,15 @@ const STR = {
     "fmenu.addContext": "Add to context",
     "fmenu.copied": "Path copied",
     "fmenu.copyFailed": "Could not copy",
+    "fmenu.rename": "Rename…",
+    "fmenu.renameTitle": "Rename",
+    "fmenu.renameOk": "Rename",
+    "fmenu.renameFailed": "Rename failed: {0}",
+    "fmenu.delete": "Delete…",
+    "fmenu.deleteConfirm": "Delete \"{0}\"? (cannot be undone)",
+    "fmenu.renamed": "Renamed",
+    "fmenu.deleted": "Deleted",
+    "fmenu.deleteFailed": "Delete failed: {0}",
     "tpl.intro": "Register Word / Excel / PowerPoint templates and office_create will follow their design (styles, theme, layouts, page setup).",
     "tpl.add": "Add a template",
     "tpl.empty": "no templates registered yet",
@@ -3842,6 +3860,10 @@ function initFileMenu() {
       );
     } else if (act === "addContext") {
       insertIntoComposer(`@${entry.path} `);
+    } else if (act === "rename") {
+      openFileRename(entry);
+    } else if (act === "delete") {
+      void deleteFileEntry(entry);
     }
   });
   // hovering the "open" row flies its submenu out; other rows tuck it away
@@ -3849,6 +3871,91 @@ function initFileMenu() {
     if (ev.target.closest('button[data-act="open"]')) showFileSubmenu();
     else hideFileSubmenu();
   });
+  // rename modal
+  const renameOverlay = $("#file-rename-overlay");
+  $("#file-rename-ok")?.addEventListener("click", () => void commitFileRename());
+  $("#file-rename-cancel")?.addEventListener("click", () => {
+    renameOverlay.hidden = true;
+  });
+  renameOverlay?.addEventListener("click", (ev) => {
+    if (ev.target === ev.currentTarget) renameOverlay.hidden = true;
+  });
+  $("#file-rename-input")?.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      ev.stopPropagation();
+      void commitFileRename();
+    } else if (ev.key === "Escape") {
+      ev.stopPropagation();
+      renameOverlay.hidden = true;
+    }
+  });
+}
+
+/** Re-render the file tree from the session folder (after a rename/delete). */
+function refreshFilesTree() {
+  filesSessionKey = null;
+  void renderFilesTab();
+}
+
+/** Rename: modal input, then fs.rename. The name is a bare base name (the
+ *  server refuses separators and an existing destination). */
+let fileRenameTarget = null;
+function openFileRename(entry) {
+  fileRenameTarget = entry;
+  const overlay = $("#file-rename-overlay");
+  const input = $("#file-rename-input");
+  $("#file-rename-error").hidden = true;
+  input.value = entry.name;
+  overlay.hidden = false;
+  input.focus();
+  input.select();
+}
+
+async function commitFileRename() {
+  const entry = fileRenameTarget;
+  const overlay = $("#file-rename-overlay");
+  const input = $("#file-rename-input");
+  const errBox = $("#file-rename-error");
+  if (!entry) {
+    overlay.hidden = true;
+    return;
+  }
+  const name = input.value.trim();
+  if (name === "" || name === entry.name) {
+    overlay.hidden = true;
+    return;
+  }
+  try {
+    await rpc("fs.rename", {
+      path: entry.path,
+      name,
+      ...(state.sessionId ? { session: state.sessionId } : {}),
+    });
+  } catch (err) {
+    errBox.textContent = t("fmenu.renameFailed", err.message);
+    errBox.hidden = false;
+    return; // keep the modal open so the name can be fixed
+  }
+  overlay.hidden = true;
+  toast(t("fmenu.renamed"), "ok");
+  refreshFilesTree();
+}
+
+/** Delete a file/folder (recursive) after a confirmation. */
+async function deleteFileEntry(entry) {
+  if (!window.confirm(t("fmenu.deleteConfirm", entry.name))) return;
+  try {
+    await rpc("fs.delete", {
+      path: entry.path,
+      ...(state.sessionId ? { session: state.sessionId } : {}),
+    });
+  } catch (err) {
+    toast(t("fmenu.deleteFailed", err.message), "err");
+    return;
+  }
+  toast(t("fmenu.deleted"), "ok");
+  refreshFilesTree();
 }
 
 /** Simple bordered table for CSV sheets and Word tables. */

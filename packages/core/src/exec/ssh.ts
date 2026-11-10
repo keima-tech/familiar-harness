@@ -456,6 +456,16 @@ export class SshBackend implements ExecBackend {
     await this.run(`rm -rf -- ${shellQuote(dir)}`, { timeoutMs: BATCH_TIMEOUT_MS });
   }
 
+  async rename(from: string, to: string): Promise<void> {
+    await this.mustRun(`mv -f -- ${shellQuote(from)} ${shellQuote(to)}`, {
+      timeoutMs: BATCH_TIMEOUT_MS,
+    });
+  }
+
+  async remove(target: string): Promise<void> {
+    await this.mustRun(`rm -rf -- ${shellQuote(target)}`, { timeoutMs: BATCH_TIMEOUT_MS });
+  }
+
   async home(): Promise<string> {
     if (this.homeDir === "") {
       const out = await this.mustRun(`printf '%s' "$HOME"`);

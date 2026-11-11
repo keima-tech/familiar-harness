@@ -13,12 +13,6 @@ client/server 型エージェントハーネス。コア(`packages/core`)は UI 
 - monorepo: npm workspaces + `tsc -b`(project references)
 - 依存は最小限に(現状 `yaml`, `ws` のみ)。新しい依存を足す前に AGENTS.md に追記して共有すること
 - ストレージ: Node 組み込み `node:sqlite`(ネイティブ依存を増やさない)
-- デスクトップは2系統。既定は Electron シェル(`packages/desktop`、Chromium 同梱)。
-  **Tauri シェル(`packages/desktop-tauri`、Rust + システム WebView)を追加済み**で、
-  こちらは Node ランタイムと familiar 本体を**同梱**(=ユーザーに Node のインストールを
-  求めない)ぶん Electron 版より小さい(本機で deb 90MB → 49MB)。
-  Rust ツールチェーン(`cargo` / `cargo tauri`)を使うため、ビルドは `--tauri` 指定時のみ。
-  Tauri 固有のクレート依存は `packages/desktop-tauri/src-tauri/Cargo.toml` に閉じる。
 
 ## コーディング規約
 

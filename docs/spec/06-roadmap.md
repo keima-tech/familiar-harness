@@ -919,55 +919,38 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
     シナリオ R(窓超えの自動継続 / 上限マーカー)を追加。ssh-e2e は 107 項目に
     (自動継続と上限のノート、停止後の再実行ボタン、長時間待ちの説明)。
 
-## v0.1.0 の実装メモ 54(2026-11-11、Tauri シェル + Node 同梱 = 小型インストーラ)
+## デスクトップ配布の検討メモ: Tauri シェルは採用せず(2026-11-11)
 
 - **動機**: 現行デスクトップ(`packages/desktop`)は Electron のため Chromium を同梱し、
-  Linux deb が **90MB**。サイズの主因は「Chromium 285MB + 自分のコード 9MB」で、実装
-  言語ではなく GUI シェルの選択だった。Rust に書き直す前に、**Electron シェルだけを
-  Tauri(システム WebView)に替え、バックエンド(TS/Node)はそのまま**にする方針を実測で
-  詰めた(会話メモ: サイズを決めるのは「Node 121MB を同梱するか否か」)。
-- **構成**: `packages/desktop-tauri`(新規、任意ビルド)。Rust 側は
-  `node resources/familiar/packages/cli/dist/familiar.js serve` を spawn して **システム WebView**
-  に http://127.0.0.1 の Web UI を読ませるだけ(`packages/desktop/main.js` の
-  「live な serve を再利用、無ければ spawn」戦略と同じ。`/healthz` の `tokenFile` を読んで
-  `?token=` を渡す)。**Node.js 公式バイナリと familiar ランタイムはリソースとして同梱**するので
-  ユーザーに Node のインストールを求めない(`scripts/stage.mjs` が実行中の node と
-  `packages/*/dist` + `yaml`/`ws` をステージ、`src-tauri/resources/` は gitignore)。
+  Linux deb が **90MB**。サイズの主因は「Chromium 285MB + 自分のコード 9MB」で、実装言語
+  ではなく GUI シェルの選択。そこで **Electron シェルだけを Tauri(システム WebView)に
+  替え、バックエンド(TS/Node)はそのまま**にする案を**プロトタイプで実測**した
+  (`packages/desktop-tauri` を一時実装。**本メモを残して実装は削除済み**。
+  `scripts/release.sh --tauri` も削除)。
 - **計測(本機、Linux x86_64)**: Tauri deb **49MB**(シェル本体 4.6MB + 同梱 Node 121MB
-  非圧縮 + familiar 6.7MB)vs Electron deb **90MB**。抽出 deb を実行し、**同梱 node**
-  (`usr/lib/Familiar Harness/node/node`)が `familiar.js serve` を起動して `/healthz` が応答する
-  ことを実測(`FAMILIAR_HOME` / `FAMILIAR_PORTS` / `FAMILIAR_SPAWN_PORT` で隔離して検証)。
-- **改善点**: Linux は `PR_SET_PDEATHSIG` でサイドカーをシェルに道連れにする
-  (Electron 版は異常終了時に `familiar serve` が残り「古い serve が原因の unknown method」を
-  招いていた)。`FAMILIAR_PORTS` / `FAMILIAR_SPAWN_PORT` は Electron 版と同じ env を受ける。
-- **ブリッジ parity(実装・実機検証済み)**: `window.familiarDesktop` を
-  `initialization_script` で Web UI に注入し、**OS 既定アプリで開く / ネイティブの
-  フォルダ選択 / クリップボード / 通知**を Tauri コマンドで実装(`open_path` /
-  `write_clipboard` / `notify` + `tauri-plugin-dialog` のフォルダ選択)。ブリッジは
-  `window.__TAURI__` の注入順に依存しないよう**遅延解決**(呼び出し時に参照)。
-  ※ remote 由来(127.0.0.1)のページではアプリコマンドが ACL で**既定拒否**されるため、
-  `permissions/bridge.toml` に `allow-familiar-bridge` を定義し、
-  `capabilities/remote.json`(`remote.urls: http://127.0.0.1:*`)で付与している
-  (これが無いと `invoke` が静かに拒否される)。実機で `bridge ready`(IPC 到達)を確認。
-- **配布ターゲット**: `bundle.targets: "all"`(ホスト既定)+ `windows.nsis`
-  (`installMode: currentUser`)。`npm run -w packages/desktop-tauri build:linux` /
-  `build:win`。**AppImage は圧縮の都合で Electron 版より大きい(122MB vs 113MB)** ため
-  リリース既定には含めず、**deb(50MB)を採用**。
-- **e2e ハーネス(`packages/desktop-tauri/scripts/e2e.mjs`、11 項目)**: WebKitGTK の
-  リモートインスペクタは CDP 互換の HTTP/JSON を持たないため、**デバッグビルド限定の
-  制御チャネル**(`src-tauri/src/e2e.rs`: `FAMILIAR_SHELL_E2E_PORT` 指定時に 127.0.0.1 で
-  `POST /eval` を立て、WebView 内で式を `await` 評価して結果を返す=Electron 版
-  `evalOnce` 相当)で実 UI を駆動する。リリースビルドは制御サーバを起動しないため
-  出荷バイナリに eval 経路は無い(`e2e_result` は登録のみで解決待ちが無ければ無害)。
-  検証内容: 起動と制御チャネル / 同梱 Node の serve 起動 / Web UI 描画 /
-  ブリッジ IPC 到達 / `openPath` 配線 / クリップボード往復 / ファイルメニュー実在 /
-  メニューハンドラ配線 / composer 補助 / **終了時にサイドカーが残らない**。
-  `npm run -w packages/desktop-tauri e2e`。
-- **繰り越し**: 自動更新(Electron シェル専用。Web UI はブリッジ不在時にボタンを隠し
-  `familiar update` を案内)、Windows インストーラの実機ビルド検証、および既存 UI テスト
-  (`packages/desktop/scripts/ssh-e2e.mjs`、130+ 項目)の Tauri ハーネスへの移植
-  (これが済めば Electron シェルを削除できる)。リリースは `scripts/release.sh --tauri`
-  で deb を成果物に追加。
+  非圧縮 + familiar 6.7MB)vs Electron deb **90MB**。AppImage は**むしろ大きい**
+  (122MB vs 113MB。圧縮の都合で同梱 Node がほぼ非圧縮のまま)。→ サイズ利得は
+  **Linux deb の 1.8 倍のみ**。抽出 deb を実行し、同梱 node が `familiar.js serve` を起動して
+  `/healthz` が応答することまで実測(`FAMILIAR_HOME`/`FAMILIAR_PORTS`/`FAMILIAR_SPAWN_PORT` で隔離)。
+- **実装時に判明した要点(再挑戦する場合の知見)**:
+  - `window.familiarDesktop` は `initialization_script` で注入するが、**`window.__TAURI__` の
+    注入順に依存**するため呼び出し時に遅延解決する。
+  - **127.0.0.1 のページは remote 扱いで、アプリコマンドは ACL により既定拒否**。
+    アプリ側 `permissions/*.toml` に permission を定義し、`capabilities` に
+    `remote.urls` 付きで付与しないと `invoke` が静かに失敗する。
+  - Linux の `PR_SET_PDEATHSIG` は**生成したスレッド**に紐づく。サイドカーを spawn した
+    スレッドが return すると即座に kill される(PDEATHSIG を使うならスレッドを生存させる)。
+  - WebKitGTK のリモートインスペクタには **CDP 互換の HTTP/JSON が無い**ため、UI を
+    自動テストするには自前の制御チャネル(デバッグ限定で WebView 内 `eval` を中継)が要る。
+  - Windows インストーラは実機でなくても `cargo-xwin` + Windows 用 `node.exe` の取得 +
+    NSIS(`makensis`/`wine`)で**理論上は Linux から生成できる**が、経路の作り込みと検証が
+    必要(Electron は `wine` で実績あり)。
+- **採用しなかった理由**: サイズ利得が deb のみ・1.8 倍に留まる一方、コストは広い —
+  Rust ツールチェーン、Windows ビルド経路の新規整備、**自動更新の喪失**(Electron 専用)、
+  UI e2e(130+ 項目)の移植、ブリッジ/ACL の複雑さ。Windows を第一級ターゲットとする
+  本プロジェクトでは、そのビルドを脆くする割に合わない。
+- **結論**: **Electron シェル(`packages/desktop`)を継続**。サイズは別途
+  electron-builder 設定(locale 削減等)で圧縮する。
 
 ## v0.1.0 の実装メモ 53(2026-11-11、ファイルタブの右クリックメニュー)
 

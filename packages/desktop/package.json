@@ -27,6 +27,11 @@
       "output": "release"
     },
     "artifactName": "familiar-${version}-${os}-${arch}.${ext}",
+    "electronLanguages": [
+      "en",
+      "ja"
+    ],
+    "compression": "maximum",
     "files": [
       "main.js",
       "preload.js",

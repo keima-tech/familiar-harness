@@ -322,6 +322,14 @@ const STR = {
     "settings.title": "設定",
     "settings.close": "閉じる (Esc)",
     "nav.general": "一般",
+    "nav.proposals": "提案",
+    "prop.intro": "エージェントが提案した memory / skills の変更をここで承認・却下できます。",
+    "prop.empty": "承認待ちの提案はありません。",
+    "prop.title": "承認待ち {0} 件",
+    "prop.memory": "memory",
+    "prop.skill": "skill",
+    "prop.gearBadge": "承認待ちの提案が {0} 件あります",
+    "todo.progress": "タスク: {0}/{1} 完了",
     "nav.appearance": "外観",
     "nav.transcript": "トランスクリプト",
     "nav.shortcuts": "ショートカット",
@@ -840,6 +848,14 @@ const STR = {
     "settings.title": "Settings",
     "settings.close": "close (Esc)",
     "nav.general": "General",
+    "nav.proposals": "Proposals",
+    "prop.intro": "Review the memory / skills changes the agent staged — approve or reject them here.",
+    "prop.empty": "No proposals waiting for approval.",
+    "prop.title": "{0} waiting for approval",
+    "prop.memory": "memory",
+    "prop.skill": "skill",
+    "prop.gearBadge": "{0} proposal(s) waiting for approval",
+    "todo.progress": "tasks: {0}/{1} done",
     "nav.appearance": "Appearance",
     "nav.transcript": "Transcript",
     "nav.shortcuts": "Shortcuts",
@@ -2101,6 +2117,7 @@ async function openSession(id) {
   renderSessionCwd(s);
   renderModelChip();
   renderEffortChip();
+  void refreshTodoProgress();
   seedContextFromHistory(id, data.messages ?? []);
   updateContextGauge();
   closeAllPops();
@@ -3203,6 +3220,8 @@ function onEvent(sessionId, e) {
       updateContextGauge();
       maybeNotify();
       void maybeSuggestSkills();
+      void refreshTodoProgress();
+      void updateProposalsBadge();
       state.pendingEvents.delete(sessionId);
       refreshSessions();
       break;
@@ -4214,6 +4233,7 @@ function card(title, note) {
 // --- modal shell -------------------------------------------------------------
 const SETTINGS_SECTIONS = [
   { id: "general", labelKey: "nav.general", icon: "⚙" },
+  { id: "proposals", labelKey: "nav.proposals", icon: "✓" },
   { id: "appearance", labelKey: "nav.appearance", icon: "◧" },
   { id: "transcript", labelKey: "nav.transcript", icon: "▤" },
   { id: "shortcuts", labelKey: "nav.shortcuts", icon: "⌘" },
@@ -4264,6 +4284,7 @@ function renderSettingsSection(id) {
   content.scrollTop = 0;
   const stale = () => gen !== settingsRenderGen;
   if (id === "general") renderGeneralSection(content);
+  else if (id === "proposals") void renderProposalsSection(content, stale);
   else if (id === "appearance") renderAppearanceSection(content);
   else if (id === "transcript") renderTranscriptSection(content);
   else if (id === "shortcuts") renderShortcutsSection(content);
@@ -4273,6 +4294,121 @@ function renderSettingsSection(id) {
   else if (id === "connectors") void renderConnectorsSection(content, stale);
   else if (id === "connections") void renderConnectionsSection(content, stale);
   else if (id === "system") void renderSystemSection(content, stale);
+}
+
+/** Settings → Proposals: approve/reject the memory/skills changes the agent
+ *  staged. This is where the removed right-pane "approvals" tab lives now. */
+async function renderProposalsSection(content, stale) {
+  const intro = document.createElement("div");
+  intro.className = "note";
+  intro.textContent = t("prop.intro");
+  content.appendChild(intro);
+  let items;
+  try {
+    const [mem, skills] = await Promise.all([rpc("memory.pending"), rpc("skills.pending")]);
+    items = [
+      ...(mem.items ?? []).map((it) => ({ ...it, _kind: "memory" })),
+      ...(skills.items ?? []).map((it) => ({ ...it, _kind: "skill" })),
+    ];
+  } catch (err) {
+    const box = document.createElement("div");
+    box.className = "note";
+    box.textContent = err.message;
+    content.appendChild(box);
+    return;
+  }
+  if (stale()) return;
+  if (items.length === 0) {
+    const box = document.createElement("div");
+    box.className = "note";
+    box.textContent = t("prop.empty");
+    content.appendChild(box);
+    return;
+  }
+  const c = card(t("prop.title", String(items.length)));
+  for (const it of items) c.appendChild(proposalCard(it));
+  content.appendChild(c);
+}
+
+function proposalCard(item) {
+  const node = document.createElement("div");
+  node.className = "proposal";
+  const reason = item.reason ? `<div class="reason">${esc(item.reason)}</div>` : "";
+  const warns = Array.isArray(item.warnings) && item.warnings.length > 0
+    ? `<div class="reason">⚠ ${esc(item.warnings.join("; "))}</div>`
+    : "";
+  const staleNote = item.stale === true ? `<div class="reason">⚠ ${esc(t("skills.stale"))}</div>` : "";
+  node.innerHTML =
+    `<div class="kind">${esc(t(item._kind === "memory" ? "prop.memory" : "prop.skill"))} · ${esc(item.kind)} · ${esc(item.id)}</div>` +
+    `<div class="summary">${esc(item.summary ?? "")}</div>${reason}${warns}${staleNote}` +
+    `<div class="row"><button data-act="approve">${esc(t("approval.approve"))}</button>` +
+    `<button class="ghost" data-act="reject">${esc(t("approval.denyShort"))}</button></div>`;
+  const approveBtn = node.querySelector('button[data-act="approve"]');
+  if (item.stale === true) {
+    approveBtn.disabled = true;
+    approveBtn.title = t("skills.stale");
+  }
+  const act = async (approved) => {
+    try {
+      if (item._kind === "memory") {
+        await rpc(approved ? "memory.approve" : "memory.reject", { id: item.id });
+      } else if (approved) {
+        await rpc("skills.approve", { prefix: item.id });
+      } else {
+        await rpc("skills.reject", { prefix: item.id });
+      }
+    } catch (err) {
+      toast(`✗ ${err.message}`, "err");
+      return;
+    }
+    toast(t(approved ? "toast.approved" : "toast.denied"), approved ? "ok" : "info");
+    void updateProposalsBadge();
+    renderSettingsSection("proposals");
+  };
+  approveBtn.addEventListener("click", () => void act(true));
+  node.querySelector('button[data-act="reject"]').addEventListener("click", () => void act(false));
+  return node;
+}
+
+/** Small dot on the settings gear while proposals are waiting for approval. */
+async function updateProposalsBadge() {
+  const gear = $("#open-settings");
+  if (!gear) return;
+  let n = 0;
+  try {
+    const [mem, skills] = await Promise.all([rpc("memory.pending"), rpc("skills.pending")]);
+    n = (mem.items ?? []).length + (skills.items ?? []).length;
+  } catch {
+    n = 0;
+  }
+  gear.classList.toggle("has-badge", n > 0);
+  gear.title = n > 0 ? t("prop.gearBadge", String(n)) : t("side.settings");
+}
+
+/** Top-bar task progress ("done/total"), hidden while there is no task list. */
+async function refreshTodoProgress() {
+  const el = $("#todo-progress");
+  if (!el) return;
+  if (!state.sessionId) {
+    el.hidden = true;
+    return;
+  }
+  try {
+    const res = await rpc("todo.list", { id: state.sessionId });
+    const items = res.items ?? [];
+    if (items.length === 0) {
+      el.hidden = true;
+      return;
+    }
+    const done = items.filter((x) => x && x.status === "done").length;
+    const active = items.filter((x) => x && x.status === "in_progress").length;
+    el.hidden = false;
+    el.textContent = `${done}/${items.length}`;
+    el.classList.toggle("active", active > 0);
+    el.title = t("todo.progress", String(done), String(items.length));
+  } catch {
+    el.hidden = true;
+  }
 }
 
 function renderGeneralSection(content) {
@@ -7517,6 +7653,8 @@ function boot() {
     () => maybeOpenBootNewSession(),
     () => maybeOpenBootNewSession(),
   );
+  void refreshTodoProgress();
+  void updateProposalsBadge();
   autoSize(input);
   input.focus();
   connectEvents();

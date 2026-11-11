@@ -1492,6 +1492,42 @@ try {
     String(tplSettings?.how),
   );
 
+  // ---- right-pane cleanup: proposals in settings, task progress chip ------
+  const props = await evalOnce(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    openSettingsModal("proposals");
+    await sleep(700);
+    const content = document.querySelector("#settings-content");
+    const nav = [...document.querySelectorAll("#settings-nav .nav-item")].map((n) => n.textContent);
+    const res = {
+      nav,
+      text: content.textContent,
+      hasBadgeApi: typeof updateProposalsBadge === "function",
+      todoChip: !!document.querySelector("#todo-progress"),
+      todoFn: typeof refreshTodoProgress === "function",
+      folder: (document.querySelector("#pane-toggle") || {}).textContent || "",
+      settingsInTop: !!document.querySelector(".top-actions #open-settings"),
+      settingsInSide: !!document.querySelector("#sidebar #open-settings"),
+    };
+    closeSettingsModal();
+    return res;
+  })()`);
+  check(
+    (props?.nav ?? []).some((n) => n.includes("提案")) && String(props?.text).includes("承認待ちの提案はありません"),
+    "the proposals section replaces the approvals tab (in settings)",
+    JSON.stringify({ nav: props?.nav, text: String(props?.text).slice(0, 80) }),
+  );
+  check(
+    props?.todoChip === true && props?.todoFn === true,
+    "the top bar has a task-progress chip",
+    JSON.stringify({ chip: props?.todoChip, fn: props?.todoFn }),
+  );
+  check(
+    props?.folder === "📁" && props?.settingsInTop === true && props?.settingsInSide === false,
+    "the file pane uses a folder icon and settings moved to the top-right",
+    JSON.stringify({ folder: props?.folder, top: props?.settingsInTop, side: props?.settingsInSide }),
+  );
+
   // ---- rich file previews (csv / json / office) ---------------------------
   // generate sample files in a temp dir, then open each in the viewer
   const previewDir = path.join(base, "preview");

@@ -448,6 +448,17 @@ console.log("— scenario I: web ui transport —");
       appJs.includes("commitFileRename") && appJs.includes("deleteFileEntry"),
     "web UI app.js wires the files-tab context menu",
   );
+  assert(
+    page.includes('id="todo-progress"') &&
+      !page.includes('data-tab="inbox"') && !page.includes('data-tab="todo"') &&
+      page.includes('data-tab="files"') && page.includes('data-tab="ctx"'),
+    "web UI ships the task-progress chip and only files/ctx pane tabs",
+  );
+  assert(
+    appJs.includes("renderProposalsSection") && appJs.includes("updateProposalsBadge") &&
+      appJs.includes("refreshTodoProgress"),
+    "web UI: approvals moved to settings; task progress wired",
+  );
 
   const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
   const frames = [];

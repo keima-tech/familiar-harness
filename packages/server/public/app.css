@@ -1524,3 +1524,26 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
   #close-sidebar { display: inline-block; }
   #app, body { overflow-x: hidden; }
 }
+
+/* ---- settings gear badge + top-bar task progress ---- */
+.top-actions .iconbtn { position: relative; }
+#open-settings.has-badge::after {
+  content: ""; position: absolute; top: 3px; right: 3px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 0 2px var(--bg);
+}
+#todo-progress {
+  font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums;
+  padding: 2px 7px; border: 1px solid var(--border); border-radius: 8px;
+  white-space: nowrap; flex: none;
+}
+#todo-progress.active { color: var(--warn); border-color: var(--warn); }
+
+/* ---- phone portrait: keep the top bar + composer on one row ---- */
+@media (max-width: 560px) {
+  .ticon { display: none; }                 /* free room for the session title */
+  #effort-chip, #ctx-btn { display: none; } /* redundant with the top-bar gauge */
+  #mode-chip, #model-chip { max-width: 92px; }
+  .composer-foot { gap: 3px; }
+  #rightpane { width: 100vw !important; }
+}

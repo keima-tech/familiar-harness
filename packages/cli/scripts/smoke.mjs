@@ -465,8 +465,9 @@ console.log("— scenario I: web ui transport —");
   );
   assert(
     appJs.includes("skill-toolbar") && appJs.includes("skills.deleteSelectedConfirm") &&
-      appJs.includes("skill-external") && appJs.includes("skillReadOnly"),
-    "web UI: skills filter + bulk delete wired; external skills are read-only",
+      appJs.includes("skill-external") && appJs.includes("skillReadOnly") &&
+      appJs.includes("editorBody.readOnly = external"),
+    "web UI: skills filter/bulk wired; external skills are view-only",
   );
 
   const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);

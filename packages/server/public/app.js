@@ -615,7 +615,8 @@ const STR = {
     "ext.noSkills": "スキルはまだありません",
     "ext.skillUses": "使用 {0} 回 · {1} 文字",
     "ext.skillReadOnly": "読取専用",
-    "ext.skillExternalNote": "外部ルート（{0}）のスキルです。Familiar からは削除できません（保存すると Familiar 側にコピーを作成します）。",
+    "ext.skillExternalNote": "外部ルート（{0}）のスキルです。読み取り専用のため、Familiar からは編集も削除もできません。",
+    "skills.close": "閉じる",
     "ext.lspDesc": "lsp_diagnostics が使用する言語サーバー。設定は config.yaml の lsp.servers です。",
     "ext.enabled": "有効",
     "ext.disabled": "無効",
@@ -1143,7 +1144,8 @@ const STR = {
     "ext.noSkills": "no skills yet",
     "ext.skillUses": "used {0}× · {1} chars",
     "ext.skillReadOnly": "read-only",
-    "ext.skillExternalNote": "Skill from an external root ({0}) — it cannot be deleted from Familiar. Saving creates a Familiar-side copy.",
+    "ext.skillExternalNote": "Skill from an external root ({0}) — read-only: it cannot be edited or deleted from Familiar.",
+    "skills.close": "Close",
     "ext.lspDesc": "language servers used by lsp_diagnostics. Configure in config.yaml [lsp.servers].",
     "ext.enabled": "enabled",
     "ext.disabled": "disabled",
@@ -4941,15 +4943,17 @@ async function renderExtensionsSection(content, stale = () => false) {
     editorBody.className = "skill-editor-body";
     editorBody.rows = 14;
     editorBody.spellcheck = false;
+    editorBody.readOnly = external; // external skills are view-only
     const actions = document.createElement("div");
     actions.className = "skill-editor-actions";
     const saveBtn = document.createElement("button");
     saveBtn.type = "button";
     saveBtn.textContent = t("skills.save");
+    saveBtn.hidden = external; // external skills are view-only
     const cancelBtn = document.createElement("button");
     cancelBtn.type = "button";
     cancelBtn.className = "ghost";
-    cancelBtn.textContent = t("skills.cancel");
+    cancelBtn.textContent = external ? t("skills.close") : t("skills.cancel");
     const delBtn = document.createElement("button");
     delBtn.type = "button";
     delBtn.className = "ghost danger";

@@ -1562,3 +1562,8 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
   border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; white-space: nowrap;
 }
 .skill-row.skill-external .skill-open { border-style: dashed; }
+/* read-only body for external skills (view-only editor) */
+.skill-editor-body[readonly] {
+  background: var(--bg); color: var(--text); cursor: default; border-style: dashed;
+}
+.skill-editor-body[readonly]:focus { border-color: var(--border); }

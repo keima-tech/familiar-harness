@@ -1545,6 +1545,22 @@ try {
     const rows = [...c.querySelectorAll(".skill-row")];
     const external = rows.filter((r) => r.classList.contains("skill-external"));
     const familiar = rows.filter((r) => !r.classList.contains("skill-external"));
+    // open the first external skill: its editor must be view-only
+    let extEditor = null;
+    const firstExternal = external[0];
+    if (firstExternal) {
+      firstExternal.querySelector(".skill-open").click();
+      await sleep(700);
+      const ed = firstExternal.nextElementSibling;
+      if (ed && ed.classList.contains("skill-editor")) {
+        const acts = [...ed.querySelectorAll(".skill-editor-actions button")];
+        extEditor = {
+          readOnly: ed.querySelector(".skill-editor-body")?.readOnly === true,
+          saveHidden: acts[0]?.hidden === true,
+          deleteHidden: !!ed.querySelector(".ghost.danger")?.hidden,
+        };
+      }
+    }
     const res = {
       filter: !!c.querySelector(".skill-toolbar .skill-filter"),
       selAll: [...c.querySelectorAll(".skill-toolbar .ghost")].some((b) => /選択|select all/i.test(b.textContent)),
@@ -1553,6 +1569,7 @@ try {
       familiarRows: familiar.length,
       externalReadOnly: external.every((r) => !!r.querySelector(".skill-badge") && !r.querySelector(".skill-check")),
       familiarSelectable: familiar.every((r) => !!r.querySelector(".skill-check")),
+      extEditor,
     };
     closeSettingsModal();
     return res;
@@ -1566,6 +1583,13 @@ try {
     extUi?.externalReadOnly === true && extUi?.familiarSelectable === true,
     "external (global/shared) skills are read-only and not selectable for deletion",
     JSON.stringify({ externalRows: extUi?.externalRows, familiarRows: extUi?.familiarRows, ro: extUi?.externalReadOnly }),
+  );
+  check(
+    (extUi?.externalRows ?? 0) === 0 ||
+      (extUi?.extEditor?.readOnly === true && extUi?.extEditor?.saveHidden === true &&
+        extUi?.extEditor?.deleteHidden === true),
+    "an external skill opens as a view-only editor (no save, no delete)",
+    JSON.stringify(extUi?.extEditor),
   );
 
   // ---- rich file previews (csv / json / office) ---------------------------

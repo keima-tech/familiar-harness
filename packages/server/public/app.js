@@ -100,7 +100,7 @@ const STR = {
     "side.filterPh": "セッションを絞り込み…  (Ctrl+K)",
     "side.foldAll": "すべてのフォルダーを折りたたむ",
     "side.unfoldAll": "すべてのフォルダーを展開する",
-    "side.settings": "⚙ 設定",
+    "side.settings": "設定",
     "top.inbox": "承認インボックス",
     "top.status": "ステータス",
     "del.confirm": "セッション「{0}」を削除しますか? この操作は元に戻せません",
@@ -142,9 +142,7 @@ const STR = {
     "update.cliHint": "ブラウザ版の更新は `familiar update` で実行できます",
     "update.remoteHint": "SSH 接続中はリモート側で `familiar update` を実行してください",
     "menu.updateCheck": "アップデートを確認",
-    "top.pane": "サイドペイン",
-    "pane.inbox": "承認",
-    "pane.todo": "タスク",
+    "top.files": "ファイル",
     "pane.ctx": "コンテキスト",
     "set.colorTheme": "カラーテーマ",
     "set.colorThemeDesc": "アクセントの配色プリセット",
@@ -620,7 +618,7 @@ const STR = {
     "side.filterPh": "filter sessions…  (Ctrl+K)",
     "side.foldAll": "collapse all folders",
     "side.unfoldAll": "expand all folders",
-    "side.settings": "⚙ Settings",
+    "side.settings": "Settings",
     "top.inbox": "approvals",
     "top.status": "status",
     "del.confirm": "delete session \"{0}\"? this cannot be undone",
@@ -662,9 +660,7 @@ const STR = {
     "update.cliHint": "Browser builds update via `familiar update`",
     "update.remoteHint": "Connected over SSH — run `familiar update` on the remote host",
     "menu.updateCheck": "Check for updates",
-    "top.pane": "side pane",
-    "pane.inbox": "approvals",
-    "pane.todo": "tasks",
+    "top.files": "files",
     "pane.ctx": "context",
     "set.colorTheme": "color theme",
     "set.colorThemeDesc": "accent palette preset",
@@ -2105,7 +2101,6 @@ async function openSession(id) {
   renderSessionCwd(s);
   renderModelChip();
   renderEffortChip();
-  void refreshTodo();
   seedContextFromHistory(id, data.messages ?? []);
   updateContextGauge();
   closeAllPops();
@@ -3205,13 +3200,11 @@ function onEvent(sessionId, e) {
         addMsgFooter(lastBubble.bubble, lastBubble.text, bits);
       }
       state.turnBubbles = [];
-      void refreshTodo();
       updateContextGauge();
       maybeNotify();
       void maybeSuggestSkills();
       state.pendingEvents.delete(sessionId);
       refreshSessions();
-      loadInbox();
       break;
     }
     case "turn.error":
@@ -3242,11 +3235,7 @@ function onEvent(sessionId, e) {
       if (oursTurn && state.lastUserText) {
         addLabelButton(`↻ ${t("turn.retryNow")}`, () => retryLastTurn(), state.lastUserText);
       }
-      void refreshTodo();
       refreshSessions();
-      break;
-    case "improvement.staged":
-      loadInbox();
       break;
     default:
       break;
@@ -3292,84 +3281,9 @@ async function respondApproval(requestId, approved, node) {
 }
 
 // ---------------------------------------------------------------------------
-// approval inbox (self-improvement writes)
-// ---------------------------------------------------------------------------
-async function loadInbox() {
-  let count = 0;
-  const body = $("#inbox-body");
-  const open = !$("#inbox").hidden;
-  body.innerHTML = "";
-  try {
-    const mem = await rpc("memory.pending");
-    for (const item of mem.items ?? []) {
-      count += 1;
-      body.appendChild(proposalNode("memory", item, async (approved) => {
-        try {
-          await rpc(approved ? "memory.approve" : "memory.reject", { id: item.id });
-        } catch (err) {
-          toast(`✗ ${err.message}`, "err");
-          return;
-        }
-        await loadInbox();
-      }));
-    }
-    const skills = await rpc("skills.pending");
-    for (const item of skills.items ?? []) {
-      count += 1;
-      body.appendChild(proposalNode("skill", item, async (approved) => {
-        try {
-          if (approved) {
-            await rpc("skills.approve", { prefix: item.id });
-          } else {
-            await rpc("skills.reject", { prefix: item.id });
-          }
-        } catch (err) {
-          toast(`✗ ${err.message}`, "err");
-          return;
-        }
-        await loadInbox();
-      }));
-    }
-  } catch (err) {
-    body.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
-    toast(t("toast.inboxUnavailable", err.message), "err");
-  }
-  if (count === 0 && open) {
-    body.innerHTML = `<div class="empty">${esc(t("inbox.empty"))}</div>`;
-  }
-  $("#inbox-count").textContent = count > 0 ? String(count) : "";
-}
-
-function proposalNode(kind, item, act) {
-  const node = document.createElement("div");
-  node.className = "proposal";
-  const reason = item.reason ? `<div class="reason">${esc(item.reason)}</div>` : "";
-  const warns = Array.isArray(item.warnings) && item.warnings.length > 0
-    ? `<div class="reason">⚠ ${esc(item.warnings.join("; "))}</div>`
-    : "";
-  const staleNote = item.stale === true ? `<div class="reason">⚠ ${esc(t("skills.stale"))}</div>` : "";
-  node.innerHTML = `
-    <div class="kind">${esc(kind)} · ${esc(item.kind)} · ${esc(item.id)}</div>
-    <div class="summary">${esc(item.summary)}</div>
-    ${reason}${warns}${staleNote}
-    <div class="row">
-      <button data-act="approve">${esc(t("approval.approve"))}</button>
-      <button class="ghost" data-act="reject">${esc(t("approval.denyShort"))}</button>
-    </div>`;
-  const approveBtn = node.querySelector('button[data-act="approve"]');
-  if (item.stale === true) {
-    approveBtn.disabled = true;
-    approveBtn.title = t("skills.stale");
-  }
-  approveBtn.addEventListener("click", () => act(true, node));
-  node.querySelector('button[data-act="reject"]').addEventListener("click", () => act(false, node));
-  return node;
-}
-
-// ---------------------------------------------------------------------------
 // status drawer (curator / MCP / cron)
 // ---------------------------------------------------------------------------
-const PANE_TABS = ["inbox", "todo", "files", "ctx"];
+const PANE_TABS = ["files", "ctx"];
 
 function showPane(which) {
   $("#rightpane").hidden = false;
@@ -3380,8 +3294,6 @@ function showPane(which) {
     b.classList.toggle("active", b.dataset.tab === which);
   }
   localStorage.setItem("familiar.paneTab", which);
-  if (which === "inbox") void loadInbox();
-  if (which === "todo") void loadTodo();
   if (which === "files") void renderFilesTab();
   if (which === "ctx") renderCtxPaneBody();
 }
@@ -3397,18 +3309,10 @@ function closePane() {
 function togglePane() {
   if ($("#rightpane").hidden) {
     const last = localStorage.getItem("familiar.paneTab");
-    showPane(PANE_TABS.includes(last) ? last : "inbox");
+    showPane(PANE_TABS.includes(last) ? last : "files");
   } else {
     closePane();
   }
-}
-
-function openDrawer(which) {
-  if (which === "none") {
-    closePane();
-    return;
-  }
-  showPane(which);
 }
 
 function sectionCard(title, rows, note) {
@@ -3430,64 +3334,6 @@ function sectionError(title, err) {
   card.className = "card";
   card.innerHTML = `<h4>${esc(title)}</h4><div class="status-err">${esc(err.message)}</div>`;
   return card;
-}
-
-const TODO_STATUS = {
-  pending: { icon: "○", label: "todo.pending", cls: "td-pending" },
-  in_progress: { icon: "◐", label: "todo.in_progress", cls: "td-active" },
-  done: { icon: "●", label: "todo.done", cls: "td-done" },
-};
-
-async function loadTodo() {
-  const body = $("#todo-body");
-  body.innerHTML = "";
-  if (!state.sessionId) {
-    body.innerHTML = `<div class="mp-note">${esc(t("home.noSession"))}</div>`;
-    updateTodoBadge([]);
-    return;
-  }
-  try {
-    const res = await rpc("todo.list", { id: state.sessionId });
-    const items = res.items ?? [];
-    updateTodoBadge(items);
-    if (items.length === 0) {
-      body.innerHTML = `<div class="mp-note">${esc(t("todo.empty"))}</div>`;
-      return;
-    }
-    for (const it of items) {
-      const meta = TODO_STATUS[it.status] ?? { icon: "○", label: "todo.pending", cls: "td-pending" };
-      const row = document.createElement("div");
-      row.className = `todo-row ${meta.cls}`;
-      row.innerHTML =
-        `<span class="td-icon">${esc(meta.icon)}</span>` +
-        `<span class="td-text">${esc(it.title ?? "")}</span>` +
-        `<span class="td-status">${esc(t(meta.label))}</span>`;
-      body.appendChild(row);
-    }
-  } catch (err) {
-    body.innerHTML = `<div class="mp-note">${esc(err.message)}</div>`;
-  }
-}
-
-/** Top-bar badge = number of in-progress tasks. */
-function updateTodoBadge(items) {
-  const n = (items ?? []).filter((x) => x && x.status === "in_progress").length;
-  $("#todo-count").textContent = n > 0 ? String(n) : "";
-}
-
-/** Refresh the badge (cheap); reload the drawer body only when it is open. */
-async function refreshTodo() {
-  if (!state.sessionId) {
-    updateTodoBadge([]);
-    return;
-  }
-  try {
-    const res = await rpc("todo.list", { id: state.sessionId });
-    updateTodoBadge(res.items ?? []);
-    if (!$("#todo").hidden) void loadTodo();
-  } catch {
-    /* session dropped */
-  }
 }
 
 /** After a turn, nudge the user when the AI staged skill proposals:
@@ -7671,7 +7517,6 @@ function boot() {
     () => maybeOpenBootNewSession(),
     () => maybeOpenBootNewSession(),
   );
-  void loadInbox();
   autoSize(input);
   input.focus();
   connectEvents();

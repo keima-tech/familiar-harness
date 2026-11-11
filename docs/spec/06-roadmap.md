@@ -952,6 +952,23 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
 - **結論**: **Electron シェル(`packages/desktop`)を継続**。サイズは別途
   electron-builder 設定(locale 削減等)で圧縮する。
 
+## v0.1.0 の実装メモ 54(2026-11-11、右ペイン整理と設定の右上移設)
+
+- **右ペインのタブ整理**: 汎用の「サイドペイン」開閉ボタン(▤)を廃し、上部の**📁 フォルダ
+  アイコン**をファイルペインの入口にした(クリックで開閉、既定タブはファイル)。
+  ペインのタブは **ファイル / コンテキスト** の 2 つに整理し、**承認(inbox)タブと
+  タスク(todo)タブを廃止**。付随して `loadInbox` / `proposalNode`(memory/skills の
+  承認一覧)、`loadTodo` / `updateTodoBadge` / `refreshTodo`、`openDrawer` と
+  各パネル(`#inbox` / `#todo`)・バッジ・i18n キー(`pane.inbox` / `pane.todo` /
+  `top.pane`)を削除。
+  ※自己改善の提案は従来どおり**トランスクリプト内のインラインカード**(`maybeSuggestSkills`)
+  で承認でき、`memory.pending` / `skills.pending` RPC はサーバ側に残る
+  (一覧ペインだけが無くなった形)。
+- **設定ボタンの移設**: 左下(`.side-foot`)の「⚙ 設定」を廃し、**右上の ⚙ 歯車
+  アイコン**(`#open-settings`、`.top-actions`)へ移動。id は据え置きのため配線は不変。
+  `side.settings` はアイコン別立てのため文言から ⚙ を外した。
+- UI のみの変更(`index.html` / `app.js`)。typecheck / smoke / GUI e2e 通過。
+
 ## v0.1.0 の実装メモ 53(2026-11-11、ファイルタブの右クリックメニュー)
 
 - **右ペインのファイル一覧で行を右クリックするとメニュー**が出る

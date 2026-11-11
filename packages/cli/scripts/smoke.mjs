@@ -464,8 +464,9 @@ console.log("— scenario I: web ui transport —");
     "web UI: the file pane toggle uses an SVG folder icon",
   );
   assert(
-    appJs.includes("skill-toolbar") && appJs.includes("skills.deleteSelectedConfirm"),
-    "web UI: skills filter + bulk delete wired",
+    appJs.includes("skill-toolbar") && appJs.includes("skills.deleteSelectedConfirm") &&
+      appJs.includes("skill-external") && appJs.includes("skillReadOnly"),
+    "web UI: skills filter + bulk delete wired; external skills are read-only",
   );
 
   const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);

@@ -1556,3 +1556,9 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
   flex: none; align-self: center; width: 15px; height: 15px;
   accent-color: var(--accent); cursor: pointer;
 }
+/* external (global / other-harness) skills: shown read-only, no selection */
+.skill-row .skill-badge {
+  flex: none; align-self: center; font-size: 10px; color: var(--dim);
+  border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; white-space: nowrap;
+}
+.skill-row.skill-external .skill-open { border-style: dashed; }

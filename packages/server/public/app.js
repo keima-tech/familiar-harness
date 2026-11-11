@@ -614,6 +614,8 @@ const STR = {
     "ext.skillsDesc": "~/.familiar/skills/<名前>/SKILL.md。チャットで「〜するスキルを作って」と依頼すると skill_manage ツールが提案を作り、承認後に有効になります。",
     "ext.noSkills": "スキルはまだありません",
     "ext.skillUses": "使用 {0} 回 · {1} 文字",
+    "ext.skillReadOnly": "読取専用",
+    "ext.skillExternalNote": "外部ルート（{0}）のスキルです。Familiar からは削除できません（保存すると Familiar 側にコピーを作成します）。",
     "ext.lspDesc": "lsp_diagnostics が使用する言語サーバー。設定は config.yaml の lsp.servers です。",
     "ext.enabled": "有効",
     "ext.disabled": "無効",
@@ -1140,6 +1142,8 @@ const STR = {
     "ext.skillsDesc": "~/.familiar/skills/<name>/SKILL.md. Ask in chat to create one — the skill_manage tool stages a proposal that activates after approval.",
     "ext.noSkills": "no skills yet",
     "ext.skillUses": "used {0}× · {1} chars",
+    "ext.skillReadOnly": "read-only",
+    "ext.skillExternalNote": "Skill from an external root ({0}) — it cannot be deleted from Familiar. Saving creates a Familiar-side copy.",
     "ext.lspDesc": "language servers used by lsp_diagnostics. Configure in config.yaml [lsp.servers].",
     "ext.enabled": "enabled",
     "ext.disabled": "disabled",
@@ -4922,7 +4926,8 @@ async function renderExtensionsSection(content, stale = () => false) {
   const closeEditors = () => {
     for (const el of skillCard.querySelectorAll(".skill-editor")) el.remove();
   };
-  const openEditor = async (name, anchor, isNew = false) => {
+  const openEditor = async (name, anchor, isNew = false, source = "familiar") => {
+    const external = source !== "familiar";
     const next = anchor.nextElementSibling;
     const wasOpen = next instanceof HTMLElement && next.classList.contains("skill-editor");
     closeEditors();
@@ -4949,9 +4954,16 @@ async function renderExtensionsSection(content, stale = () => false) {
     delBtn.type = "button";
     delBtn.className = "ghost danger";
     delBtn.textContent = t("skills.delete");
-    delBtn.hidden = isNew; // nothing to delete until it is saved
+    delBtn.hidden = isNew || external; // external (global/shared) skills are read-only
     actions.append(saveBtn, cancelBtn, delBtn);
-    editor.append(editorName, editorBody, actions);
+    editor.append(editorName);
+    if (external) {
+      const note = document.createElement("div");
+      note.className = "note";
+      note.textContent = t("ext.skillExternalNote", source);
+      editor.appendChild(note);
+    }
+    editor.append(editorBody, actions);
     anchor.insertAdjacentElement("afterend", editor);
     if (isNew) {
       editorBody.value = `# ${name}\n\nWhen: \nProcedure: \n`;
@@ -5040,30 +5052,43 @@ async function renderExtensionsSection(content, stale = () => false) {
     }
     for (const sk of shown) {
       const meta = t("ext.skillUses", sk.useCount ?? 0, sk.bodyChars ?? 0);
+      const source = sk.source ?? "familiar";
+      const external = source !== "familiar";
       const row = document.createElement("div");
-      row.className = "skill-row";
-      const cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.className = "skill-check";
-      cb.checked = selected.has(sk.name);
-      cb.title = sk.name;
-      cb.addEventListener("change", () => {
-        if (cb.checked) selected.add(sk.name);
-        else selected.delete(sk.name);
-        updateBulk();
-      });
+      row.className = `skill-row${external ? " skill-external" : ""}`;
+      if (external) {
+        // global / other-harness skill: Familiar never writes to it (no checkbox)
+        const badge = document.createElement("span");
+        badge.className = "skill-badge";
+        badge.textContent = t("ext.skillReadOnly");
+        badge.title = source;
+        row.appendChild(badge);
+      } else {
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.className = "skill-check";
+        cb.checked = selected.has(sk.name);
+        cb.title = sk.name;
+        cb.addEventListener("change", () => {
+          if (cb.checked) selected.add(sk.name);
+          else selected.delete(sk.name);
+          updateBulk();
+        });
+        row.appendChild(cb);
+      }
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "skill-open";
       btn.innerHTML = `<b>${esc(sk.name)}</b><small>${esc(`${sk.description ?? ""}${sk.description ? " · " : ""}${meta}`)}</small>`;
-      btn.addEventListener("click", () => void openEditor(sk.name, row, false));
-      row.append(cb, btn);
+      btn.addEventListener("click", () => void openEditor(sk.name, row, false, source));
+      row.appendChild(btn);
       mount.appendChild(row);
     }
   };
   filterInput.addEventListener("input", renderRows);
   selAllBtn.addEventListener("click", () => {
-    const shown = filtered();
+    // only Familiar-owned skills are selectable — externals are read-only
+    const shown = filtered().filter((sk) => (sk.source ?? "familiar") === "familiar");
     const allOn = shown.length > 0 && shown.every((sk) => selected.has(sk.name));
     for (const sk of shown) {
       if (allOn) selected.delete(sk.name);

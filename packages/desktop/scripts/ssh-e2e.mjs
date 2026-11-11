@@ -1542,10 +1542,17 @@ try {
     openSettingsModal("extensions");
     await sleep(900);
     const c = document.querySelector("#settings-content");
+    const rows = [...c.querySelectorAll(".skill-row")];
+    const external = rows.filter((r) => r.classList.contains("skill-external"));
+    const familiar = rows.filter((r) => !r.classList.contains("skill-external"));
     const res = {
       filter: !!c.querySelector(".skill-toolbar .skill-filter"),
       selAll: [...c.querySelectorAll(".skill-toolbar .ghost")].some((b) => /選択|select all/i.test(b.textContent)),
       delDisabled: !!c.querySelector(".skill-toolbar .ghost.danger")?.disabled,
+      externalRows: external.length,
+      familiarRows: familiar.length,
+      externalReadOnly: external.every((r) => !!r.querySelector(".skill-badge") && !r.querySelector(".skill-check")),
+      familiarSelectable: familiar.every((r) => !!r.querySelector(".skill-check")),
     };
     closeSettingsModal();
     return res;
@@ -1554,6 +1561,11 @@ try {
     extUi?.filter === true && extUi?.selAll === true && extUi?.delDisabled === true,
     "the skills section has a filter and a (disabled) bulk delete",
     JSON.stringify(extUi),
+  );
+  check(
+    extUi?.externalReadOnly === true && extUi?.familiarSelectable === true,
+    "external (global/shared) skills are read-only and not selectable for deletion",
+    JSON.stringify({ externalRows: extUi?.externalRows, familiarRows: extUi?.familiarRows, ro: extUi?.externalReadOnly }),
   );
 
   // ---- rich file previews (csv / json / office) ---------------------------

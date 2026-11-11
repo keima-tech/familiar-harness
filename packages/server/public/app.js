@@ -190,6 +190,12 @@ const STR = {
     "skills.cancel": "キャンセル",
     "skills.deleteConfirm": "スキル「{0}」を削除しますか?\n(アーカイブへ移動されるので元に戻せます)",
     "skills.deleted": "スキルを削除しました: {0}",
+    "skills.filterPh": "スキルを絞り込み…",
+    "skills.selectAll": "すべて選択/解除",
+    "skills.filterEmpty": "一致するスキルがありません",
+    "skills.deleteSelected": "選択を削除 ({0})",
+    "skills.deleteSelectedConfirm": "選択した {0} 件のスキルを削除しますか?\n(アーカイブへ移動されるので元に戻せます)",
+    "skills.deletedBulk": "{0} 件のスキルを削除しました",
     "notify.skillSuggest": "Familiar Harness — スキル作成の提案",
     "pane.files": "ファイル",
     "skills.edit": "スキルの編集",
@@ -322,13 +328,6 @@ const STR = {
     "settings.title": "設定",
     "settings.close": "閉じる (Esc)",
     "nav.general": "一般",
-    "nav.proposals": "提案",
-    "prop.intro": "エージェントが提案した memory / skills の変更をここで承認・却下できます。",
-    "prop.empty": "承認待ちの提案はありません。",
-    "prop.title": "承認待ち {0} 件",
-    "prop.memory": "memory",
-    "prop.skill": "skill",
-    "prop.gearBadge": "承認待ちの提案が {0} 件あります",
     "todo.progress": "タスク: {0}/{1} 完了",
     "nav.appearance": "外観",
     "nav.transcript": "トランスクリプト",
@@ -716,6 +715,12 @@ const STR = {
     "skills.cancel": "Cancel",
     "skills.deleteConfirm": "Delete the skill \"{0}\"?\n(It is moved to the archive and can be restored.)",
     "skills.deleted": "skill deleted: {0}",
+    "skills.filterPh": "filter skills…",
+    "skills.selectAll": "select all / none",
+    "skills.filterEmpty": "no skills match",
+    "skills.deleteSelected": "delete selected ({0})",
+    "skills.deleteSelectedConfirm": "Delete {0} selected skills?\n(they move to the archive, so this is reversible)",
+    "skills.deletedBulk": "deleted {0} skills",
     "notify.skillSuggest": "Familiar Harness — skill proposal",
     "pane.files": "files",
     "skills.edit": "edit skills",
@@ -848,13 +853,6 @@ const STR = {
     "settings.title": "Settings",
     "settings.close": "close (Esc)",
     "nav.general": "General",
-    "nav.proposals": "Proposals",
-    "prop.intro": "Review the memory / skills changes the agent staged — approve or reject them here.",
-    "prop.empty": "No proposals waiting for approval.",
-    "prop.title": "{0} waiting for approval",
-    "prop.memory": "memory",
-    "prop.skill": "skill",
-    "prop.gearBadge": "{0} proposal(s) waiting for approval",
     "todo.progress": "tasks: {0}/{1} done",
     "nav.appearance": "Appearance",
     "nav.transcript": "Transcript",
@@ -3221,7 +3219,6 @@ function onEvent(sessionId, e) {
       maybeNotify();
       void maybeSuggestSkills();
       void refreshTodoProgress();
-      void updateProposalsBadge();
       state.pendingEvents.delete(sessionId);
       refreshSessions();
       break;
@@ -4233,7 +4230,6 @@ function card(title, note) {
 // --- modal shell -------------------------------------------------------------
 const SETTINGS_SECTIONS = [
   { id: "general", labelKey: "nav.general", icon: "⚙" },
-  { id: "proposals", labelKey: "nav.proposals", icon: "✓" },
   { id: "appearance", labelKey: "nav.appearance", icon: "◧" },
   { id: "transcript", labelKey: "nav.transcript", icon: "▤" },
   { id: "shortcuts", labelKey: "nav.shortcuts", icon: "⌘" },
@@ -4284,7 +4280,6 @@ function renderSettingsSection(id) {
   content.scrollTop = 0;
   const stale = () => gen !== settingsRenderGen;
   if (id === "general") renderGeneralSection(content);
-  else if (id === "proposals") void renderProposalsSection(content, stale);
   else if (id === "appearance") renderAppearanceSection(content);
   else if (id === "transcript") renderTranscriptSection(content);
   else if (id === "shortcuts") renderShortcutsSection(content);
@@ -4294,95 +4289,6 @@ function renderSettingsSection(id) {
   else if (id === "connectors") void renderConnectorsSection(content, stale);
   else if (id === "connections") void renderConnectionsSection(content, stale);
   else if (id === "system") void renderSystemSection(content, stale);
-}
-
-/** Settings → Proposals: approve/reject the memory/skills changes the agent
- *  staged. This is where the removed right-pane "approvals" tab lives now. */
-async function renderProposalsSection(content, stale) {
-  const intro = document.createElement("div");
-  intro.className = "note";
-  intro.textContent = t("prop.intro");
-  content.appendChild(intro);
-  let items;
-  try {
-    const [mem, skills] = await Promise.all([rpc("memory.pending"), rpc("skills.pending")]);
-    items = [
-      ...(mem.items ?? []).map((it) => ({ ...it, _kind: "memory" })),
-      ...(skills.items ?? []).map((it) => ({ ...it, _kind: "skill" })),
-    ];
-  } catch (err) {
-    const box = document.createElement("div");
-    box.className = "note";
-    box.textContent = err.message;
-    content.appendChild(box);
-    return;
-  }
-  if (stale()) return;
-  if (items.length === 0) {
-    const box = document.createElement("div");
-    box.className = "note";
-    box.textContent = t("prop.empty");
-    content.appendChild(box);
-    return;
-  }
-  const c = card(t("prop.title", String(items.length)));
-  for (const it of items) c.appendChild(proposalCard(it));
-  content.appendChild(c);
-}
-
-function proposalCard(item) {
-  const node = document.createElement("div");
-  node.className = "proposal";
-  const reason = item.reason ? `<div class="reason">${esc(item.reason)}</div>` : "";
-  const warns = Array.isArray(item.warnings) && item.warnings.length > 0
-    ? `<div class="reason">⚠ ${esc(item.warnings.join("; "))}</div>`
-    : "";
-  const staleNote = item.stale === true ? `<div class="reason">⚠ ${esc(t("skills.stale"))}</div>` : "";
-  node.innerHTML =
-    `<div class="kind">${esc(t(item._kind === "memory" ? "prop.memory" : "prop.skill"))} · ${esc(item.kind)} · ${esc(item.id)}</div>` +
-    `<div class="summary">${esc(item.summary ?? "")}</div>${reason}${warns}${staleNote}` +
-    `<div class="row"><button data-act="approve">${esc(t("approval.approve"))}</button>` +
-    `<button class="ghost" data-act="reject">${esc(t("approval.denyShort"))}</button></div>`;
-  const approveBtn = node.querySelector('button[data-act="approve"]');
-  if (item.stale === true) {
-    approveBtn.disabled = true;
-    approveBtn.title = t("skills.stale");
-  }
-  const act = async (approved) => {
-    try {
-      if (item._kind === "memory") {
-        await rpc(approved ? "memory.approve" : "memory.reject", { id: item.id });
-      } else if (approved) {
-        await rpc("skills.approve", { prefix: item.id });
-      } else {
-        await rpc("skills.reject", { prefix: item.id });
-      }
-    } catch (err) {
-      toast(`✗ ${err.message}`, "err");
-      return;
-    }
-    toast(t(approved ? "toast.approved" : "toast.denied"), approved ? "ok" : "info");
-    void updateProposalsBadge();
-    renderSettingsSection("proposals");
-  };
-  approveBtn.addEventListener("click", () => void act(true));
-  node.querySelector('button[data-act="reject"]').addEventListener("click", () => void act(false));
-  return node;
-}
-
-/** Small dot on the settings gear while proposals are waiting for approval. */
-async function updateProposalsBadge() {
-  const gear = $("#open-settings");
-  if (!gear) return;
-  let n = 0;
-  try {
-    const [mem, skills] = await Promise.all([rpc("memory.pending"), rpc("skills.pending")]);
-    n = (mem.items ?? []).length + (skills.items ?? []).length;
-  } catch {
-    n = 0;
-  }
-  gear.classList.toggle("has-badge", n > 0);
-  gear.title = n > 0 ? t("prop.gearBadge", String(n)) : t("side.settings");
 }
 
 /** Top-bar task progress ("done/total"), hidden while there is no task list. */
@@ -5091,24 +4997,109 @@ async function renderExtensionsSection(content, stale = () => false) {
     void openEditor(name, createRow, true);
   });
 
-  try {
-    if (stale()) return;
-    const res = await rpc("skills.list");
-    const skills = res.skills ?? [];
-    summary.textContent = `${t("skills.edit")} (${skills.length})`;
-    if (skills.length === 0) mount.appendChild(pairRow("—", t("ext.noSkills")));
-    for (const sk of skills) {
+  // filter + bulk delete
+  const toolbar = document.createElement("div");
+  toolbar.className = "skill-toolbar";
+  const filterInput = document.createElement("input");
+  filterInput.type = "search";
+  filterInput.className = "setting-input skill-filter";
+  filterInput.placeholder = t("skills.filterPh");
+  filterInput.autocomplete = "off";
+  const selAllBtn = document.createElement("button");
+  selAllBtn.type = "button";
+  selAllBtn.className = "ghost";
+  selAllBtn.textContent = t("skills.selectAll");
+  const delSelBtn = document.createElement("button");
+  delSelBtn.type = "button";
+  delSelBtn.className = "ghost danger";
+  delSelBtn.disabled = true;
+  toolbar.append(filterInput, selAllBtn, delSelBtn);
+  details.insertBefore(toolbar, mount);
+
+  let allSkills = [];
+  const selected = new Set();
+  const filtered = () => {
+    const q = filterInput.value.trim().toLowerCase();
+    if (!q) return allSkills;
+    return allSkills.filter((sk) => `${sk.name} ${sk.description ?? ""}`.toLowerCase().includes(q));
+  };
+  const updateBulk = () => {
+    delSelBtn.textContent = t("skills.deleteSelected", String(selected.size));
+    delSelBtn.disabled = selected.size === 0;
+  };
+  const renderRows = () => {
+    mount.innerHTML = "";
+    if (allSkills.length === 0) {
+      mount.appendChild(pairRow("—", t("ext.noSkills")));
+      return;
+    }
+    const shown = filtered();
+    if (shown.length === 0) {
+      mount.appendChild(pairRow("—", t("skills.filterEmpty")));
+      return;
+    }
+    for (const sk of shown) {
       const meta = t("ext.skillUses", sk.useCount ?? 0, sk.bodyChars ?? 0);
       const row = document.createElement("div");
       row.className = "skill-row";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.className = "skill-check";
+      cb.checked = selected.has(sk.name);
+      cb.title = sk.name;
+      cb.addEventListener("change", () => {
+        if (cb.checked) selected.add(sk.name);
+        else selected.delete(sk.name);
+        updateBulk();
+      });
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "skill-open";
       btn.innerHTML = `<b>${esc(sk.name)}</b><small>${esc(`${sk.description ?? ""}${sk.description ? " · " : ""}${meta}`)}</small>`;
       btn.addEventListener("click", () => void openEditor(sk.name, row, false));
-      row.appendChild(btn);
+      row.append(cb, btn);
       mount.appendChild(row);
     }
+  };
+  filterInput.addEventListener("input", renderRows);
+  selAllBtn.addEventListener("click", () => {
+    const shown = filtered();
+    const allOn = shown.length > 0 && shown.every((sk) => selected.has(sk.name));
+    for (const sk of shown) {
+      if (allOn) selected.delete(sk.name);
+      else selected.add(sk.name);
+    }
+    renderRows();
+    updateBulk();
+  });
+  delSelBtn.addEventListener("click", async () => {
+    const names = [...selected];
+    if (names.length === 0) return;
+    if (!window.confirm(t("skills.deleteSelectedConfirm", String(names.length)))) return;
+    delSelBtn.disabled = true;
+    let ok = 0;
+    const failed = [];
+    for (const name of names) {
+      try {
+        await rpc("skills.delete", { name });
+        ok += 1;
+        selected.delete(name);
+      } catch {
+        failed.push(name);
+      }
+    }
+    if (failed.length === 0) toast(t("skills.deletedBulk", String(ok)), "ok");
+    else toast(t("skills.partialResult", String(ok), String(failed.length), failed.join(", ")), "err");
+    renderSettingsSection("extensions");
+  });
+
+  try {
+    if (stale()) return;
+    const res = await rpc("skills.list");
+    allSkills = res.skills ?? [];
+    summary.textContent = `${t("skills.edit")} (${allSkills.length})`;
+    renderRows();
+    updateBulk();
   } catch (err) {
     const row = document.createElement("div");
     row.className = "status-err";
@@ -7654,7 +7645,6 @@ function boot() {
     () => maybeOpenBootNewSession(),
   );
   void refreshTodoProgress();
-  void updateProposalsBadge();
   autoSize(input);
   input.focus();
   connectEvents();

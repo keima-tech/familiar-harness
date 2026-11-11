@@ -1492,30 +1492,33 @@ try {
     String(tplSettings?.how),
   );
 
-  // ---- right-pane cleanup: proposals in settings, task progress chip ------
+  // ---- top-bar layout + no proposals section ------------------------------
   const props = await evalOnce(`(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-    openSettingsModal("proposals");
-    await sleep(700);
-    const content = document.querySelector("#settings-content");
+    openSettingsModal("general");
+    await sleep(600);
     const nav = [...document.querySelectorAll("#settings-nav .nav-item")].map((n) => n.textContent);
-    const res = {
+    closeSettingsModal();
+    const gear = document.querySelector(".top-actions #open-settings");
+    const gauge = document.querySelector(".top-actions #ctx-gauge");
+    const folder = document.querySelector("#pane-toggle");
+    const order = [...document.querySelectorAll(".top-actions > *")].map((el) => el.id || el.className);
+    return {
       nav,
-      text: content.textContent,
-      hasBadgeApi: typeof updateProposalsBadge === "function",
+      hasProposalsSection: nav.some((n) => n.includes("提案")),
       todoChip: !!document.querySelector("#todo-progress"),
       todoFn: typeof refreshTodoProgress === "function",
-      folder: (document.querySelector("#pane-toggle") || {}).textContent || "",
-      settingsInTop: !!document.querySelector(".top-actions #open-settings"),
-      settingsInSide: !!document.querySelector("#sidebar #open-settings"),
+      gearLeftOfGauge: !!(gear && gauge) && (gear.compareDocumentPosition(gauge) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+      folderSvg: !!(folder && folder.querySelector("svg")),
+      folderInTop: !!document.querySelector(".top-actions #pane-toggle"),
+      gearInSide: !!document.querySelector("#sidebar #open-settings"),
+      order,
     };
-    closeSettingsModal();
-    return res;
   })()`);
   check(
-    (props?.nav ?? []).some((n) => n.includes("提案")) && String(props?.text).includes("承認待ちの提案はありません"),
-    "the proposals section replaces the approvals tab (in settings)",
-    JSON.stringify({ nav: props?.nav, text: String(props?.text).slice(0, 80) }),
+    props?.hasProposalsSection === false,
+    "settings has no proposals section",
+    JSON.stringify(props?.nav),
   );
   check(
     props?.todoChip === true && props?.todoFn === true,
@@ -1523,9 +1526,34 @@ try {
     JSON.stringify({ chip: props?.todoChip, fn: props?.todoFn }),
   );
   check(
-    props?.folder === "📁" && props?.settingsInTop === true && props?.settingsInSide === false,
-    "the file pane uses a folder icon and settings moved to the top-right",
-    JSON.stringify({ folder: props?.folder, top: props?.settingsInTop, side: props?.settingsInSide }),
+    props?.gearLeftOfGauge === true && props?.gearInSide === false,
+    "the settings gear sits left of the context gauge",
+    JSON.stringify({ left: props?.gearLeftOfGauge, side: props?.gearInSide, order: props?.order }),
+  );
+  check(
+    props?.folderSvg === true && props?.folderInTop === true,
+    "the file pane uses a monochrome folder icon in the top bar",
+    JSON.stringify({ svg: props?.folderSvg, top: props?.folderInTop }),
+  );
+
+  // ---- skills: filter + bulk delete ---------------------------------------
+  const extUi = await evalOnce(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    openSettingsModal("extensions");
+    await sleep(900);
+    const c = document.querySelector("#settings-content");
+    const res = {
+      filter: !!c.querySelector(".skill-toolbar .skill-filter"),
+      selAll: [...c.querySelectorAll(".skill-toolbar .ghost")].some((b) => /選択|select all/i.test(b.textContent)),
+      delDisabled: !!c.querySelector(".skill-toolbar .ghost.danger")?.disabled,
+    };
+    closeSettingsModal();
+    return res;
+  })()`);
+  check(
+    extUi?.filter === true && extUi?.selAll === true && extUi?.delDisabled === true,
+    "the skills section has a filter and a (disabled) bulk delete",
+    JSON.stringify(extUi),
   );
 
   // ---- rich file previews (csv / json / office) ---------------------------

@@ -1525,13 +1525,7 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
   #app, body { overflow-x: hidden; }
 }
 
-/* ---- settings gear badge + top-bar task progress ---- */
-.top-actions .iconbtn { position: relative; }
-#open-settings.has-badge::after {
-  content: ""; position: absolute; top: 3px; right: 3px;
-  width: 7px; height: 7px; border-radius: 50%;
-  background: var(--accent); box-shadow: 0 0 0 2px var(--bg);
-}
+/* ---- top-bar task progress ---- */
 #todo-progress {
   font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums;
   padding: 2px 7px; border: 1px solid var(--border); border-radius: 8px;
@@ -1546,4 +1540,19 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
   #mode-chip, #model-chip { max-width: 92px; }
   .composer-foot { gap: 3px; }
   #rightpane { width: 100vw !important; }
+}
+
+/* ---- skills: filter + bulk delete (settings -> extensions) ---- */
+.skill-toolbar { display: flex; gap: 6px; margin-bottom: 8px; align-items: center; flex-wrap: wrap; }
+.skill-toolbar .skill-filter { flex: 1; min-width: 140px; }
+.skill-toolbar .ghost {
+  padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--panel2); color: var(--text); font: inherit; font-size: 12px; cursor: pointer;
+}
+.skill-toolbar .ghost:hover { border-color: var(--accent); }
+.skill-toolbar .ghost.danger { color: var(--err); border-color: var(--err); }
+.skill-toolbar .ghost:disabled { opacity: 0.45; cursor: default; border-color: var(--border); color: var(--dim); }
+.skill-row .skill-check {
+  flex: none; align-self: center; width: 15px; height: 15px;
+  accent-color: var(--accent); cursor: pointer;
 }

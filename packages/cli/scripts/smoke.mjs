@@ -455,9 +455,17 @@ console.log("— scenario I: web ui transport —");
     "web UI ships the task-progress chip and only files/ctx pane tabs",
   );
   assert(
-    appJs.includes("renderProposalsSection") && appJs.includes("updateProposalsBadge") &&
-      appJs.includes("refreshTodoProgress"),
-    "web UI: approvals moved to settings; task progress wired",
+    appJs.includes("refreshTodoProgress") &&
+      !appJs.includes("renderProposalsSection") && !appJs.includes("updateProposalsBadge"),
+    "web UI: task progress wired; settings proposals section removed",
+  );
+  assert(
+    page.includes('id="pane-toggle"') && /id="pane-toggle"[\s\S]{0,220}<svg/.test(page),
+    "web UI: the file pane toggle uses an SVG folder icon",
+  );
+  assert(
+    appJs.includes("skill-toolbar") && appJs.includes("skills.deleteSelectedConfirm"),
+    "web UI: skills filter + bulk delete wired",
   );
 
   const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);

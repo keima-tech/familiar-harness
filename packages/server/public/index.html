@@ -60,6 +60,7 @@
             <span id="turn-spinner" class="spinner" hidden></span><span id="turn-label"></span>
           </div>
           <span id="todo-progress" class="todo-progress" hidden></span>
+          <button id="open-settings" class="iconbtn" title="設定" data-i18n-title="side.settings">⚙</button>
           <button id="ctx-gauge" class="gauge" title="コンテキスト使用量" data-i18n-title="chip.ctx">
             <svg viewBox="0 0 22 22" width="20" height="20">
               <circle class="gauge-track" cx="11" cy="11" r="8"></circle>
@@ -67,8 +68,9 @@
             </svg>
             <span id="gauge-pct" class="gauge-pct">—</span>
           </button>
-          <button id="pane-toggle" class="iconbtn" title="ファイル" data-i18n-title="top.files">📁</button>
-          <button id="open-settings" class="iconbtn" title="設定" data-i18n-title="side.settings">⚙</button>
+          <button id="pane-toggle" class="iconbtn" title="ファイル" data-i18n-title="top.files" aria-label="files">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 7.5a2 2 0 0 1 2-2h3.4l1.9 2.2h7.7a2 2 0 0 1 2 2v6.6a2 2 0 0 1-2 2H5.5a2 2 0 0 1-2-2z"/></svg>
+          </button>
         </div>
       </header>
 

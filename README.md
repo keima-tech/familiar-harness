@@ -77,7 +77,8 @@ what ships).
 ```bash
 npm run -w packages/desktop-tauri build:linux   # deb (+ AppImage)
 npm run -w packages/desktop-tauri build:win     # NSIS (build on Windows)
-# needs the Rust toolchain + cargo tauri
+npm run -w packages/desktop-tauri e2e           # drives the Web UI in the Tauri webview
+# needs the Rust toolchain + cargo tauri (+ xvfb for e2e)
 ```
 
 ### Updating

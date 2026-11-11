@@ -80,7 +80,8 @@ Chromium を同梱せず **OS の WebView** を使い、**Node ランタイム�
 ```bash
 npm run -w packages/desktop-tauri build:linux   # deb(+ AppImage)
 npm run -w packages/desktop-tauri build:win     # NSIS(Windows 上でビルド)
-# Rust ツールチェーン + cargo tauri が必要
+npm run -w packages/desktop-tauri e2e           # Tauri の WebView で Web UI を駆動
+# Rust ツールチェーン + cargo tauri(と e2e には xvfb)が必要
 ```
 
 ### アップデート

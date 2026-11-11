@@ -953,10 +953,21 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   (`installMode: currentUser`)。`npm run -w packages/desktop-tauri build:linux` /
   `build:win`。**AppImage は圧縮の都合で Electron 版より大きい(122MB vs 113MB)** ため
   リリース既定には含めず、**deb(50MB)を採用**。
+- **e2e ハーネス(`packages/desktop-tauri/scripts/e2e.mjs`、11 項目)**: WebKitGTK の
+  リモートインスペクタは CDP 互換の HTTP/JSON を持たないため、**デバッグビルド限定の
+  制御チャネル**(`src-tauri/src/e2e.rs`: `FAMILIAR_SHELL_E2E_PORT` 指定時に 127.0.0.1 で
+  `POST /eval` を立て、WebView 内で式を `await` 評価して結果を返す=Electron 版
+  `evalOnce` 相当)で実 UI を駆動する。リリースビルドは制御サーバを起動しないため
+  出荷バイナリに eval 経路は無い(`e2e_result` は登録のみで解決待ちが無ければ無害)。
+  検証内容: 起動と制御チャネル / 同梱 Node の serve 起動 / Web UI 描画 /
+  ブリッジ IPC 到達 / `openPath` 配線 / クリップボード往復 / ファイルメニュー実在 /
+  メニューハンドラ配線 / composer 補助 / **終了時にサイドカーが残らない**。
+  `npm run -w packages/desktop-tauri e2e`。
 - **繰り越し**: 自動更新(Electron シェル専用。Web UI はブリッジ不在時にボタンを隠し
-  `familiar update` を案内)、Windows インストーラの実機ビルド検証、および Web UI の
-  自動 e2e(`packages/desktop/scripts/ssh-e2e.mjs` は Electron レンダラを駆動するため
-  Electron シェルに依存)。リリースは `scripts/release.sh --tauri` で deb を成果物に追加。
+  `familiar update` を案内)、Windows インストーラの実機ビルド検証、および既存 UI テスト
+  (`packages/desktop/scripts/ssh-e2e.mjs`、130+ 項目)の Tauri ハーネスへの移植
+  (これが済めば Electron シェルを削除できる)。リリースは `scripts/release.sh --tauri`
+  で deb を成果物に追加。
 
 ## v0.1.0 の実装メモ 53(2026-11-11、ファイルタブの右クリックメニュー)
 

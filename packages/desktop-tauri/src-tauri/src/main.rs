@@ -20,6 +20,8 @@ use std::time::Duration;
 
 use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 
+mod e2e;
+
 /// Ports the shell probes for an already-running `familiar serve` (mirrors the
 /// Electron shell). `FAMILIAR_PORTS` overrides the list; `FAMILIAR_SPAWN_PORT`
 /// overrides the port a fresh server is spawned on.
@@ -268,11 +270,13 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .manage(ServeState(Mutex::new(None)))
+        .manage(e2e::E2eState::new())
         .invoke_handler(tauri::generate_handler![
             write_clipboard,
             open_path,
             notify,
-            bridge_ready
+            bridge_ready,
+            e2e::e2e_result
         ])
         .setup(|app| {
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
@@ -281,6 +285,14 @@ fn main() {
                 .min_inner_size(900.0, 600.0)
                 .initialization_script(BRIDGE)
                 .build()?;
+            // Debug-only test control channel (see src/e2e.rs). Never started
+            // by a release build, so a shipped binary has no eval endpoint.
+            #[cfg(debug_assertions)]
+            if let Ok(port) = std::env::var("FAMILIAR_SHELL_E2E_PORT") {
+                if let Ok(port) = port.trim().parse::<u16>() {
+                    e2e::start(app.handle().clone(), port);
+                }
+            }
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 let (base, port) = match start_serve(&handle) {

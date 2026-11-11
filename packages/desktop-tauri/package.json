@@ -8,6 +8,7 @@
     "dev": "node scripts/stage.mjs && cargo tauri dev",
     "build": "node scripts/stage.mjs && cargo tauri build",
     "build:linux": "node scripts/stage.mjs && cargo tauri build --bundles deb,appimage",
-    "build:win": "node scripts/stage.mjs && cargo tauri build --bundles nsis"
+    "build:win": "node scripts/stage.mjs && cargo tauri build --bundles nsis",
+    "e2e": "node scripts/e2e.mjs"
   }
 }

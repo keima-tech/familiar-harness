@@ -1235,6 +1235,68 @@ try {
   check(queue?.chips?.length === 1 && queue?.hidden === false, "typing while busy queues the instruction", JSON.stringify(queue));
   check(queue?.after === 0 && queue?.bubbles >= 2, "the queue drains once the turn ends", JSON.stringify(queue));
 
+  // while a turn runs: ↑ queues the text, a separate ■ button stops the turn
+  const busySend = await evalOnce(`(async () => {
+    setBusy(true);
+    const sendBtn = document.querySelector("#send");
+    const stopBtn = document.querySelector("#stop");
+    const before = {
+      stopVisible: !stopBtn.hidden,
+      sendIcon: sendBtn.textContent,
+      sendIsStop: sendBtn.classList.contains("stop"),
+    };
+    document.querySelector("#input").value = "queued via button";
+    document.querySelector("#composer").requestSubmit();
+    await new Promise((r) => setTimeout(r, 250));
+    const chips = [...document.querySelectorAll("#queue-strip .queue-chip")].map((c) => c.textContent.trim());
+    const stillBusy = state.busy === true;
+    state.queue.length = 0;
+    renderQueueStrip();
+    setBusy(false);
+    return { ...before, chips, stillBusy };
+  })()`);
+  check(
+    busySend?.stopVisible === true && busySend?.sendIsStop === false && String(busySend?.sendIcon) !== "■",
+    "while busy: the ↑ send button stays and a separate ■ stop appears",
+    JSON.stringify(busySend),
+  );
+  check(
+    (busySend?.chips ?? []).some((c) => c.includes("queued via button")) && busySend?.stillBusy === true,
+    "the send button queues while busy instead of stopping the turn",
+    JSON.stringify({ chips: busySend?.chips, stillBusy: busySend?.stillBusy }),
+  );
+
+  // phone (coarse pointer + narrow): Enter inserts a newline, it does not send
+  const mobileEnter = await evalOnce(`(async () => {
+    const real = window.matchMedia;
+    window.matchMedia = (q) => (String(q).includes("coarse") || String(q).includes("max-width: 900px"))
+      ? { matches: true, addEventListener() {}, removeEventListener() {} }
+      : real.call(window, q);
+    const input = document.querySelector("#input");
+    const isMobile = mobileComposer();
+    applyComposerPlaceholder();
+    const ph = input.placeholder;
+    input.value = "abc";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 150));
+    const kept = input.value;
+    const queued = state.queue.length;
+    window.matchMedia = real;
+    applyComposerPlaceholder();
+    input.value = "";
+    return { isMobile, ph, kept, queued };
+  })()`);
+  check(
+    mobileEnter?.isMobile === true && /↑/.test(String(mobileEnter?.ph)),
+    "a coarse pointer + narrow width is treated as mobile (Enter=newline hint)",
+    JSON.stringify(mobileEnter),
+  );
+  check(
+    mobileEnter?.kept === "abc" && mobileEnter?.queued === 0,
+    "on mobile Enter does not send (newline) and is not queued",
+    JSON.stringify({ kept: mobileEnter?.kept, queued: mobileEnter?.queued }),
+  );
+
   const copyCheck = await evalOnce(`(async () => {
     const fence = String.fromCharCode(96).repeat(3);
     appendMessage("assistant", fence + "js" + String.fromCharCode(10) + "const x = 1;" + String.fromCharCode(10) + fence);

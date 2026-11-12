@@ -469,6 +469,11 @@ console.log("— scenario I: web ui transport —");
       appJs.includes("editorBody.readOnly = external"),
     "web UI: skills filter/bulk wired; external skills are view-only",
   );
+  assert(
+    page.includes('id="stop"') && appJs.includes("stopBtn.hidden = !busy") &&
+      appJs.includes("mobileComposer") && appJs.includes("composer.phMobile"),
+    "web UI: separate stop button + mobile Enter=newline wired",
+  );
 
   const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
   const frames = [];

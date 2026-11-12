@@ -319,9 +319,10 @@ const STR = {
     "msg.thinking": "思考",
     "send.enter": "送信 (Enter)",
     "send.ctrlEnter": "送信 (Ctrl+Enter)",
-    "send.stop": "停止 (Enter)",
+    "send.stop": "停止",
     "composer.phEnter": "何でも聞いてください (Enter で送信 / Shift+Enter で改行)",
     "composer.phCtrl": "何でも聞いてください (Ctrl+Enter で送信 / Enter で改行)",
+    "composer.phMobile": "何でも聞いてください (Enter で改行 / ↑ で送信)",
     "drawer.inbox": "承認インボックス",
     "drawer.status": "システム状態",
     "drawer.info": "セッション情報",
@@ -847,9 +848,10 @@ const STR = {
     "msg.thinking": "Thinking",
     "send.enter": "send (Enter)",
     "send.ctrlEnter": "send (Ctrl+Enter)",
-    "send.stop": "stop (Enter)",
+    "send.stop": "Stop",
     "composer.phEnter": "Ask anything… (Enter to send / Shift+Enter for a new line)",
     "composer.phCtrl": "Ask anything… (Ctrl+Enter to send / Enter for a new line)",
+    "composer.phMobile": "Ask anything… (Enter for a new line / tap ↑ to send)",
     "drawer.inbox": "approval inbox",
     "drawer.status": "system status",
     "drawer.info": "session info",
@@ -1206,13 +1208,28 @@ function applyI18n() {
   }
 }
 
-/** Composer placeholder reflects the send-key preference. */
+/** Phones/tablets (touch + narrow): the on-screen Enter key inserts a newline
+ *  and the ↑ button sends, so the send-key preference does not apply there. */
+function mobileComposer() {
+  try {
+    return (
+      window.matchMedia("(pointer: coarse)").matches &&
+      window.matchMedia("(max-width: 900px)").matches
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Composer placeholder reflects the send-key preference (or the mobile hint). */
 function applyComposerPlaceholder() {
   $("#input").placeholder = state.busy
     ? t("composer.phBusy")
-    : prefs.sendWithEnter
-      ? t("composer.phEnter")
-      : t("composer.phCtrl");
+    : mobileComposer()
+      ? t("composer.phMobile")
+      : prefs.sendWithEnter
+        ? t("composer.phEnter")
+        : t("composer.phCtrl");
 }
 
 // ---- md-render (pure, DOM-free; kept contiguous for headless unit tests) ----
@@ -2900,10 +2917,8 @@ function liveBubble(sessionId) {
 /** Send button doubles as the stop button: ↑ idle / ■ while a turn runs. */
 function refreshSendButton() {
   const send = $("#send");
-  const busy = state.busy === true;
-  send.classList.toggle("stop", busy);
-  send.textContent = busy ? "■" : (send.dataset.iconIdle ?? "↑");
-  send.title = busy ? t("send.stop") : (prefs.sendWithEnter ? t("send.enter") : t("send.ctrlEnter"));
+  send.textContent = send.dataset.iconIdle ?? "↑";
+  send.title = prefs.sendWithEnter ? t("send.enter") : t("send.ctrlEnter");
 }
 
 /** Abort the running turn of the current session. */
@@ -2921,8 +2936,10 @@ async function stopTurn() {
 function setBusy(busy) {
   state.busy = busy;
   if (!busy) state.busySessionId = null;
-  $("#send").disabled = false; // the send button doubles as the stop button
-  $("#input").disabled = false; // always typeable: Enter queues while busy
+  $("#send").disabled = false; // always enabled: it queues while a turn runs
+  $("#input").disabled = false; // always typeable: send/Enter queues while busy
+  const stopBtn = $("#stop");
+  if (stopBtn) stopBtn.hidden = !busy; // the ■ button is the one that aborts
   $("#turn-spinner").hidden = !busy;
   refreshSendButton();
   applyComposerPlaceholder();
@@ -6879,10 +6896,8 @@ async function createSessionFromModal() {
 // ---------------------------------------------------------------------------
 /** Abort the running turn when busy; otherwise send the composer text. */
 function composerAction() {
-  if (state.busy) {
-    void stopTurn();
-    return;
-  }
+  // Sending is always "queue": while a turn runs the text waits its turn
+  // instead of aborting it — stopping is the separate ■ button.
   void send();
 }
 
@@ -7513,11 +7528,16 @@ function boot() {
       hideFileMenu();
     }, { passive: true });
   }
+  // the composer hint depends on the device (touch ⇒ Enter inserts a newline)
+  for (const evt of ["resize", "orientationchange"]) {
+    window.addEventListener(evt, () => applyComposerPlaceholder(), { passive: true });
+  }
 
   $("#composer").addEventListener("submit", (ev) => {
     ev.preventDefault();
     composerAction();
   });
+  $("#stop").addEventListener("click", () => void stopTurn());
   const input = $("#input");
   input.addEventListener("keydown", (ev) => {
     if (!$("#cmd-pop").hidden && ev.key === "Escape") {
@@ -7538,13 +7558,16 @@ function boot() {
       return;
     }
     if (!$("#cmd-pop").hidden && ev.key === "Tab") $("#cmd-pop").hidden = true;
-    const wantsSend = prefs.sendWithEnter
-      ? ev.key === "Enter" && !ev.shiftKey
-      : ev.key === "Enter" && (ev.ctrlKey || ev.metaKey);
+    const wantsSend = mobileComposer()
+      ? // phones: Enter inserts a newline, the ↑ button sends
+        ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)
+      : prefs.sendWithEnter
+        ? ev.key === "Enter" && !ev.shiftKey
+        : ev.key === "Enter" && (ev.ctrlKey || ev.metaKey);
     if (wantsSend) {
       ev.preventDefault();
-      // Enter always means "send": while a turn runs this queues the text
-      // (visible chip) — the ■ button is the one that stops the turn
+      // Enter (or Ctrl/Cmd+Enter) means "send": while a turn runs this queues
+      // the text (visible chip) — the ■ button is the one that aborts
       void send();
     }
   });

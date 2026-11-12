@@ -952,6 +952,24 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
 - **結論**: **Electron シェル(`packages/desktop`)を継続**。サイズは別途
   electron-builder 設定(locale 削減等)で圧縮する。
 
+## v0.1.0 の実装メモ 57(2026-11-12、スマホ操作と実行中の追加指示)
+
+- **スマホ縦の ⋯ メニュー見切れ**: `#session-menu-pop` は `.title-wrap` 内にあり、
+  ≤900px の全幅化ルール(`.top-actions .pop`)の対象外だったため、左へはみ出していた。
+  `.title-wrap .pop` も ≤900px で**上部バー直下・全幅**(`position: fixed; left/right: 6px;
+  top: 56px; max-height: calc(100vh - 72px)`)に。
+- **スマホは Enter = 改行**: `mobileComposer()`(`(pointer: coarse)` かつ `≤900px`)のとき、
+  作曲欄の Enter は**改行**、送信は **↑ ボタン**(Ctrl/Cmd+Enter は送信)。プレースホルダも
+  切替(`composer.phMobile`)、`resize`/`orientationchange` で更新。デスクトップは従来どおり
+  設定(`sendWithEnter`)に従う。
+- **実行中も止めずに追加指示(送信と停止の分離)**: これまで実行中は ↑ が ■ に化けて
+  「送信=停止」だった。**`#stop`(■)を独立**させて busy 時のみ表示し、**↑ は常に送信=キュー**
+  (`composerAction()`/Enter とも `send()` → busy なら `enqueueMessage`)。停止は `#stop` のみ。
+  これでスマホ(Enter=改行)でもボタンからキューできる。
+- **テスト**: smoke に「専用の停止ボタン + スマホ Enter=改行の配線」、ssh-e2e に
+  「busy 時は ↑ と ■ が並ぶ/↑ はキューして停止しない」「coarse+narrow は mobile 扱いで
+  Enter が送信もキューもしない」を追加。typecheck / smoke / GUI e2e 通過。
+
 ## v0.1.0 の実装メモ 56(2026-11-12、UI 微調整と Skills 管理)
 
 - **設定「提案」は撤去(実装メモ 55 を撤回)**: セッション内のインラインカードで完結し、

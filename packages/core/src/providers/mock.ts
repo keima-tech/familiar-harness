@@ -48,6 +48,9 @@ export class MockProvider implements Provider {
           .slice(messages.indexOf(repeatInstr))
           .filter((m) => m.role === "tool").length;
         if (done < target) {
+          // `@repeat n @slow <ms>`: pace the steps so tests can steer mid-turn.
+          const slow = repeatInstr.content.match(/@slow\s+(\d+)/);
+          if (slow) await new Promise((r) => setTimeout(r, Math.min(30_000, Number(slow[1]))));
           onChunk({ type: "tool_call_start", index: 0, id: `call_repeat_${done}`, name: "read" });
           onChunk({
             type: "tool_call_delta",
@@ -115,6 +118,10 @@ export class MockProvider implements Provider {
       streamText(names.length > 0 ? names.join("\n") : "(no tools)", onChunk);
       return { stopReason: "end_turn", usage: { promptTokens: 1, completionTokens: 2 } };
     }
+    // `@slow <ms>`: pace every step (pair with @repeat) so a test can inject a
+    // steering message while the turn is running.
+    const slowMatch = userText.match(/@slow\s+(\d+)/);
+    if (slowMatch) await new Promise((r) => setTimeout(r, Math.min(30_000, Number(slowMatch[1]))));
     // `@hold <ms>`: keep the turn (and its session lock) open for a while.
     // Lets tests exercise "a turn is already running", turn.start UI states
     // and the queue deterministically — the turn has started by now.

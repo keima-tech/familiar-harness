@@ -470,9 +470,10 @@ console.log("— scenario I: web ui transport —");
     "web UI: skills filter/bulk wired; external skills are view-only",
   );
   assert(
-    page.includes('id="stop"') && appJs.includes("stopBtn.hidden = !busy") &&
-      appJs.includes("mobileComposer") && appJs.includes("composer.phMobile"),
-    "web UI: separate stop button + mobile Enter=newline wired",
+    !page.includes('id="stop"') && appJs.includes("steerRunningTurn") &&
+      appJs.includes('rpc("session.steer"') && appJs.includes("mobileComposer") &&
+      appJs.includes("composer.phMobile"),
+    "web UI: single button steers the running turn; mobile Enter=newline",
   );
 
   const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
@@ -755,6 +756,41 @@ console.log("— scenario I: web ui transport —");
     yoloRan,
     "permissionMode yolo runs a risky command without asking",
     JSON.stringify(yoloSend.result ?? yoloSend.error ?? {}).slice(0, 160),
+  );
+
+  // steering: a message sent while a turn runs joins it at the next step
+  const post = (id, method, params) =>
+    fetch(`http://127.0.0.1:${PORT}/rpc`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
+    }).then((r) => r.json());
+  const steerSess = await post(40, "session.create", { cwd: project });
+  const steerSend = post(41, "session.send", {
+    id: steerSess.result.id,
+    text: "@repeat 4 @slow 250 steered",
+  });
+  await new Promise((r) => setTimeout(r, 500)); // the turn is mid-run
+  const steerAck = await post(42, "session.steer", { id: steerSess.result.id, text: "MIDTURN-MARKER" });
+  assert(
+    steerAck.result?.steered === true,
+    "session.steer accepts a message for a running turn",
+    JSON.stringify(steerAck).slice(0, 140),
+  );
+  await steerSend;
+  const steerAfter = (await post(43, "session.get", { id: steerSess.result.id })).result;
+  const steerMsgs = steerAfter.messages ?? [];
+  const steerIdx = steerMsgs.findIndex((m) => m.role === "user" && String(m.content).includes("MIDTURN-MARKER"));
+  assert(
+    steerIdx >= 0 && steerMsgs.slice(steerIdx + 1).some((m) => m.role === "assistant"),
+    "the steered message is appended mid-turn and read by the model",
+    JSON.stringify({ idx: steerIdx, roles: steerMsgs.map((m) => m.role) }).slice(0, 200),
+  );
+  const steerIdle = await post(44, "session.steer", { id: steerSess.result.id, text: "too late" });
+  assert(
+    !!steerIdle.error,
+    "session.steer errors when no turn is running",
+    JSON.stringify(steerIdle).slice(0, 140),
   );
 
   ws.close();

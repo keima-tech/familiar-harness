@@ -199,6 +199,11 @@ export class AgentServer {
     string,
     { controller: AbortController; text: string; startedAt: number }
   >();
+  /** steering: user messages injected into a running turn (drained by the loop) */
+  private readonly injections = new Map<
+    string,
+    { text: string; attachments?: MessageAttachment[] }[]
+  >();
   /** M5: MCP dynamic tools */
   readonly mcp?: McpHub;
   private mcpDiscover?: Promise<void>;
@@ -577,6 +582,8 @@ export class AgentServer {
         return this.updateSession(params);
       case "session.send":
         return this.send(params, ctx);
+      case "session.steer":
+        return this.steer(params);
       case "session.abort":
         return this.abortTurn(params);
       case "permission.respond": {
@@ -1816,6 +1823,7 @@ export class AgentServer {
         maxSteps: num(params, "maxSteps"),
         signal: controller.signal,
         onEvent: events,
+        takeInjections: () => this.takeInjections(sessionId),
         ...(contextWindowTokens > 0 ? { contextWindowTokens } : {}),
         ...(remoteTools ? { extraTools: remoteTools } : {}),
         ...(session.remote ? { excludeToolPrefix: "mcp__" } : {}),
@@ -1864,6 +1872,7 @@ export class AgentServer {
               maxSteps: num(params, "maxSteps"),
               signal: controller.signal,
               onEvent: events,
+              takeInjections: () => this.takeInjections(sessionId),
             });
             return retry;
           } catch {
@@ -1876,7 +1885,54 @@ export class AgentServer {
       throw err;
     } finally {
       this.activeTurns.delete(sessionId);
+      // A steering message that landed after the loop's final drain: run it as
+      // its own turn so it is never silently dropped (a tiny race window).
+      const leftover = this.injections.get(sessionId) ?? [];
+      this.injections.delete(sessionId);
+      const [first, ...rest] = leftover;
+      if (rest.length > 0) this.injections.set(sessionId, rest);
+      if (first) {
+        void this.send(
+          {
+            id: sessionId,
+            text: first.text,
+            ...(first.attachments && first.attachments.length > 0
+              ? { attachments: first.attachments }
+              : {}),
+          },
+          ctx,
+        ).catch(() => {});
+      }
     }
+  }
+
+  /**
+   * Steer a running turn: queue the message so the loop appends it at the next
+   * step boundary and the model reads it then. Unlike session.send it neither
+   * aborts nor waits for the turn to finish (and unlike the client-side queue it
+   * is read mid-turn rather than after).
+   */
+  private steer(params: Record<string, unknown>): Record<string, unknown> {
+    const sessionId = str(params, "id");
+    const text = str(params, "text");
+    if (!sessionId || text === undefined || text === null || text === "") {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, "params 'id' and 'text' are required");
+    }
+    this.requireSession(sessionId);
+    if (!this.activeTurns.has(sessionId)) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, "no running turn to steer");
+    }
+    const list = this.injections.get(sessionId) ?? [];
+    list.push({ text, attachments: this.parseAttachments(params) });
+    this.injections.set(sessionId, list);
+    return { steered: true, pending: list.length };
+  }
+
+  /** Drain the steering messages queued for a running session. */
+  private takeInjections(sessionId: string): { text: string; attachments?: MessageAttachment[] }[] {
+    const list = this.injections.get(sessionId) ?? [];
+    this.injections.set(sessionId, []);
+    return list;
   }
 
   /** Validate image attachments for session.send (multimodal input). */

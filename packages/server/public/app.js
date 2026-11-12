@@ -127,7 +127,7 @@ const STR = {
     "toast.dupRunning": "同じ内容がすでに実行中です(重複送信はしません)",
     "side.running": "実行中",
     "queue.otherDevice": "他の端末でターンが実行中です — 送信待ちに追加しました",
-    "composer.phBusy": "追加の指示を入力(このターンの終了後に送信されます)",
+    "composer.phBusy": "追加の指示を入力(実行中のターンに取り込まれます)",
     "usage.overNote": "コンテキストウィンドウを超えています — 次のターンで自動的に圧縮されます",
     "msg.copyFailed": "コピーできませんでした — テキストを選択してコピーしてください",
     "code.showAll": "すべて表示",
@@ -436,6 +436,8 @@ const STR = {
     "attach.remoteNoSession": "先にセッションを作成してください",
     "attach.fileTooLarge": "ファイルが大きすぎます (最大 {0}MB): {1}",
     "toast.stopRequested": "停止を要求しました…",
+    "toast.steered": "実行中のターンに取り込みました",
+    "toast.steerFallback": "ターンが終了していたため新規に送信します",
     "toast.effortSet": "エフォート: {0}",
     "toast.effortNext": "エフォート: {0} (次のセッションから適用)",
     "chip.effort": "推論エフォート",
@@ -656,7 +658,7 @@ const STR = {
     "toast.dupRunning": "the same instruction is already running (not sent twice)",
     "side.running": "running",
     "queue.otherDevice": "A turn is already running in another client — queued instead",
-    "composer.phBusy": "type to queue an instruction (sent after this turn)",
+    "composer.phBusy": "type to steer the running turn (read at the next step)",
     "usage.overNote": "Over the context window — the next turn compacts automatically",
     "msg.copyFailed": "Copy failed — select the text and copy it manually",
     "code.showAll": "show all",
@@ -965,6 +967,8 @@ const STR = {
     "attach.remoteNoSession": "open a session first",
     "attach.fileTooLarge": "file too large (max {0}MB): {1}",
     "toast.stopRequested": "stop requested…",
+    "toast.steered": "sent into the running turn",
+    "toast.steerFallback": "the turn had ended — sent as a new turn",
     "toast.effortSet": "effort: {0}",
     "toast.effortNext": "effort: {0} (applies from the next session)",
     "chip.effort": "reasoning effort",
@@ -2917,8 +2921,16 @@ function liveBubble(sessionId) {
 /** Send button doubles as the stop button: ↑ idle / ■ while a turn runs. */
 function refreshSendButton() {
   const send = $("#send");
-  send.textContent = send.dataset.iconIdle ?? "↑";
-  send.title = prefs.sendWithEnter ? t("send.enter") : t("send.ctrlEnter");
+  // one button: while a turn runs and the box is empty it is ■ (stop); with text
+  // it is ↑ (send/steer). Idle it is always ↑.
+  const stopMode = state.busy === true && $("#input").value.trim() === "";
+  send.classList.toggle("stop", stopMode);
+  send.textContent = stopMode ? "■" : (send.dataset.iconIdle ?? "↑");
+  send.title = stopMode
+    ? t("send.stop")
+    : prefs.sendWithEnter
+      ? t("send.enter")
+      : t("send.ctrlEnter");
 }
 
 /** Abort the running turn of the current session. */
@@ -2936,10 +2948,8 @@ async function stopTurn() {
 function setBusy(busy) {
   state.busy = busy;
   if (!busy) state.busySessionId = null;
-  $("#send").disabled = false; // always enabled: it queues while a turn runs
-  $("#input").disabled = false; // always typeable: send/Enter queues while busy
-  const stopBtn = $("#stop");
-  if (stopBtn) stopBtn.hidden = !busy; // the ■ button is the one that aborts
+  $("#send").disabled = false; // always enabled: it steers/queues while busy
+  $("#input").disabled = false; // always typeable: send/Enter steers while busy
   $("#turn-spinner").hidden = !busy;
   refreshSendButton();
   applyComposerPlaceholder();
@@ -6896,8 +6906,12 @@ async function createSessionFromModal() {
 // ---------------------------------------------------------------------------
 /** Abort the running turn when busy; otherwise send the composer text. */
 function composerAction() {
-  // Sending is always "queue": while a turn runs the text waits its turn
-  // instead of aborting it — stopping is the separate ■ button.
+  // One button: busy + empty box stops the turn; otherwise it sends (while a
+  // turn runs, sending steers that turn rather than aborting it).
+  if (state.busy && $("#input").value.trim() === "") {
+    void stopTurn();
+    return;
+  }
   void send();
 }
 
@@ -6917,18 +6931,39 @@ async function send() {
       toast(t("toast.dupRunning"), "info");
       return;
     }
-    // the turn keeps running; this instruction waits its turn
+    // the turn keeps running; steer it — the message is read at the next step
     const atts = state.pendingAttachments.slice();
     state.pendingAttachments = [];
     renderAttachStrip();
     input.value = "";
     autoSize(input);
-    enqueueMessage(text, atts);
+    refreshSendButton();
+    void steerRunningTurn(text, atts);
     return;
   }
   input.value = "";
   autoSize(input);
   await sendTurn(text, state.pendingAttachments.slice());
+}
+
+/** Steering: while a turn runs, a new instruction is injected into it so the
+ *  model reads it at the next step (no abort, no wait for the turn to end). */
+async function steerRunningTurn(text, atts) {
+  const bubble = appendMessage("user", text, null, { attachments: atts });
+  bubble.closest(".msg")?.setAttribute("data-opt", "1");
+  try {
+    await rpc("session.steer", {
+      id: state.sessionId,
+      text,
+      ...(atts.length > 0 ? { attachments: atts } : {}),
+    });
+    toast(t("toast.steered"), "info");
+  } catch (err) {
+    // the turn finished between typing and sending — deliver it as a normal turn
+    bubble.closest(".msg")?.remove();
+    toast(t("toast.steerFallback", err.message), "info");
+    await sendTurn(text, atts);
+  }
 }
 
 /** Start a turn with an explicit message (composer or queue drain). */
@@ -7537,7 +7572,6 @@ function boot() {
     ev.preventDefault();
     composerAction();
   });
-  $("#stop").addEventListener("click", () => void stopTurn());
   const input = $("#input");
   input.addEventListener("keydown", (ev) => {
     if (!$("#cmd-pop").hidden && ev.key === "Escape") {
@@ -7573,6 +7607,7 @@ function boot() {
   });
   input.addEventListener("input", () => {
     autoSize(input);
+    refreshSendButton(); // toggle ↑ / ■ while a turn runs
     void updateComposerPop();
   });
 
@@ -7683,7 +7718,12 @@ function boot() {
         toggleSearch(false);
         return;
       }
-      if (!$("#rightpane").hidden) closePane();
+      if (!$("#rightpane").hidden) {
+        closePane();
+        return;
+      }
+      // Esc with nothing else to dismiss interrupts a running turn
+      if (state.busy) void stopTurn();
     }
   });
 

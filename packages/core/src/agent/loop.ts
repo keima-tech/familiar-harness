@@ -51,6 +51,12 @@ export interface RunTurnOptions {
   /** registry tools to hide for this turn (local MCP tools in ssh sessions) */
   excludeToolPrefix?: string;
   onEvent: (event: AgentEvent) => void;
+  /**
+   * Steering: messages the user sends while this turn runs. Drawn at each step
+   * boundary and appended as user messages, so the next model call reads them
+   * (the turn keeps running — it is not aborted and does not wait for the end).
+   */
+  takeInjections?: () => { text: string; attachments?: MessageAttachment[] }[];
   /** cancel the turn (provider streams abort; tools finish their step) */
   signal?: AbortSignal;
   /** the model's context window, when the caller knows it (compaction ratio) */
@@ -199,6 +205,26 @@ export class AgentRunner {
       ? baseTools
       : baseTools.filter((t) => !SELF_IMPROVE_TOOLS.includes(t.name as "memory_manage"));
 
+    // Steering: append any user messages that arrived since the last boundary.
+    // Called at the top of each step (before history is read) and again just
+    // before the turn would finish, so nothing is stranded until a later turn.
+    const appendInjections = (): number => {
+      if (!opts.takeInjections) return 0;
+      const list = opts.takeInjections();
+      for (const inj of list) {
+        this.store.appendMessage(session.id, {
+          id: crypto.randomUUID(),
+          role: "user",
+          content: inj.text,
+          createdAt: Date.now(),
+          ...(inj.attachments && inj.attachments.length > 0
+            ? { meta: { attachments: inj.attachments } }
+            : {}),
+        });
+      }
+      return list.length;
+    };
+
     try {
       for (let stepIndex = 0; stepIndex < stepCeiling; stepIndex++) {
         steps += 1;
@@ -213,6 +239,9 @@ export class AgentRunner {
           });
         }
         opts.onEvent({ type: "step.start", turnId, index: stepIndex });
+
+        // steering messages sent since the previous step join this step's history
+        appendInjections();
 
         // Build injected prompt sections: memory + skills catalog (M3),
         // todos first, then caller extras (later phases).
@@ -358,6 +387,9 @@ export class AgentRunner {
         stepPromptFromChunks = 0;
 
         if (stepToolCalls.length === 0) {
+          // A steering message that landed while this (final) step streamed:
+          // keep the turn alive so the model reads it now.
+          if (appendInjections() > 0) continue;
           // The model stopped. If it left TODO items open and did not ask the
           // user a question, nudge it to keep working (what the user used to
           // have to trigger by typing 続けて). Bounded and visible.

@@ -1216,54 +1216,76 @@ try {
     JSON.stringify(badge?.rows),
   );
 
-  const queue = await evalOnce(`(async () => {
-    state.busy = true;
-    document.querySelector("#input").value = "queued instruction";
-    await send();
-    const chips = [...document.querySelectorAll("#queue-strip .queue-chip")].map((c) => c.textContent.trim());
-    const hidden = document.querySelector("#queue-strip").hidden;
-    state.busy = false;
-    drainQueue();
-    await new Promise((r) => setTimeout(r, 1800));
-    return {
-      chips,
-      hidden,
-      after: document.querySelectorAll("#queue-strip .queue-chip").length,
-      bubbles: document.querySelectorAll("#transcript .msg.user").length,
-    };
-  })()`);
-  check(queue?.chips?.length === 1 && queue?.hidden === false, "typing while busy queues the instruction", JSON.stringify(queue));
-  check(queue?.after === 0 && queue?.bubbles >= 2, "the queue drains once the turn ends", JSON.stringify(queue));
-
-  // while a turn runs: ↑ queues the text, a separate ■ button stops the turn
-  const busySend = await evalOnce(`(async () => {
+  // steering: while a turn runs, sending injects the text into it (no queue)
+  const steer = await evalOnce(`(async () => {
+    const real = rpc;
+    const calls = [];
+    rpc = async (m) => { calls.push(m); return { steered: true, pending: 1 }; };
     setBusy(true);
-    const sendBtn = document.querySelector("#send");
-    const stopBtn = document.querySelector("#stop");
-    const before = {
-      stopVisible: !stopBtn.hidden,
-      sendIcon: sendBtn.textContent,
-      sendIsStop: sendBtn.classList.contains("stop"),
+    document.querySelector("#input").value = "steer this";
+    await send();
+    const steered = calls.includes("session.steer");
+    const chips = document.querySelectorAll("#queue-strip .queue-chip").length;
+    const bubbleSeen = [...document.querySelectorAll("#transcript .msg.user")].some((m) => m.textContent.includes("steer this"));
+    rpc = real;
+    setBusy(false);
+    return { steered, chips, bubbleSeen };
+  })()`);
+  check(
+    steer?.steered === true && steer?.chips === 0 && steer?.bubbleSeen === true,
+    "sending while busy steers the running turn (no queue chip)",
+    JSON.stringify(steer),
+  );
+
+  // one button: ■ while busy + empty (stop), ↑ otherwise (send/steer)
+  const oneButton = await evalOnce(`(async () => {
+    const real = rpc; rpc = async () => ({ aborted: true });
+    const input = document.querySelector("#input");
+    input.value = "";
+    setBusy(true);
+    const busyEmpty = document.querySelector("#send").textContent;
+    let stopped = false;
+    const realStop = stopTurn; stopTurn = () => { stopped = true; };
+    composerAction(); // busy + empty => stop
+    stopTurn = realStop;
+    input.value = "x";
+    refreshSendButton();
+    const busyTyped = document.querySelector("#send").textContent;
+    setBusy(false);
+    const idle = document.querySelector("#send").textContent;
+    input.value = "";
+    refreshSendButton();
+    rpc = real;
+    return { busyEmpty, busyTyped, idle, stopped };
+  })()`);
+  check(
+    oneButton?.busyEmpty === "■" && oneButton?.busyTyped === "↑" && oneButton?.idle === "↑" && oneButton?.stopped === true,
+    "the single send button is ■ while busy+empty (stop) and ↑ otherwise",
+    JSON.stringify(oneButton),
+  );
+
+  // fallback: a send the server rejects (turn running on another client) queues
+  const otherDev = await evalOnce(`(async () => {
+    const real = rpc;
+    rpc = async (m) => {
+      if (m === "session.send") throw new Error("a turn is already running for this session (stop it first)");
+      return {};
     };
-    document.querySelector("#input").value = "queued via button";
-    document.querySelector("#composer").requestSubmit();
-    await new Promise((r) => setTimeout(r, 250));
+    state.busy = false;
+    document.querySelector("#input").value = "from another device";
+    await send();
+    await new Promise((r) => setTimeout(r, 200));
     const chips = [...document.querySelectorAll("#queue-strip .queue-chip")].map((c) => c.textContent.trim());
-    const stillBusy = state.busy === true;
+    rpc = real;
     state.queue.length = 0;
     renderQueueStrip();
     setBusy(false);
-    return { ...before, chips, stillBusy };
+    return { chips };
   })()`);
   check(
-    busySend?.stopVisible === true && busySend?.sendIsStop === false && String(busySend?.sendIcon) !== "■",
-    "while busy: the ↑ send button stays and a separate ■ stop appears",
-    JSON.stringify(busySend),
-  );
-  check(
-    (busySend?.chips ?? []).some((c) => c.includes("queued via button")) && busySend?.stillBusy === true,
-    "the send button queues while busy instead of stopping the turn",
-    JSON.stringify({ chips: busySend?.chips, stillBusy: busySend?.stillBusy }),
+    (otherDev?.chips ?? []).some((c) => c.includes("from another device")),
+    "a send rejected because a turn runs elsewhere is queued (fallback)",
+    JSON.stringify(otherDev),
   );
 
   // phone (coarse pointer + narrow): Enter inserts a newline, it does not send
@@ -1393,26 +1415,25 @@ try {
   check(pending?.during === true, "the received placeholder shows before the first token", JSON.stringify(pending));
   check(pending?.after === false, "the placeholder is replaced once tokens stream", JSON.stringify(pending));
 
-  const enterQueue = await evalOnce(`(async () => {
+  const enterSteer = await evalOnce(`(async () => {
+    const real = rpc; const calls = [];
+    rpc = async (m) => { calls.push(m); return { steered: true }; };
     state.busy = true;
     state.busySessionId = state.sessionId;
     state.lastUserText = "previous turn text";
     const input = document.querySelector("#input");
-    input.value = "queued via Enter";
+    input.value = "steered via Enter";
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
-    await new Promise((r) => setTimeout(r, 80));
-    const chips = document.querySelectorAll("#queue-strip .queue-chip").length;
-    const cleared = input.value === "";
-    state.queue = [];
-    renderQueueStrip();
+    await new Promise((r) => setTimeout(r, 120));
+    rpc = real;
     state.busy = false;
     state.busySessionId = null;
-    return { chips, cleared };
+    return { steered: calls.includes("session.steer"), cleared: input.value === "" };
   })()`);
   check(
-    enterQueue?.chips === 1 && enterQueue?.cleared === true,
-    "Enter while busy queues the instruction (does not stop the turn)",
-    JSON.stringify(enterQueue),
+    enterSteer?.steered === true && enterSteer?.cleared === true,
+    "Enter while busy steers the running turn (does not stop it)",
+    JSON.stringify(enterSteer),
   );
 
   // ---- auto-continue notices, stop retry, long-wait hint -------------------

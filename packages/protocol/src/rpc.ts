@@ -93,6 +93,7 @@ export const RPC_METHODS = [
   "office.templates.delete",
   "session.delete",
   "session.send",
+  "session.steer",
   "permission.respond",
   "memory.list",
   "memory.pending",

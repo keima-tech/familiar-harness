@@ -35,7 +35,7 @@ export type AgentEvent =
   | { type: "turn.error"; turnId: string; error: string; recoverable: boolean }
   /** the turn was cancelled (user abort) — normal shutdown, not an error */
   | { type: "turn.aborted"; turnId: string }
-  | { type: "compaction"; dropped: number; kept: number; /** M4: true when an aux model wrote the summary note (false / absent = drop guard) */ summarized?: boolean }
+  | { type: "compaction"; dropped: number; kept: number; /** M4: true when an aux model wrote the summary note (false / absent = drop guard) */ summarized?: boolean; /** true when forced (reactive overflow guard / manual /compact) rather than the proactive ratio */ forced?: boolean }
   /** M2 dynamic approval (serve mode): broadcast, wait for permission.respond */
   | { type: "permission.request"; requestId: string; tool: string; summary: string; detail?: string }
   | { type: "permission.resolved"; requestId: string; approved: boolean }

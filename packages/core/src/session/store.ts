@@ -39,6 +39,8 @@ export interface SessionStore {
    * of a turn that a provider 400 aborted before any answer.
    */
   truncateMessages(sessionId: string, keep: number): number;
+  /** Replace the whole message history in one transaction (manual compaction). */
+  replaceMessages(sessionId: string, messages: ChatMessage[]): void;
   /** Set/update the title (used for first user message). */
   renameSession(id: string, title: string): void;
   /** Patch session options (title / provider / model / profile / cwd / effort). Returns the updated record. */
@@ -301,6 +303,37 @@ export class SqliteSessionStore implements SessionStore {
       .run(sessionId, keep);
     this.db.prepare(`UPDATE sessions SET updated_at = ? WHERE id = ?`).run(Date.now(), sessionId);
     return Number(res.changes ?? 0);
+  }
+
+  /** Replace the whole message history in one transaction (manual compaction). */
+  replaceMessages(sessionId: string, messages: ChatMessage[]): void {
+    const insert = this.db.prepare(
+      `INSERT INTO messages (id, session_id, seq, role, content, name, tool_call_id, tool_calls, meta, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    this.db.exec("BEGIN");
+    try {
+      this.db.prepare(`DELETE FROM messages WHERE session_id = ?`).run(sessionId);
+      messages.forEach((m, i) => {
+        insert.run(
+          m.id,
+          sessionId,
+          i,
+          m.role,
+          m.content,
+          m.name ?? null,
+          m.toolCallId ?? null,
+          m.toolCalls ? JSON.stringify(m.toolCalls) : null,
+          m.meta ? JSON.stringify(m.meta) : null,
+          m.createdAt,
+        );
+      });
+      this.db.prepare(`UPDATE sessions SET updated_at = ? WHERE id = ?`).run(Date.now(), sessionId);
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
   }
 
   getMessages(sessionId: string): ChatMessage[] {

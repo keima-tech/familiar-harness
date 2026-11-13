@@ -952,6 +952,24 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
 - **結論**: **Electron シェル(`packages/desktop`)を継続**。サイズは別途
   electron-builder 設定(locale 削減等)で圧縮する。
 
+## v0.1.0 の実装メモ 59(2026-11-14、コンパクションの保険と手動 /compact)
+
+- **リアクティブ保険(溢れからの自動回復)**: プロアクティブ判定(窓×ratio / 128k フォールバック)
+  をすり抜けてプロバイダが「プロンプト長すぎ」で拒否した場合、**そのターンで一度だけ
+  強制コンパクション**して**同一ステップを再試行**する。判定は `isContextLengthError`
+  (context length / maximum context / prompt is too long 等)。強制時は ratio を無視し
+  `keep_last` を 4 に縮めて確実に縮める。`compaction` イベントに `forced: true` を付与し、
+  Web UI はターン内ノートで通知。これで「窓unknown/小さめの窓/日本語で推定が甘い」場合でも
+  行き止まりにならず応答が返る。
+- **手動 `/compact`**: 新 RPC `session.compact`(実行中は拒否)。`AgentRunner.compactSession`
+  が中盤を要約して `store.replaceMessages` で**履歴を置換(永続)**。CLI は REPL / TUI /
+  コマンドパレット(`/compact`)、Web UI は作曲欄コマンド `"/compact"`(実行後に一覧再描画+トースト)。
+- store に `replaceMessages`(BEGIN/COMMIT で全置換)。mock に `@overflow <n>`(n 回だけ
+  「長すぎ」で拒否)を追加。
+- **テスト**: smoke に「context-length 400 をその場で強制圧縮して再試行 / 強制イベント /
+  手動 `session.compact` が履歴を縮小 / 再実行が安全」、e2e に「`/compact` が
+  `session.compact` を呼ぶ」。typecheck / smoke / GUI e2e 通過。
+
 ## v0.1.0 の実装メモ 58(2026-11-12、実行中ステアリングと送信ボタンの1本化)
 
 - **送信ボタンを1本化**: 実行中は「入力が空なら ■(停止)／文字があれば ↑(送信)」の

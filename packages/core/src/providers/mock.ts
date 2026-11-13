@@ -22,6 +22,10 @@ import {
  * - last is user, otherwise                        → streams back `mock: <echo>`
  * - last is a tool result                          → final summary of that result
  */
+/** `@overflow <n>`: the provider rejects the prompt as too long n times total
+ *  (module-wide) — exercises the reactive compaction guard. Test-only. */
+let overflowThrown = 0;
+
 export class MockProvider implements Provider {
   readonly id: string;
 
@@ -117,6 +121,12 @@ export class MockProvider implements Provider {
       const names = (params.tools ?? []).map((tool) => tool.name).sort();
       streamText(names.length > 0 ? names.join("\n") : "(no tools)", onChunk);
       return { stopReason: "end_turn", usage: { promptTokens: 1, completionTokens: 2 } };
+    }
+    // `@overflow <n>`: reject the prompt as too long until n throws happened.
+    const overflowMatch = userText.match(/@overflow\s+(\d+)/);
+    if (overflowMatch && overflowThrown < Number(overflowMatch[1])) {
+      overflowThrown += 1;
+      throw new ProviderError("maximum context length exceeded (simulated)", 400, this.id);
     }
     // `@slow <ms>`: pace every step (pair with @repeat) so a test can inject a
     // steering message while the turn is running.

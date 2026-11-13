@@ -94,6 +94,7 @@ export const RPC_METHODS = [
   "session.delete",
   "session.send",
   "session.steer",
+  "session.compact",
   "permission.respond",
   "memory.list",
   "memory.pending",

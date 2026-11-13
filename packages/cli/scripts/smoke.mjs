@@ -475,6 +475,11 @@ console.log("— scenario I: web ui transport —");
       appJs.includes("composer.phMobile"),
     "web UI: single button steers the running turn; mobile Enter=newline",
   );
+  assert(
+    appJs.includes('"/compact"') && appJs.includes("compactContext") &&
+      appJs.includes('rpc("session.compact"') && appJs.includes("turn.noteCompactionForced"),
+    "web UI: /compact command and the forced-compaction note are wired",
+  );
 
   const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
   const frames = [];
@@ -791,6 +796,43 @@ console.log("— scenario I: web ui transport —");
     !!steerIdle.error,
     "session.steer errors when no turn is running",
     JSON.stringify(steerIdle).slice(0, 140),
+  );
+
+  // reactive guard: the provider rejects an over-long prompt once; the loop
+  // force-compacts and retries within the same turn (no client retry needed)
+  const heavySess = await post(50, "session.create", { cwd: project });
+  await post(51, "session.send", { id: heavySess.result.id, text: "@repeat 4 seed" });
+  const ovFrom = frames.length;
+  const ov = await post(52, "session.send", { id: heavySess.result.id, text: "@overflow 1 hello" });
+  assert(
+    !ov.error && (ov.result?.steps ?? 0) >= 1,
+    "a context-length 400 is force-compacted and retried in-turn",
+    JSON.stringify(ov).slice(0, 160),
+  );
+  const forcedEvents = frames
+    .slice(ovFrom)
+    .map((f) => f.event)
+    .filter((e) => e?.type === "compaction" && e.forced === true);
+  assert(
+    forcedEvents.length >= 1,
+    "the reactive guard emits a forced compaction event",
+    JSON.stringify(forcedEvents).slice(0, 200),
+  );
+
+  // manual /compact rewrites the stored history (persisted)
+  const beforeCompact = (await post(53, "session.get", { id: heavySess.result.id })).result.messages.length;
+  const manual = await post(54, "session.compact", { id: heavySess.result.id });
+  const afterCompact = (await post(55, "session.get", { id: heavySess.result.id })).result.messages.length;
+  assert(
+    manual.result?.compacted === true && afterCompact < beforeCompact,
+    "session.compact shrinks the stored history",
+    JSON.stringify({ ...manual.result, beforeCompact, afterCompact }).slice(0, 200),
+  );
+  const manualAgain = await post(56, "session.compact", { id: heavySess.result.id });
+  assert(
+    !manualAgain.error,
+    "session.compact is safe to call again",
+    JSON.stringify(manualAgain).slice(0, 140),
   );
 
   ws.close();

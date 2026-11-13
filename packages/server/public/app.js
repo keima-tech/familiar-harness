@@ -120,6 +120,8 @@ const STR = {
     "turn.noteSteps": "↻ ステップ上限に達したため自動継続します ({0}/{1})",
     "turn.noteTodos": "↻ 未完了のTODOがあるため自動継続します ({0}/{1})",
     "turn.noteCeiling": "ステップ上限({0})に達しました — 続行するには「続けて」",
+    "turn.noteCompaction": "コンテキストを圧縮しました（古い {0} 件を要約/削除、直近 {1} 件を保持）",
+    "turn.noteCompactionForced": "プロバイダがプロンプト長を拒否したため、圧縮して再試行しました（{0} 件削除）",
     "turn.retryNow": "再実行",
     "turn.continueNow": "続けて",
     "turn.continueWord": "続けて",
@@ -593,6 +595,12 @@ const STR = {
     "cmd.yolo": "フルアクセス — 確認しない",
     "cmd.export": "Markdown で出力",
     "cmd.retry": "直前のターンを再実行",
+    "cmd.compact": "コンテキストを圧縮",
+    "compact.noSession": "セッションがありません",
+    "compact.busy": "実行中のため圧縮できません（停止してから行ってください）",
+    "compact.done": "コンテキストを圧縮しました（{0} 件削除 / {1} 件保持）",
+    "compact.nothing": "圧縮するものがありません",
+    "compact.failed": "圧縮できませんでした: {0}",
     "cmd.settings": "設定を開く",
     "cmd.search": "トランスクリプト内検索",
     "top.todo": "タスク (todo)",
@@ -651,6 +659,8 @@ const STR = {
     "turn.noteSteps": "↻ auto-continued past the step window ({0}/{1})",
     "turn.noteTodos": "↻ continuing automatically — TODOs still open ({0}/{1})",
     "turn.noteCeiling": "step ceiling ({0}) reached — reply “continue” to resume",
+    "turn.noteCompaction": "compacted the context (summarized/dropped {0} older messages, kept the last {1})",
+    "turn.noteCompactionForced": "the provider rejected the prompt as too long — compacted and retried ({0} dropped)",
     "turn.retryNow": "retry",
     "turn.continueNow": "continue",
     "turn.continueWord": "continue",
@@ -1125,6 +1135,12 @@ const STR = {
     "cmd.yolo": "full access — never ask",
     "cmd.export": "export as markdown",
     "cmd.retry": "retry the last turn",
+    "cmd.compact": "compact the context",
+    "compact.noSession": "no session",
+    "compact.busy": "a turn is running — stop it before compacting",
+    "compact.done": "compacted the context ({0} dropped / {1} kept)",
+    "compact.nothing": "nothing to compact",
+    "compact.failed": "compaction failed: {0}",
     "cmd.settings": "open settings",
     "cmd.search": "search the transcript",
     "top.todo": "tasks (todo)",
@@ -2511,6 +2527,7 @@ const COMMANDS = [
   { cmd: "/yolo", key: "cmd.yolo", run: () => setMode("yolo") },
   { cmd: "/export", key: "cmd.export", run: () => void exportMarkdown() },
   { cmd: "/retry", key: "cmd.retry", run: () => retryLastTurn() },
+  { cmd: "/compact", key: "cmd.compact", run: () => void compactContext() },
   { cmd: "/settings", key: "cmd.settings", run: () => openSettingsModal() },
   { cmd: "/search", key: "cmd.search", run: () => toggleSearch() },
 ];
@@ -3285,6 +3302,15 @@ function onEvent(sessionId, e) {
         addLabelButton(`↻ ${t("turn.retryNow")}`, () => retryLastTurn(), state.lastUserText);
       }
       refreshSessions();
+      break;
+    case "compaction":
+      appendTurnNote(
+        t(
+          e.forced ? "turn.noteCompactionForced" : "turn.noteCompaction",
+          String(e.dropped ?? 0),
+          String(e.kept ?? 0),
+        ),
+      );
       break;
     default:
       break;
@@ -6963,6 +6989,29 @@ async function steerRunningTurn(text, atts) {
     bubble.closest(".msg")?.remove();
     toast(t("toast.steerFallback", err.message), "info");
     await sendTurn(text, atts);
+  }
+}
+
+/** /compact — summarize and shrink the stored context now (persisted). */
+async function compactContext() {
+  if (!state.sessionId) {
+    toast(t("compact.noSession"), "err");
+    return;
+  }
+  if (state.busy) {
+    toast(t("compact.busy"), "info");
+    return;
+  }
+  try {
+    const res = await rpc("session.compact", { id: state.sessionId });
+    if (res?.compacted) {
+      toast(t("compact.done", String(res.dropped ?? 0), String(res.kept ?? 0)), "ok");
+      await openSession(state.sessionId); // re-render the shortened transcript
+    } else {
+      toast(t("compact.nothing"), "info");
+    }
+  } catch (err) {
+    toast(t("compact.failed", err.message), "err");
   }
 }
 

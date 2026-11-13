@@ -584,6 +584,8 @@ export class AgentServer {
         return this.send(params, ctx);
       case "session.steer":
         return this.steer(params);
+      case "session.compact":
+        return this.compact(params, ctx);
       case "session.abort":
         return this.abortTurn(params);
       case "permission.respond": {
@@ -1926,6 +1928,26 @@ export class AgentServer {
     list.push({ text, attachments: this.parseAttachments(params) });
     this.injections.set(sessionId, list);
     return { steered: true, pending: list.length };
+  }
+
+  /**
+   * Manual compaction (`/compact`): summarize the middle of the stored history
+   * and rewrite it so future turns start small. Persisted (unlike the per-step
+   * guard). Refused while a turn runs (it is rewriting the same history).
+   */
+  private async compact(
+    params: Record<string, unknown>,
+    ctx: RpcContext,
+  ): Promise<Record<string, unknown>> {
+    const id = str(params, "id");
+    if (!id) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "session id is required");
+    this.requireSession(id);
+    if (this.activeTurns.has(id)) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, "a turn is running — stop it before compacting");
+    }
+    return this.runner.compactSession(id, {
+      onEvent: (event) => ctx.onEvent?.(id, event),
+    });
   }
 
   /** Drain the steering messages queued for a running session. */

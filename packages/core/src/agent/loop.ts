@@ -70,6 +70,9 @@ export interface RunTurnResult {
   usage: Usage;
 }
 
+/** The slice of RunTurnOptions compaction needs, so /compact can reuse it. */
+type CompactOpts = { onEvent: (event: AgentEvent) => void; contextWindowTokens?: number };
+
 /**
  * The agent loop: user message → provider (streaming) → tool calls → results →
  * repeat until a final answer or maxSteps is reached. All messages are
@@ -153,6 +156,8 @@ export class AgentRunner {
     let pendingNudge: string | undefined;
     /** true when the model finished on its own (no tool calls) */
     let finishedNaturally = false;
+    /** reactive context guard: at most one force-compaction retry per turn */
+    let reactiveUsed = false;
     // "Full access" on the composer is the same thing as --yolo for tools:
     // both file writes and risky commands must stop asking (bash only looks at
     // `ctx.yolo`, so the permission mode has to fold into it here).
@@ -297,43 +302,63 @@ export class AgentRunner {
         let stepToolCalls: ToolCall[] = [];
 
         const provider = this.providers.get(providerId);
+        const chatParams: Parameters<typeof provider.chat>[0] = {
+          model,
+          messages: history,
+          system,
+          tools: effectiveTools.map((t) => ({
+            name: t.name,
+            description: t.description,
+            parameters: t.parameters,
+          })),
+          signal: opts.signal,
+          effort,
+        };
+        const onChunk = (chunk: Parameters<Parameters<typeof provider.chat>[1]>[0]): void => {
+          if (chunk.type === "text") {
+            textParts.push(chunk.text);
+            opts.onEvent({ type: "text.delta", messageId: assistantId, text: chunk.text });
+          } else if (chunk.type === "usage") {
+            // cumulative (cost) vs per-step (context size) are tracked apart
+            usage.totalPromptTokens =
+              (usage.totalPromptTokens ?? 0) + (chunk.usage.promptTokens ?? 0);
+            usage.completionTokens =
+              (usage.completionTokens ?? 0) + (chunk.usage.completionTokens ?? 0);
+            stepPromptFromChunks = chunk.usage.promptTokens ?? stepPromptFromChunks;
+            lastStepPromptTokens = stepPromptFromChunks;
+          } else if (chunk.type === "stop") {
+            stepStopReason = chunk.finishReason;
+          } else if (chunk.type === "tool_call_start" || chunk.type === "tool_call_delta") {
+            observeProviderChunk(assistantId, chunk);
+          } else if (chunk.type === "reasoning") {
+            reasoningParts.push(chunk.text);
+            opts.onEvent({ type: "reasoning.delta", messageId: assistantId, text: chunk.text });
+          }
+        };
         let result!: Awaited<ReturnType<typeof provider.chat>>;
         try {
-          result = await provider.chat(
-            {
-              model,
-              messages: history,
-              system,
-              tools: effectiveTools.map((t) => ({
-                name: t.name,
-                description: t.description,
-                parameters: t.parameters,
-              })),
-              signal: opts.signal,
-              effort,
-            },
-            (chunk) => {
-              if (chunk.type === "text") {
-                textParts.push(chunk.text);
-                opts.onEvent({ type: "text.delta", messageId: assistantId, text: chunk.text });
-              } else if (chunk.type === "usage") {
-                // cumulative (cost) vs per-step (context size) are tracked apart
-                usage.totalPromptTokens =
-                  (usage.totalPromptTokens ?? 0) + (chunk.usage.promptTokens ?? 0);
-                usage.completionTokens =
-                  (usage.completionTokens ?? 0) + (chunk.usage.completionTokens ?? 0);
-                stepPromptFromChunks = chunk.usage.promptTokens ?? stepPromptFromChunks;
-                lastStepPromptTokens = stepPromptFromChunks;
-              } else if (chunk.type === "stop") {
-                stepStopReason = chunk.finishReason;
-              } else if (chunk.type === "tool_call_start" || chunk.type === "tool_call_delta") {
-                observeProviderChunk(assistantId, chunk);
-              } else if (chunk.type === "reasoning") {
-                reasoningParts.push(chunk.text);
-                opts.onEvent({ type: "reasoning.delta", messageId: assistantId, text: chunk.text });
-              }
-            },
-          );
+          try {
+            result = await provider.chat(chatParams, onChunk);
+          } catch (err) {
+            // Reactive guard: the proactive estimate missed (unknown / smaller
+            // than expected window) and the provider rejected the prompt as too
+            // long. Compact harder (ignore the ratio) and retry this step once.
+            if (reactiveUsed || opts.signal?.aborted || !isContextLengthError(err)) throw err;
+            reactiveUsed = true;
+            const beforeCount = history.length;
+            const forcedHistory = await this.compactIfNeeded(history, session, opts, true);
+            if (forcedHistory.length >= beforeCount) throw err; // nothing left to drop
+            history = forcedHistory;
+            chatParams.messages = history;
+            textParts.length = 0;
+            reasoningParts.length = 0;
+            callBuffers.delete(assistantId);
+            log.warn(
+              `provider rejected the prompt as too long — force-compacted ` +
+                `${beforeCount} -> ${history.length} messages, retrying once`,
+            );
+            result = await provider.chat(chatParams, onChunk);
+          }
           // Collect here (before finally runs): the buffer must be drained
           // while the try body still owns it.
           stepToolCalls = takeObservedToolCalls(assistantId);
@@ -600,6 +625,42 @@ export class AgentRunner {
   }
 
   /**
+   * Manual compaction (`/compact`): summarize the middle of the stored history
+   * and rewrite it in place so future turns start small (persisted, unlike the
+   * ephemeral per-step guard).
+   */
+  async compactSession(
+    sessionId: string,
+    opts: { onEvent?: (event: AgentEvent) => void; force?: boolean } = {},
+  ): Promise<{ compacted: boolean; dropped: number; kept: number; summarized: boolean }> {
+    const session = this.store.getSession(sessionId);
+    if (!session) throw new Error(`session not found: ${sessionId}`);
+    const before = this.store.getMessages(sessionId);
+    let dropped = 0;
+    let kept = 0;
+    let summarized = false;
+    const forward = (event: AgentEvent): void => {
+      if (event.type === "compaction") {
+        dropped = event.dropped;
+        kept = event.kept;
+        summarized = event.summarized === true;
+      }
+      opts.onEvent?.(event);
+    };
+    const compacted = await this.compactIfNeeded(
+      before,
+      session,
+      { onEvent: forward },
+      opts.force ?? true,
+    );
+    if (compacted === before) {
+      return { compacted: false, dropped: 0, kept: before.length, summarized: false };
+    }
+    this.store.replaceMessages(sessionId, compacted);
+    return { compacted: true, dropped, kept: kept || compacted.length, summarized };
+  }
+
+  /**
    * M1/M4 compaction guard: character-based estimate over the soft limit.
    * mode "summarize" (default M4): ask the aux compactor (auxiliary.compactor
    * slot, else the session model) for a durable note; any failure falls back
@@ -616,7 +677,8 @@ export class AgentRunner {
   private async compactIfNeeded(
     history: ChatMessage[],
     session: SessionRecord,
-    opts: RunTurnOptions,
+    opts: CompactOpts,
+    force = false,
   ): Promise<ChatMessage[]> {
     let chars = 0;
     for (const m of history) {
@@ -644,9 +706,12 @@ export class AgentRunner {
     // nothing known about the model: keep a conservative fallback
     const limitTokens = limits.length > 0 ? Math.min(...limits) : 128_000;
 
-    if (usedTokens < limitTokens) return history;
+    // `force` (reactive guard / manual /compact): compact regardless of the
+    // estimate, and keep a shorter tail to make real room.
+    if (!force && usedTokens < limitTokens) return history;
     const total = chars; // kept for the log line below
-    const keepLast = Math.max(2, this.cfg.context.keep_last);
+    const configuredKeepLast = Math.max(2, this.cfg.context.keep_last);
+    const keepLast = force ? Math.max(2, Math.min(configuredKeepLast, 4)) : configuredKeepLast;
     const keepFirst = history.filter((m) => m.role === "user")[0];
 
     const firstIdx = keepFirst ? history.indexOf(keepFirst) : -1;
@@ -682,9 +747,9 @@ export class AgentRunner {
 
     let kept = 0;
     for (const m of compacted) kept += m.content.length;
-    opts.onEvent({ type: "compaction", dropped, kept, summarized });
+    opts.onEvent({ type: "compaction", dropped, kept, summarized, ...(force ? { forced: true } : {}) });
     log.warn(
-      `compaction: ${summarized ? "summarized" : "dropped"} ${dropped} messages ` +
+      `compaction${force ? " (forced)" : ""}: ${summarized ? "summarized" : "dropped"} ${dropped} messages ` +
         `(estimate ${estimatedTokens} tok / observed ${observedTokens ?? "-"} tok >= ${limitTokens} tok${
           win > 0 ? ` = ${Math.round(ratio * 100)}% of ${win}` : ""
         })`,
@@ -757,6 +822,26 @@ function newCallBuffer(): CallBuffer {
 
 /** Exported for AgentRunner wiring: feed provider chunks here. */
 /** Prompt tokens of the newest assistant step (the real context size). */
+/** Heuristic: does this provider error mean "the prompt is too long"? */
+export function isContextLengthError(err: unknown): boolean {
+  const msg = (err instanceof Error ? err.message : String(err ?? "")).toLowerCase();
+  return (
+    msg.includes("context length") ||
+    msg.includes("context_length") ||
+    msg.includes("maximum context") ||
+    msg.includes("context window") ||
+    msg.includes("too many tokens") ||
+    msg.includes("token limit") ||
+    msg.includes("prompt is too long") ||
+    msg.includes("input is too long") ||
+    msg.includes("reduce the length") ||
+    msg.includes("max_model_len") ||
+    msg.includes("exceeds the maximum") ||
+    (msg.includes("too long") &&
+      (msg.includes("prompt") || msg.includes("context") || msg.includes("input") || msg.includes("message")))
+  );
+}
+
 function lastPromptTokens(history: ChatMessage[]): number | undefined {
   for (let i = history.length - 1; i >= 0; i -= 1) {
     const m = history[i];

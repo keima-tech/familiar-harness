@@ -325,6 +325,7 @@ export const TUI_COMMANDS: TuiCommand[] = [
   { name: "/plan", desc: "toggle plan mode" },
   { name: "/todo", desc: "show the session task list" },
   { name: "/retry", desc: "resend the previous message" },
+  { name: "/compact", desc: "summarize and shrink the context now" },
   { name: "/export", desc: "dump the transcript as markdown", needsArg: true },
   { name: "/clear", desc: "clear the transcript" },
   { name: "/exit", desc: "quit (also /quit, /q)" },

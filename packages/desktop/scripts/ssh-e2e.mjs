@@ -1264,6 +1264,29 @@ try {
     JSON.stringify(oneButton),
   );
 
+  // /compact: the composer command runs session.compact
+  const compactCmd = await evalOnce(`(async () => {
+    const real = rpc; const calls = [];
+    rpc = async (m) => {
+      calls.push(m);
+      if (m === "session.get") return { session: { id: "x", cwd: "" }, messages: [] };
+      return { compacted: true, dropped: 3, kept: 5 };
+    };
+    const listed = COMMANDS.some((c) => c.cmd === "/compact");
+    const hadSession = state.sessionId;
+    state.sessionId = state.sessionId ?? "fake";
+    let threw = "";
+    try { await compactContext(); } catch (e) { threw = String(e?.message ?? e); }
+    state.sessionId = hadSession;
+    rpc = real;
+    return { listed, called: calls.includes("session.compact"), threw };
+  })()`);
+  check(
+    compactCmd?.listed === true && compactCmd?.called === true && compactCmd?.threw === "",
+    "/compact runs session.compact from the composer",
+    JSON.stringify(compactCmd),
+  );
+
   // fallback: a send the server rejects (turn running on another client) queues
   const otherDev = await evalOnce(`(async () => {
     const real = rpc;

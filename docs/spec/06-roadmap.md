@@ -1036,6 +1036,15 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
 - Web UI 設定に「権限」セクション: 既定モードの select、allow/ask/deny のテキストエリア、
   保存、そしてコマンド判定テスタ(結果を色分け表示)。smoke に tester の 3 判定を追加。
 
+### 9. MCP サーバのヘルス表示と自動再接続
+
+- `McpClient` が予期しない exit を検知したら `wantRunning` を保ったまま指数バックオフ
+  (1s→最大 60s)で `discover()` を再試行(auto-reconnect)。`stop()` は再接続を止める。
+  `reconnects`/`lastOkAt` を保持し、`discover()` は毎回ツール一覧を再構築。
+- 手動 `mcp.restart {name}` RPC と `McpHub.restart`。`mcp.status` に `reconnects`/`lastOkAt`。
+- CLI `familiar mcp [status] | restart <name>` は ready/error/reconnecting と最終 OK・再接続回数を表示。
+  設定の「拡張」セクションの MCP 行に状態 + 再接続ボタン。smoke に `mcp restart` を追加。
+
 ## v0.1.0 の実装メモ 60(2026-11-15、全体再精査で見つけた不具合の修正)
 
 `packages/core` / `packages/server` / `packages/cli` / Web UI を横断で再精査し、

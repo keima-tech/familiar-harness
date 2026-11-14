@@ -672,6 +672,11 @@ const STR = {
     "prov.none": "(なし)",
     "ext.mcp": "MCP サーバー",
     "ext.mcpDesc": "mcp.status より(n. = そのサーバーの公開ツール数)。設定は config.yaml の mcp.servers です。",
+    "ext.reconnect": "再接続",
+    "ext.reconnected": "{0} を再接続しました",
+    "ext.reconnectFailed": "再接続できませんでした: {0}",
+    "ext.reconnects": "{0} 回再接続",
+    "ext.lastOk": "最終OK {0}",
     "ext.lsp": "LSP サーバー",
     "ext.skills": "スキル (Skills)",
     "ext.skillsDesc": "~/.familiar/skills/<名前>/SKILL.md。チャットで「〜するスキルを作って」と依頼すると skill_manage ツールが提案を作り、承認後に有効になります。",
@@ -1263,6 +1268,11 @@ const STR = {
     "prov.none": "(none)",
     "ext.mcp": "MCP servers",
     "ext.mcpDesc": "from mcp.status (n. = tools exposed by that server). Configure in config.yaml [mcp.servers].",
+    "ext.reconnect": "Reconnect",
+    "ext.reconnected": "reconnected {0}",
+    "ext.reconnectFailed": "reconnect failed: {0}",
+    "ext.reconnects": "{0} reconnect(s)",
+    "ext.lastOk": "last ok {0}",
     "ext.lsp": "LSP servers",
     "ext.skills": "Skills",
     "ext.skillsDesc": "~/.familiar/skills/<name>/SKILL.md. Ask in chat to create one — the skill_manage tool stages a proposal that activates after approval.",
@@ -5322,7 +5332,39 @@ async function renderExtensionsSection(content, stale = () => false) {
       mcpCard.appendChild(pairRow("—", t("stat.noServers")));
     }
     for (const sv of servers) {
-      mcpCard.appendChild(pairRow(sv.name ?? "(unknown)", `${sv.state ?? "?"} · ${t("ext.tools", (sv.tools ?? []).length)}${sv.error ? ` · ${sv.error}` : ""}`));
+      const info =
+        `${sv.state ?? "?"} · ${t("ext.tools", (sv.tools ?? []).length)}` +
+        (sv.lastOkAt ? ` · ${t("ext.lastOk", new Date(sv.lastOkAt).toLocaleTimeString())}` : "") +
+        (sv.reconnects ? ` · ${t("ext.reconnects", String(sv.reconnects))}` : "") +
+        (sv.error ? ` · ${sv.error}` : "");
+      const row = document.createElement("div");
+      row.className = "pair";
+      const k = document.createElement("span");
+      k.className = "k";
+      k.textContent = sv.name ?? "(unknown)";
+      const v = document.createElement("span");
+      v.className = "v";
+      v.textContent = info;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "ghost ext-reconnect";
+      btn.textContent = t("ext.reconnect");
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        try {
+          await rpc("mcp.restart", {
+            name: sv.name,
+            ...(state.sessionId ? { session: state.sessionId } : {}),
+          });
+          toast(t("ext.reconnected", sv.name), "ok");
+          renderSettingsSection("extensions");
+        } catch (err) {
+          toast(t("ext.reconnectFailed", err.message), "err");
+          btn.disabled = false;
+        }
+      });
+      row.append(k, v, btn);
+      mcpCard.appendChild(row);
     }
   } catch (err) {
     const mcpCard = card(t("ext.mcp"), t("ext.mcpDesc"));

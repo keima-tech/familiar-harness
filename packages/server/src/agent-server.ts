@@ -737,6 +737,18 @@ export class AgentServer {
         await this.mcpReady();
         return { servers: this.mcp?.status() ?? [] };
       }
+      case "mcp.restart": {
+        const name = str(params, "name");
+        if (!name) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "server name is required");
+        await this.mcpReady();
+        if (!this.mcp) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "MCP not available");
+        const sessionId = str(params, "session");
+        const session = sessionId ? this.store.getSession(sessionId) : null;
+        const hub = session?.remote ? this.remoteMcpHub(session.remote) : this.mcp;
+        const ok = await hub.restart(name);
+        if (!ok) throw new RpcError(RPC_ERROR_INVALID_PARAMS, `unknown MCP server: ${name}`);
+        return { name, servers: hub.status() };
+      }
       case "cron.status": {
         const runtime = this.cronScheduler?.status();
         return {

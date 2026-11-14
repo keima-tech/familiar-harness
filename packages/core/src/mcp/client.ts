@@ -47,12 +47,19 @@ export class McpClient {
     private readonly spawnSpec?: StdioSpec,
   ) {}
 
-  get state(): McpServerState | "stopped" {
-    if (this.process === undefined) return "stopped";
+  get state(): McpServerState | "stopped" | "reconnecting" {
+    if (this.process === undefined) return this.reconnectTimer ? "reconnecting" : "stopped";
     return this.process.exitCode === null && !this.process.killed ? "ok" : "error";
   }
 
   lastError?: string;
+  /** wall-clock of the last successful discover (health readout) */
+  lastOkAt?: number;
+  /** successful auto-reconnects after an unexpected exit (health readout) */
+  reconnects = 0;
+  private wantRunning = true;
+  private reconnectTimer?: NodeJS.Timeout;
+  private backoffMs = 1000;
 
   /** Spawn the server and complete the MCP initialize handshake. */
   private ensureStarted(): void {
@@ -117,6 +124,14 @@ export class McpClient {
     child.on("exit", () => {
       for (const [, p] of this.pending) p.reject(new Error(`mcp ${this.name}: server exited`));
       this.pending.clear();
+      if (this.process === child) this.process = undefined;
+      if (this.wantRunning) {
+        // unexpected exit: keep the tool list for the last-known set but try to
+        // come back on a backoff so a crashed server heals without a restart
+        this.lastError = this.lastError ?? `mcp ${this.name}: server exited`;
+        this.tools.clear();
+        this.scheduleReconnect();
+      }
     });
     // A server whose command does not exist makes stdin writes fail with
     // EPIPE; without this listener node would crash the whole host process.
@@ -161,6 +176,7 @@ export class McpClient {
   /** initialize + notifications/initialized + tools/list; cached in tools map. */
   async discover(): Promise<void> {
     this.ensureStarted();
+    this.tools.clear();
     await this.request("initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
@@ -170,6 +186,53 @@ export class McpClient {
     const result = (await this.request("tools/list", {})) as { tools?: McpToolDef[] } | undefined;
     for (const t of result?.tools ?? []) {
       if (typeof t?.name === "string") this.tools.set(t.name, t);
+    }
+    this.lastError = undefined;
+    this.lastOkAt = Date.now();
+    this.backoffMs = 1000;
+  }
+
+  /** Force a reconnect now (health "reconnect" action). */
+  async reconnect(): Promise<void> {
+    if (this.process) {
+      try {
+        this.process.kill();
+      } catch {
+        /* already gone */
+      }
+      this.process = undefined;
+    }
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+    }
+    this.wantRunning = true;
+    this.backoffMs = 1000;
+    await this.discover();
+  }
+
+  private scheduleReconnect(): void {
+    if (!this.wantRunning || this.reconnectTimer) return;
+    if (!this.spawnSpec && (!this.cfg.command || this.cfg.command.trim() === "")) return;
+    const delay = this.backoffMs;
+    this.backoffMs = Math.min(this.backoffMs * 2, 60_000);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = undefined;
+      void this.reconnectNow();
+    }, delay);
+    this.reconnectTimer.unref?.();
+    log.debug(`mcp ${this.name}: reconnecting in ${delay}ms`);
+  }
+
+  private async reconnectNow(): Promise<void> {
+    if (!this.wantRunning) return;
+    try {
+      await this.discover();
+      this.reconnects += 1;
+      log.info(`mcp ${this.name}: reconnected`);
+    } catch (err) {
+      this.lastError = err instanceof Error ? err.message : String(err);
+      this.scheduleReconnect();
     }
   }
 
@@ -203,6 +266,12 @@ export class McpClient {
   }
 
   stop(): void {
+    // intentional shutdown: don't fight the reconnect loop
+    this.wantRunning = false;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+    }
     if (this.process) {
       try {
         this.process.kill();
@@ -292,13 +361,36 @@ export class McpHub {
     return this.clients.size > 0;
   }
 
-  status(): { name: string; state: string; tools: string[]; error?: string }[] {
+  status(): {
+    name: string;
+    state: string;
+    tools: string[];
+    error?: string;
+    reconnects: number;
+    lastOkAt?: number;
+  }[] {
     return [...this.clients.entries()].map(([name, c]) => ({
       name,
       state: c.state,
       tools: [...c.tools.keys()],
+      reconnects: c.reconnects,
+      ...(c.lastOkAt ? { lastOkAt: c.lastOkAt } : {}),
       ...(c.lastError ? { error: c.lastError } : {}),
     }));
+  }
+
+  /** Health action: restart one server and re-run its discovery. */
+  async restart(name: string): Promise<boolean> {
+    const client = this.clients.get(name);
+    if (!client) return false;
+    try {
+      await client.reconnect();
+      log.info(`mcp ${name}: restarted`);
+    } catch (err) {
+      client.lastError = err instanceof Error ? err.message : String(err);
+      log.warn(`mcp ${name}: restart failed (${client.lastError})`);
+    }
+    return true;
   }
 
   stopAll(): void {

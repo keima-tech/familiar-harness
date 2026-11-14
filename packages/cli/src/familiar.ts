@@ -62,7 +62,7 @@ Usage:
   familiar memory [list] | pending | approve <id> | reject <id> | approval on|off
   familiar skills [list] | view <name> | pending | approve <id|all> | reject <id>
   familiar curator status | run [--dry-run] [--consolidate] | pause | resume
-  familiar mcp                       # MCP server status + exposed tool names
+  familiar mcp [status] | restart <name>   # MCP server health / reconnect
            | pin/unpin <skill> | restore <skill> | list-archived | backup
            | rollback <id> | prune --days N | ledger [--skill]
   familiar worktree list | add <name> | remove <name> | prune   (git worktree wrapper)
@@ -1960,11 +1960,29 @@ async function cmdSkills(flags: Record<string, string | boolean>, positionals: s
 // mcp diagnostics (M5)
 // ---------------------------------------------------------------------------
 
-async function cmdMcp(flags: Record<string, string | boolean>): Promise<void> {
+async function cmdMcp(
+  flags: Record<string, string | boolean>,
+  positionals: string[] = [],
+): Promise<void> {
   const server = openLocalServer(flags);
   await server.mcpReady();
+  const sub = positionals[0] ?? "status";
+  if (sub === "restart") {
+    const name = positionals[1];
+    if (!name) fail("usage: familiar mcp restart <name>");
+    await server.dispatch("mcp.restart", { name });
+    process.stdout.write(dim(`restarted ${name}\n`));
+    return;
+  }
   const res = (await server.dispatch("mcp.status", {})) as {
-    servers: { name: string; state: string; tools: string[]; error?: string }[];
+    servers: {
+      name: string;
+      state: string;
+      tools: string[];
+      error?: string;
+      reconnects?: number;
+      lastOkAt?: number;
+    }[];
   };
   const servers = res.servers ?? [];
   if (servers.length === 0) {
@@ -1973,9 +1991,19 @@ async function cmdMcp(flags: Record<string, string | boolean>): Promise<void> {
   }
   for (const s of servers) {
     const stateMark =
-      s.state === "ok" ? green("ready") : s.state === "error" ? red("error") : dim("stopped");
+      s.state === "ok"
+        ? green("ready")
+        : s.state === "error"
+          ? red("error")
+          : s.state === "reconnecting"
+            ? cyan("reconnecting")
+            : dim("stopped");
+    const health =
+      s.state === "ok" && s.lastOkAt
+        ? dim(` (ok ${new Date(s.lastOkAt).toISOString().slice(11, 19)}${s.reconnects ? `, ${s.reconnects} reconnect(s)` : ""})`)
+        : "";
     process.stdout.write(
-      `${stateMark}  ${cyan(s.name)}  tools: ${s.tools.map((t) => `mcp__${s.name}__${t}`).join(", ") || dim("(none)")}${s.error ? `  ${dim(s.error.slice(0, 120))}` : ""}\n`,
+      `${stateMark}  ${cyan(s.name)}${health}  tools: ${s.tools.map((t) => `mcp__${s.name}__${t}`).join(", ") || dim("(none)")}${s.error ? `  ${dim(s.error.slice(0, 120))}` : ""}\n`,
     );
   }
 }
@@ -2282,7 +2310,7 @@ async function main(): Promise<void> {
         await cmdCurator(flags, rest);
         break;
       case "mcp":
-        await cmdMcp(flags);
+        await cmdMcp(flags, rest);
         break;
       case "worktree":
         await cmdWorktree(flags, rest, resolveCwd(flags));

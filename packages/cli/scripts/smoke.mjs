@@ -1006,6 +1006,12 @@ console.log("— scenario J: mcp —");
     "MCP tool executed inside the turn loop",
     j2.stdout.slice(-300) + j2.stderr.slice(-200),
   );
+  const j3 = await run(["mcp", "restart", "mock"], project, homeJ);
+  assert(
+    j3.code === 0 && j3.stdout.includes("restarted mock"),
+    "familiar mcp restart reconnects a server",
+    j3.stdout.slice(0, 200) + j3.stderr.slice(0, 200),
+  );
 }
 
 // ---------------------------------------------------------------------------

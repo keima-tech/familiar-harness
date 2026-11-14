@@ -1716,6 +1716,7 @@ try {
       config: {},
       approval: { request: async () => true },
       backend: {
+        path,
         mkdirp: async (d) => fs.mkdirSync(d, { recursive: true }),
         writeFile: async (f, data) => fs.writeFileSync(f, data),
       },

@@ -1045,6 +1045,18 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
 - CLI `familiar mcp [status] | restart <name>` は ready/error/reconnecting と最終 OK・再接続回数を表示。
   設定の「拡張」セクションの MCP 行に状態 + 再接続ボタン。smoke に `mcp restart` を追加。
 
+### 10. `familiar doctor` の拡張
+
+- 既存(config 読込 / provider 認証 / node:sqlite / ollama 到達性)に加え、
+  **Node バージョン**、**state.db の integrity_check(読み取り専用で開く)**、
+  **git / ssh の PATH**、**~/.ssh の鍵**、**serve ポートの空き**を診断。
+  smoke に doctor の exit 0 / state.db / port の 3 項目を追加。
+
+### まとめ
+
+10 機能はいずれも 1 機能=1 コミットで実装し、`typecheck` / `smoke` を各コミットで通過。
+Web UI / サーバ RPC / CLI を含む変更のため GUI e2e も確認する。
+
 ## v0.1.0 の実装メモ 60(2026-11-15、全体再精査で見つけた不具合の修正)
 
 `packages/core` / `packages/server` / `packages/cli` / Web UI を横断で再精査し、

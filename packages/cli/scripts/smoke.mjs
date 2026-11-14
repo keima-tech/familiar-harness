@@ -2111,6 +2111,21 @@ server:
   serve.kill("SIGTERM");
 }
 
+// ---------------------------------------------------------------------------
+// Scenario: familiar doctor (environment diagnostics)
+// ---------------------------------------------------------------------------
+console.log("— scenario: doctor —");
+{
+  const d = await run(["doctor"], project, familiarHome);
+  assert(
+    d.code === 0,
+    "familiar doctor exits 0 on a healthy install",
+    d.stdout.slice(-300) + d.stderr.slice(-200),
+  );
+  assert(d.stdout.includes("state.db integrity ok"), "doctor checks state.db integrity", d.stdout.slice(0, 500));
+  assert(/port \d+ is (free|in use)/.test(d.stdout), "doctor checks the serve port", d.stdout.slice(0, 500));
+}
+
 console.log(
   failures === 0 ? "\nsmoke: all checks passed" : `\nsmoke: ${failures} failure(s)`,
 );

@@ -15,7 +15,8 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
+import net from "node:net";
 import https from "node:https";
 import type { AgentEvent, ChatMessage, ModelInfo, SessionRecord } from "@familiar/protocol";
 import {
@@ -2171,6 +2172,66 @@ async function cmdDoctor(): Promise<void> {
       ok("sqlite (node:sqlite) available");
     } catch (err) {
       bad(`node:sqlite unavailable: ${String(err)} (need Node >= 22.5)`);
+    }
+    // Node runtime version
+    {
+      const major = Number(process.versions.node.split(".")[0]);
+      if (major >= 24) ok(`node ${process.versions.node}`);
+      else if (major >= 22) warn(`node ${process.versions.node} (>= 24 recommended)`);
+      else bad(`node ${process.versions.node} is too old (need >= 22.5 for node:sqlite)`);
+    }
+    // state DB integrity (read-only — never mutates the user's database)
+    try {
+      const dbFile = familiarPaths.stateDb();
+      if (fs.existsSync(dbFile)) {
+        const { DatabaseSync } = await import("node:sqlite");
+        const db = new DatabaseSync(dbFile, { readOnly: true });
+        const row = db.prepare("PRAGMA integrity_check").get() as { integrity_check?: string };
+        db.close();
+        if (row?.integrity_check === "ok") ok(`state.db integrity ok`);
+        else bad(`state.db integrity check: ${row?.integrity_check ?? "unknown"}`);
+      } else {
+        warn(`state.db not created yet (${dbFile})`);
+      }
+    } catch (err) {
+      warn(`state.db check skipped: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    // external tools the ssh/exec backends rely on
+    for (const bin of ["git", "ssh"]) {
+      try {
+        execFileSync(bin, ["--version"], { stdio: "ignore" });
+        ok(`${bin} on PATH`);
+      } catch {
+        warn(`${bin} not found on PATH`);
+      }
+    }
+    // ssh keys (ssh sessions use agent or ~/.ssh keys)
+    try {
+      const sshDir = path.join(os.homedir(), ".ssh");
+      const keys = fs.existsSync(sshDir)
+        ? fs.readdirSync(sshDir).filter((f) => f.startsWith("id_") || f.endsWith(".pub"))
+        : [];
+      if (keys.length > 0) ok(`ssh keys present (${keys.length} file(s) in ~/.ssh)`);
+      else warn("no ssh keys found in ~/.ssh (needed for ssh sessions)");
+    } catch {
+      warn("could not read ~/.ssh");
+    }
+    // serve port availability
+    {
+      const port = cfg.server.port;
+      const busy = await new Promise<boolean>((resolve) => {
+        const s = net.connect({ host: "127.0.0.1", port }, () => {
+          s.destroy();
+          resolve(true);
+        });
+        s.on("error", () => resolve(false));
+        s.setTimeout(800, () => {
+          s.destroy();
+          resolve(false);
+        });
+      });
+      if (busy) warn(`port ${port} is in use (a familiar server may already be running)`);
+      else ok(`port ${port} is free`);
     }
     try {
       const ollama = cfg.providers["ollama"];

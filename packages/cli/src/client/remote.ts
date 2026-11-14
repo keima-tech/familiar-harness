@@ -85,12 +85,18 @@ export class RemoteFamiliarClient {
 
   private ensureSocket(): Promise<WebSocket> {
     if (this.socketPromise && !this.closed) return this.socketPromise;
-    this.socketPromise = new Promise<WebSocket>((resolve) => {
+    this.socketPromise = new Promise<WebSocket>((resolve, reject) => {
       const base = this.baseUrl.replace(/^http/, "ws").replace(/\/+$/, "");
       const wsUrl = this.token ? `${base}/ws?token=${encodeURIComponent(this.token)}` : `${base}/ws`;
       const socket = new WebSocket(wsUrl);
       this.socket = socket;
-      socket.onopen = () => resolve(socket);
+      // settle the promise on failure too: otherwise `await ensureSocket()`
+      // never resolves when the /ws upgrade fails (dispatch would hang forever)
+      let opened = false;
+      socket.onopen = () => {
+        opened = true;
+        resolve(socket);
+      };
       socket.onmessage = (msg: MessageEvent) => {
         let frame:
           | { type: "event"; sessionId: string; event: AgentEvent }
@@ -117,9 +123,11 @@ export class RemoteFamiliarClient {
       };
       socket.onclose = () => {
         if (!this.closed) this.socketPromise = undefined; // reconnect on next call
+        if (!opened) reject(new Error(`websocket to ${base}/ws closed before it opened`));
       };
       socket.onerror = () => {
         if (!this.closed) this.socketPromise = undefined;
+        if (!opened) reject(new Error(`websocket to ${base}/ws failed to connect`));
       };
     });
     return this.socketPromise;

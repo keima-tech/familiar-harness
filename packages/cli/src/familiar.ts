@@ -35,7 +35,7 @@ import {
 import { AgentServer, startHttpTransport } from "@familiar/server";
 import { createPrettyPrinter, createJsonPrinter, ansi, useColor } from "./ui/display.js";
 import { FullScreenTui, type TuiModelGroup } from "./ui/tui.js";
-import { CliApprovalAdapter, TuiApprovalAdapter } from "./ui/approvals.js";
+import { CliApprovalAdapter, TuiApprovalAdapter, setApprovalRepl } from "./ui/approvals.js";
 import { RemoteFamiliarClient } from "./client/remote.js";
 import { cmdWorktree } from "./worktree.js";
 
@@ -419,6 +419,7 @@ async function cmdChat(flags: Record<string, string | boolean>): Promise<void> {
   banner();
   const readline = await import("node:readline");
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  setApprovalRepl(rl); // pause the REPL while a y/N approval prompt is up
 
   const ensureSession = async (): Promise<SessionRecord> => {
     if (session) return session;

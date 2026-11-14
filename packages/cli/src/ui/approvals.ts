@@ -1,28 +1,42 @@
 import readline from "node:readline";
 import type { ApprovalAdapter, ApprovalRequest } from "@familiar/core";
 
+/** The line CLI's REPL interface while it is active. The approval prompt must
+ *  pause it, or the y/N keystroke is also read by the REPL and queued as a
+ *  stray chat message. */
+let activeRepl: { pause(): void; resume(): void } | null = null;
+export function setApprovalRepl(rl: { pause(): void; resume(): void } | null): void {
+  activeRepl = rl;
+}
+
 /** Interactive y/n prompt for risky actions (CLI REPL mode). */
 export class CliApprovalAdapter implements ApprovalAdapter {
   constructor(private readonly stdout: NodeJS.WriteStream = process.stdout) {}
 
-  async request(req: ApprovalRequest): Promise<boolean> {    if (process.stdin.destroyed || !process.stdout.isTTY) return false;
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-      prompt: "",
-      terminal: true,
-    });
-    const answer = await new Promise<string>((resolve) => {
-      this.write(`\napprove ${req.tool}: ${req.summary}? [y/N] `);
-      rl.question("", (input) => {
-        resolve(input.trim().toLowerCase());
+  async request(req: ApprovalRequest): Promise<boolean> {
+    if (process.stdin.destroyed || !process.stdout.isTTY) return false;
+    activeRepl?.pause(); // do not let the REPL consume the answer too
+    try {
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+        prompt: "",
+        terminal: true,
       });
-      // EOF (ctrl-d) resolves with ""
-      rl.on("close", () => resolve(""));
-    });
-    rl.close();
-    this.write("\n");
-    return answer === "y" || answer === "yes";
+      const answer = await new Promise<string>((resolve) => {
+        this.write(`\napprove ${req.tool}: ${req.summary}? [y/N] `);
+        rl.question("", (input) => {
+          resolve(input.trim().toLowerCase());
+        });
+        // EOF (ctrl-d) resolves with ""
+        rl.on("close", () => resolve(""));
+      });
+      rl.close();
+      this.write("\n");
+      return answer === "y" || answer === "yes";
+    } finally {
+      activeRepl?.resume();
+    }
   }
 
   private write(s: string): void {

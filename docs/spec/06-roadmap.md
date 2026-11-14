@@ -1016,6 +1016,17 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
 - Web UI に `/import`(JSON ファイル選択→取り込んで新セッションを開く)。smoke に
   JSON export→import の往復を追加。
 
+### 7. cron の管理(RPC / CLI / 設定画面)
+
+- `CronScheduler` に `runNow(name)` / `setEnabled(name, enabled)` と status の `enabled` を追加。
+  繰り返しジョブは無効でも ticker を作り、tick が `enabled` を見るので再起動なしで再開できる。
+- RPC `cron.run`(スケジューラ未起動でも config からジョブを 1 回実行)、
+  `cron.setEnabled`(稼働中スケジューラへ反映 + `config.yaml` に永続化)。
+  `writeCronJobEnabled` を config に追加。
+- CLI `familiar cron list | run <name> | enable <name> | disable <name>`。
+  Web UI 設定に「Cron」セクション(ジョブ一覧 + 今すぐ実行 + 一時停止/再開)。
+- smoke に「一覧 / 有効化 / config 永続化 / 即時実行」を追加。
+
 ## v0.1.0 の実装メモ 60(2026-11-15、全体再精査で見つけた不具合の修正)
 
 `packages/core` / `packages/server` / `packages/cli` / Web UI を横断で再精査し、

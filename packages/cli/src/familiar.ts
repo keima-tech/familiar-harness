@@ -57,6 +57,7 @@ Usage:
   familiar search <query>            # full-text search across all sessions
   familiar export <id> [--out FILE] [--format md|json]
   familiar import <file.json> [--cwd DIR]
+  familiar cron list | run <name> | enable <name> | disable <name>
   familiar model list [provider]
   familiar memory [list] | pending | approve <id> | reject <id> | approval on|off
   familiar skills [list] | view <name> | pending | approve <id|all> | reject <id>
@@ -1440,6 +1441,55 @@ async function cmdServe(flags: Record<string, string | boolean>): Promise<void> 
   process.on("SIGTERM", shutdown);
 }
 
+async function cmdCron(flags: Record<string, string | boolean>, positionals: string[]): Promise<void> {
+  const sub = positionals[0] ?? "list";
+  const server = new AgentServer({ config: loadCliConfig(flags) });
+  if (sub === "list") {
+    const res = (await server.dispatch("cron.status", {})) as {
+      started: boolean;
+      jobs: Array<{
+        name?: string;
+        prompt?: string;
+        everyMinutes?: number;
+        every_minutes?: number;
+        enabled?: boolean;
+        lastRunAt?: number;
+      }>;
+    };
+    const jobs = res.jobs ?? [];
+    if (jobs.length === 0) {
+      process.stdout.write(dim("(no cron jobs)\n"));
+      return;
+    }
+    for (const j of jobs) {
+      const name = j.name ?? (j.prompt ?? "").slice(0, 24);
+      const every = j.everyMinutes ?? j.every_minutes ?? 0;
+      const paused = j.enabled === false;
+      const last = j.lastRunAt ? new Date(j.lastRunAt).toISOString().slice(0, 16).replace("T", " ") : "-";
+      process.stdout.write(
+        `${paused ? dim("○") : green("●")} ${cyan(name)}  ${every <= 0 ? "once at boot" : `every ${every}m`}  ` +
+          `${dim(paused ? "paused" : "enabled")}  last ${dim(last)}\n`,
+      );
+    }
+    return;
+  }
+  if (sub === "run") {
+    const name = positionals[1];
+    if (!name) fail("usage: familiar cron run <name>");
+    await server.dispatch("cron.run", { name });
+    process.stdout.write(dim(`ran ${name}\n`));
+    return;
+  }
+  if (sub === "enable" || sub === "disable") {
+    const name = positionals[1];
+    if (!name) fail(`usage: familiar cron ${sub} <name>`);
+    await server.dispatch("cron.setEnabled", { name, enabled: sub === "enable" });
+    process.stdout.write(dim(`${sub === "enable" ? "enabled" : "disabled"} ${name}\n`));
+    return;
+  }
+  fail("usage: familiar cron list | run <name> | enable <name> | disable <name>");
+}
+
 async function cmdExport(flags: Record<string, string | boolean>, positionals: string[]): Promise<void> {
   const id = positionals[0];
   if (!id) fail("usage: familiar export <session-id> [--out FILE] [--format md|json]");
@@ -2215,6 +2265,9 @@ async function main(): Promise<void> {
         break;
       case "import":
         await cmdImport(flags, rest);
+        break;
+      case "cron":
+        await cmdCron(flags, rest);
         break;
       case "model":
         await cmdModel(flags, rest);

@@ -1603,3 +1603,14 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
 .find-meta { font-size: 12px; color: var(--dim); }
 .find-snip { font-size: 13px; line-height: 1.4; word-break: break-word; }
 .find-snip b { color: var(--accent, inherit); }
+
+/* cron settings section */
+.cron-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px 10px; border-top: 1px solid var(--border);
+}
+.cron-row:first-of-type { border-top: none; }
+.cron-label { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cron-name { font-weight: 600; }
+.cron-meta, .cron-role { font-size: 12px; color: var(--dim); }
+.cron-actions { display: flex; gap: 6px; flex: 0 0 auto; }

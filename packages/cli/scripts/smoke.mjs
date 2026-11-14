@@ -2026,6 +2026,71 @@ server:
   serve.kill("SIGTERM");
 }
 
+// ---------------------------------------------------------------------------
+// Scenario: cron management (list / enable / run + persistence)
+// ---------------------------------------------------------------------------
+console.log("— scenario: cron management —");
+{
+  const PORT = 46239;
+  const cronHome = path.join(tmpBase, "home-cron");
+  fs.mkdirSync(cronHome, { recursive: true });
+  fs.writeFileSync(
+    path.join(cronHome, "config.yaml"),
+    `version: 1
+default_provider: mock
+providers:
+  mock:
+    kind: mock
+cron:
+  jobs:
+    - name: nightly
+      every_minutes: 1440
+      prompt: "summarize the day"
+      enabled: false
+server:
+  port: ${PORT}
+  bind: 127.0.0.1
+`,
+  );
+  const serve = spawn(process.execPath, [familiarBin, "serve", "--port", String(PORT)], {
+    cwd: project,
+    env: env(cronHome),
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let serveLog = "";
+  serve.stdout.on("data", (d) => (serveLog += d));
+  serve.stderr.on("data", (d) => (serveLog += d));
+  let health = false;
+  for (let i = 0; i < 50 && !health; i++) {
+    await new Promise((r) => setTimeout(r, 200));
+    try {
+      health = (await fetch(`http://127.0.0.1:${PORT}/healthz`).then((r) => r.json())).ok === true;
+    } catch {
+      health = false;
+    }
+  }
+  assert(health, "cron server /healthz responds", serveLog.slice(0, 200));
+  const cpost = (id, method, params) =>
+    fetch(`http://127.0.0.1:${PORT}/rpc`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
+    }).then((r) => r.json());
+  const st = await cpost(1, "cron.status", {});
+  assert(
+    (st.result?.jobs ?? []).some((j) => j.name === "nightly"),
+    "cron.status lists the configured job",
+    JSON.stringify(st.result ?? st.error ?? {}).slice(0, 200),
+  );
+  const en = await cpost(2, "cron.setEnabled", { name: "nightly", enabled: true });
+  assert(en.result?.enabled === true, "cron.setEnabled enables a job", JSON.stringify(en.result ?? en.error ?? {}).slice(0, 160));
+  const cfgAfter = fs.readFileSync(path.join(cronHome, "config.yaml"), "utf8");
+  assert(/enabled:\s*true/.test(cfgAfter), "cron.setEnabled persists to config.yaml", cfgAfter.slice(0, 220));
+  const run = await cpost(3, "cron.run", { name: "nightly" });
+  assert(run.result?.started === true, "cron.run runs a job now", JSON.stringify(run.result ?? run.error ?? {}).slice(0, 160));
+  serve.kill("SIGTERM");
+}
+
 console.log(
   failures === 0 ? "\nsmoke: all checks passed" : `\nsmoke: ${failures} failure(s)`,
 );

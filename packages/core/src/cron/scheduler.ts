@@ -17,6 +17,8 @@ export interface CronJobRuntimeStatus {
   nextRunAt?: number;
   onceAtBoot: boolean;
   ranOnce: boolean;
+  /** false when the job is paused (config `enabled: false` or a live toggle) */
+  enabled: boolean;
 }
 
 export interface CronSchedulerOptions {
@@ -41,6 +43,7 @@ export class CronScheduler {
         prompt: job.prompt,
         onceAtBoot: job.every_minutes <= 0,
         ranOnce: false,
+        enabled: job.enabled !== false,
       });
     }
   }
@@ -49,10 +52,39 @@ export class CronScheduler {
     return job.name ?? job.prompt.slice(0, 40);
   }
 
+  /** Find a job by its display name or key. */
+  private jobByName(name: string): CronJob | undefined {
+    return this.jobs.find((j) => (j.name ?? j.prompt.slice(0, 24)) === name || this.key(j) === name);
+  }
+
+  /** Run a job immediately (regardless of its schedule / enabled flag). */
+  runNow(name: string): boolean {
+    const job = this.jobByName(name);
+    if (!job) return false;
+    void this.execute(job);
+    return true;
+  }
+
+  /** Pause/resume a job in memory (the config file is not rewritten). */
+  setEnabled(name: string, enabled: boolean): boolean {
+    const job = this.jobByName(name);
+    if (!job) return false;
+    const st = this.statuses.get(this.key(job));
+    if (!st) return false;
+    st.enabled = enabled;
+    // a once-at-boot job that is enabled later should still fire once
+    if (enabled && job.every_minutes <= 0 && !st.ranOnce) {
+      const t = setTimeout(() => void this.execute(job), 500);
+      t.unref?.();
+      this.timers.push(t);
+    }
+    return true;
+  }
+
   start(): void {
     for (const job of this.jobs) {
-      if (job.enabled === false) continue;
       if (job.every_minutes <= 0) {
+        if (job.enabled === false) continue;
         // once at boot (slight delay so transports/lists settle)
         const t = setTimeout(() => {
           void this.execute(job);
@@ -61,11 +93,13 @@ export class CronScheduler {
         this.timers.push(t);
         continue;
       }
+      // create a ticker for every repeating job; the tick itself honors the
+      // live enabled flag so cron.enable/disable works without a restart
       const periodMs = job.every_minutes * 60_000;
       const tick = setInterval(() => {
         const st = this.statuses.get(this.key(job))!;
         const due = st.lastRunAt === undefined || Date.now() - st.lastRunAt >= periodMs;
-        if (due && !this.inFlight.has(this.key(job))) void this.execute(job);
+        if (st.enabled && due && !this.inFlight.has(this.key(job))) void this.execute(job);
       }, Math.min(periodMs, 30_000));
       tick.unref?.();
       this.timers.push(tick);

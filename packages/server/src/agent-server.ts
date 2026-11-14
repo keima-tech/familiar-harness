@@ -32,6 +32,7 @@ import {
   configFilePath,
   writeConnectorsToDisk,
   writeProviderToDisk,
+  writeCronJobEnabled,
   describeAuthSource,
   normalizeEffort,
   familiarPaths,
@@ -233,8 +234,9 @@ export class AgentServer {
   /** Serve mode: start scheduled prompts (config cron.jobs). */
   startCronScheduler(): CronScheduler | undefined {
     if (this.cronScheduler) return this.cronScheduler;
+    // keep disabled jobs too so cron.setEnabled can resume them live
     const jobs = (this.cfg.cron?.jobs ?? []).filter(
-      (j) => j.enabled !== false && typeof j.prompt === "string" && j.prompt.trim() !== "" && Number.isFinite(j.every_minutes),
+      (j) => typeof j.prompt === "string" && j.prompt.trim() !== "" && Number.isFinite(j.every_minutes),
     );
     if (jobs.length === 0) return undefined;
     this.cronScheduler = new CronScheduler(jobs, (job) => this.runCronJob(job));
@@ -737,6 +739,38 @@ export class AgentServer {
           started: runtime?.started ?? false,
           jobs: runtime?.jobs ?? (this.cfg.cron?.jobs ?? []),
         };
+      }
+      case "cron.run": {
+        const name = str(params, "name");
+        if (!name) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "job name is required");
+        // run one job directly (no scheduler start, so a CLI one-shot does not
+        // kick off every other timer / once-at-boot job)
+        if (this.cronScheduler) {
+          if (!this.cronScheduler.runNow(name)) {
+            throw new RpcError(RPC_ERROR_INVALID_PARAMS, `unknown cron job: ${name}`);
+          }
+        } else {
+          const job = (this.cfg.cron?.jobs ?? []).find(
+            (j) => (j.name ?? j.prompt.slice(0, 24)) === name || j.name === name,
+          );
+          if (!job || typeof job.prompt !== "string") {
+            throw new RpcError(RPC_ERROR_INVALID_PARAMS, `unknown cron job: ${name}`);
+          }
+          await this.runCronJob(job);
+        }
+        return { started: true };
+      }
+      case "cron.setEnabled": {
+        const name = str(params, "name");
+        if (!name) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "job name is required");
+        const enabled = params["enabled"] === true;
+        // live toggle for a running server, then persist so it survives restart
+        this.cronScheduler?.setEnabled(name, enabled);
+        const updated = writeCronJobEnabled(name, enabled);
+        if (!updated && !this.cronScheduler) {
+          throw new RpcError(RPC_ERROR_INVALID_PARAMS, `unknown cron job: ${name}`);
+        }
+        return { name, enabled };
       }
       default:
         throw new RpcError(RPC_ERROR_METHOD_NOT_FOUND, `unknown method: ${method}`);

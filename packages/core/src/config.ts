@@ -684,6 +684,44 @@ export function writeProviderToDisk(
   return entry as unknown as ProviderConfig;
 }
 
+/**
+ * Persist `enabled` for a cron job (matched by name, or by the first 24 chars
+ * of its prompt when unnamed) in config.yaml. Returns false when the job is
+ * not found. Never rewrites unrelated keys.
+ */
+export function writeCronJobEnabled(
+  name: string,
+  enabled: boolean,
+  options: LoadConfigOptions = {},
+): boolean {
+  const file = configFilePath(options.configFile);
+  if (!fs.existsSync(file)) return false;
+  const parsed = parseYaml(fs.readFileSync(file, "utf8"));
+  if (!isPlainObject(parsed)) return false;
+  const doc = parsed as Record<string, unknown>;
+  const cron = isPlainObject(doc["cron"]) ? (doc["cron"] as Record<string, unknown>) : undefined;
+  const jobs = cron && Array.isArray(cron["jobs"]) ? (cron["jobs"] as unknown[]) : undefined;
+  if (!jobs) return false;
+  let found = false;
+  for (const raw of jobs) {
+    if (!isPlainObject(raw)) continue;
+    const job = raw as Record<string, unknown>;
+    const jobName = typeof job["name"] === "string" ? (job["name"] as string) : "";
+    const prompt = typeof job["prompt"] === "string" ? (job["prompt"] as string) : "";
+    if (jobName === name || (!jobName && prompt.slice(0, 24) === name)) {
+      job["enabled"] = enabled;
+      found = true;
+    }
+  }
+  if (!found) return false;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(tmp, stringifyYaml(doc), { mode: 0o600 });
+  fs.renameSync(tmp, file);
+  log.info(`cron job ${enabled ? "enabled" : "disabled"}: ${name}`);
+  return true;
+}
+
 export function configFilePath(explicit?: string): string {
   if (explicit) return expandHome(explicit);
   return familiarPaths.config();

@@ -340,7 +340,19 @@ const STR = {
     "nav.templates": "テンプレート",
     "nav.connectors": "コネクタ",
     "nav.connections": "接続",
+    "nav.cron": "Cron",
     "nav.system": "このアプリについて",
+    "cron.desc": "config の cron.jobs で定義したスケジュール実行。ここから手動実行・一時停止できます。",
+    "cron.empty": "スケジュールされたジョブはありません",
+    "cron.once": "起動時に1回",
+    "cron.every": "{0} 分ごと",
+    "cron.run": "今すぐ実行",
+    "cron.ran": "{0} を実行しました",
+    "cron.failed": "失敗しました: {0}",
+    "cron.pause": "一時停止",
+    "cron.resume": "再開",
+    "cron.enabled": "有効",
+    "cron.paused": "一時停止中",
     "remote.back": "ローカルに戻る",
     "remote.badge": "SSH: {0}",
     "remote.badgeTitle": "SSH 接続中: {0} — クリックで接続設定",
@@ -899,7 +911,19 @@ const STR = {
     "nav.templates": "Templates",
     "nav.connectors": "Connectors",
     "nav.connections": "Connections",
+    "nav.cron": "Cron",
     "nav.system": "About",
+    "cron.desc": "Scheduled runs from cron.jobs in config. Run now or pause from here.",
+    "cron.empty": "no scheduled jobs",
+    "cron.once": "once at boot",
+    "cron.every": "every {0}m",
+    "cron.run": "Run now",
+    "cron.ran": "ran {0}",
+    "cron.failed": "failed: {0}",
+    "cron.pause": "Pause",
+    "cron.resume": "Resume",
+    "cron.enabled": "enabled",
+    "cron.paused": "paused",
     "remote.back": "Back to local",
     "remote.badge": "SSH: {0}",
     "remote.badgeTitle": "Connected over SSH: {0} — click for connection settings",
@@ -4353,6 +4377,7 @@ const SETTINGS_SECTIONS = [
   { id: "templates", labelKey: "nav.templates", icon: "📄" },
   { id: "connectors", labelKey: "nav.connectors", icon: "🔗" },
   { id: "connections", labelKey: "nav.connections", icon: "🖥" },
+  { id: "cron", labelKey: "nav.cron", icon: "⏱" },
   { id: "system", labelKey: "nav.system", icon: "◍" },
 ];
 let settingsSection = "general";
@@ -4403,6 +4428,7 @@ function renderSettingsSection(id) {
   else if (id === "templates") void renderTemplatesSection(content, stale);
   else if (id === "connectors") void renderConnectorsSection(content, stale);
   else if (id === "connections") void renderConnectionsSection(content, stale);
+  else if (id === "cron") void renderCronSection(content, stale);
   else if (id === "system") void renderSystemSection(content, stale);
 }
 
@@ -5692,6 +5718,77 @@ async function renderConnectionsSection(content, stale = () => false) {
 }
 
 /** Settings → templates: register Office files whose design office_create reuses. */
+async function renderCronSection(content, stale = () => false) {
+  const c = card(t("nav.cron"), t("cron.desc"));
+  content.appendChild(c);
+  let jobs = [];
+  try {
+    const res = await rpc("cron.status", {});
+    jobs = res?.jobs ?? [];
+  } catch (err) {
+    const note = document.createElement("div");
+    note.className = "note";
+    note.textContent = t("cron.failed", err.message);
+    c.appendChild(note);
+    return;
+  }
+  if (stale()) return;
+  if (jobs.length === 0) {
+    const note = document.createElement("div");
+    note.className = "note";
+    note.textContent = t("cron.empty");
+    c.appendChild(note);
+    return;
+  }
+  for (const j of jobs) {
+    const name = j.name ?? (j.prompt ?? "").slice(0, 24);
+    const every = j.everyMinutes ?? j.every_minutes ?? 0;
+    const enabled = j.enabled !== false;
+    const row = document.createElement("div");
+    row.className = "cron-row";
+    const label = document.createElement("div");
+    label.className = "cron-label";
+    label.innerHTML =
+      `<span class="cron-name">${esc(name)}</span>` +
+      `<span class="cron-meta">${esc(every <= 0 ? t("cron.once") : t("cron.every", String(every)))}</span>` +
+      `<span class="cron-role">${esc(enabled ? t("cron.enabled") : t("cron.paused"))}</span>`;
+    const actions = document.createElement("div");
+    actions.className = "cron-actions";
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "btn";
+    toggle.textContent = enabled ? t("cron.pause") : t("cron.resume");
+    toggle.addEventListener("click", async () => {
+      toggle.disabled = true;
+      try {
+        await rpc("cron.setEnabled", { name, enabled: !enabled });
+        renderSettingsSection("cron");
+      } catch (err) {
+        toast(t("cron.failed", err.message), "err");
+        toggle.disabled = false;
+      }
+    });
+    const run = document.createElement("button");
+    run.type = "button";
+    run.className = "btn";
+    run.textContent = t("cron.run");
+    run.addEventListener("click", async () => {
+      run.disabled = true;
+      try {
+        await rpc("cron.run", { name });
+        toast(t("cron.ran", name), "ok");
+      } catch (err) {
+        toast(t("cron.failed", err.message), "err");
+      } finally {
+        run.disabled = false;
+      }
+    });
+    actions.append(toggle, run);
+    row.append(label, actions);
+    c.appendChild(row);
+  }
+}
+
 async function renderTemplatesSection(content, stale = () => false) {
   const put = (node) => { if (!stale()) content.appendChild(node); };
   let templates = [];

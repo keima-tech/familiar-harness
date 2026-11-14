@@ -965,6 +965,16 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
 - 設定テンプレートと `docs/spec/05-config.md` を更新。smoke に
   「cwd 内は承認なし / cwd 外はヘッドレスで拒否 / --yolo で許可」を追加。
 
+### 2. exec タイムアウトでプロセスツリーを停止
+
+- 新規 `exec/kill.ts` の `killProcessTree(pid, signal)`。POSIX は `ps -eo pid=,ppid=`
+  で子孫を列挙して葉から停止(macOS 含む)、Windows は `taskkill /T /F`。
+  プロセスグループ(`detached`)を使わないので Ctrl+C/SIGINT の挙動は不変。
+- `local.ts` の `runSpawn` と `ssh.ts` の 2 箇所を、`SIGTERM`(3s 後 `SIGKILL`)で
+  ツリー停止 → `close` で確定する方式に変更(`bash -c "sleep 1000 & wait"` の
+  孫プロセスが孤児化しなくなる)。タイムアウト時は強制 `exitCode = -1`。
+- smoke に「背景の孫プロセスがタイムアウトで停止し、マーカーを書かない」を追加。
+
 ## v0.1.0 の実装メモ 60(2026-11-15、全体再精査で見つけた不具合の修正)
 
 `packages/core` / `packages/server` / `packages/cli` / Web UI を横断で再精査し、

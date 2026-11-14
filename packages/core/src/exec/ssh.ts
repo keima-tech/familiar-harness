@@ -4,6 +4,7 @@ import os from "node:os";
 import nodePath, { type PlatformPath } from "node:path";
 import type { SessionRemote } from "@familiar/protocol";
 import { resolveExecutable } from "./resolve.js";
+import { killProcessTree } from "./kill.js";
 import { sshAuthArgs, sshAuthEnv, hasSshSecret } from "./ssh-auth.js";
 import {
   OutputCollector,
@@ -197,20 +198,25 @@ export class SshBackend implements ExecBackend {
       let stdoutLen = 0;
       let stderr = "";
       let settled = false;
+      let timedOut = false;
+      let killTimer: NodeJS.Timeout | undefined;
       const timeoutMs = opts.timeoutMs ?? HELPER_TIMEOUT_MS;
       const finalize = (exitCode: number) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        resolve({ exitCode, stdout: Buffer.concat(stdout), stderr });
+        if (killTimer) clearTimeout(killTimer);
+        resolve({ exitCode: timedOut ? -1 : exitCode, stdout: Buffer.concat(stdout), stderr });
       };
       const timer = setTimeout(() => {
-        try {
-          child.kill("SIGTERM");
-        } catch {
-          /* already gone */
-        }
-        finalize(-1);
+        timedOut = true;
+        // kill the client tree, then let 'close' settle with the final output
+        killProcessTree(child.pid, "SIGTERM");
+        killTimer = setTimeout(() => {
+          killProcessTree(child.pid, "SIGKILL");
+          finalize(-1);
+        }, 3000);
+        killTimer.unref?.();
       }, timeoutMs);
       child.stdout.on("data", (chunk: Buffer) => {
         if (stdoutLen < STDOUT_CAP) {
@@ -268,15 +274,18 @@ export class SshBackend implements ExecBackend {
       const out = new OutputCollector();
       let stderrText = "";
       let settled = false;
+      let timedOut = false;
+      let killTimer: NodeJS.Timeout | undefined;
       const timeoutMs = opts.timeoutMs ?? 30_000;
-      const finalize = (exitCode: number, timedOut: boolean) => {
+      const finalize = (exitCode: number) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        if (exitCode !== -1) noteSshOutcome(this.target, exitCode, stderrText);
+        if (killTimer) clearTimeout(killTimer);
+        if (!timedOut && exitCode !== -1) noteSshOutcome(this.target, exitCode, stderrText);
         const text = out.text();
         resolve({
-          exitCode,
+          exitCode: timedOut ? -1 : exitCode,
           output:
             (timedOut ? `${text}\n[familiar: command timed out after ${timeoutMs}ms]` : text).trimEnd() ||
             "(no output)",
@@ -284,12 +293,13 @@ export class SshBackend implements ExecBackend {
         });
       };
       const timer = setTimeout(() => {
-        try {
-          child.kill("SIGTERM");
-        } catch {
-          /* already gone */
-        }
-        finalize(-1, true);
+        timedOut = true;
+        killProcessTree(child.pid, "SIGTERM");
+        killTimer = setTimeout(() => {
+          killProcessTree(child.pid, "SIGKILL");
+          finalize(-1);
+        }, 3000);
+        killTimer.unref?.();
       }, timeoutMs);
       child.stdout.on("data", (chunk: Buffer) => out.append(chunk));
       child.stderr.on("data", (chunk: Buffer) => {
@@ -298,9 +308,9 @@ export class SshBackend implements ExecBackend {
       });
       child.on("error", (err) => {
         out.append(Buffer.from(`failed to spawn ${sshBin()}: ${err.message}`));
-        finalize(-1, false);
+        finalize(-1);
       });
-      child.on("close", (code) => finalize(code ?? -1, false));
+      child.on("close", (code) => finalize(code ?? -1));
       if (opts.input !== undefined) {
         try {
           child.stdin.end(opts.input);

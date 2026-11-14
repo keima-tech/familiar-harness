@@ -3,6 +3,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import nodePath, { type PlatformPath } from "node:path";
+import { killProcessTree } from "./kill.js";
 import {
   OutputCollector,
   SKIP_DIR_NAMES,
@@ -176,40 +177,42 @@ export function runSpawn(file: string, args: string[], opts: ExecOptions): Promi
 
     const timeoutMs = opts.timeoutMs ?? 30_000;
     let settled = false;
-    const finalize = (exitCode: number, timedOut: boolean) => {
+    let timedOut = false;
+    let killTimer: NodeJS.Timeout | undefined;
+    const finalize = (code: number | null) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
       const text = out.text();
       resolve({
-        exitCode,
+        exitCode: timedOut ? -1 : (code ?? -1),
         output: (timedOut ? `${text}\n[familiar: command timed out after ${timeoutMs}ms]` : text).trimEnd() || "(no output)",
         timedOut,
       });
     };
 
     const timer = setTimeout(() => {
-      try {
-        child.kill("SIGTERM");
-        setTimeout(() => {
-          try {
-            child.kill("SIGKILL");
-          } catch {
-            /* already dead */
-          }
-        }, 3000);
-      } catch {
-        /* already dead */
-      }
-      finalize(-1, true);
+      timedOut = true;
+      // Kill the whole tree (backgrounded grandchildren included), not just the
+      // direct child; 'close' then settles with the final output. Escalate to
+      // SIGKILL and force-settle if the process ignores SIGTERM.
+      killProcessTree(child.pid, "SIGTERM");
+      killTimer = setTimeout(() => {
+        killProcessTree(child.pid, "SIGKILL");
+        finalize(-1);
+      }, 3000);
+      killTimer.unref?.();
     }, timeoutMs);
 
     child.on("error", (err) => {
+      if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
       resolve({ exitCode: -1, output: `failed to spawn ${file}: ${err.message}`, timedOut: false });
     });
-    child.on("close", (code) => finalize(code ?? -1, false));
+    child.on("close", (code) => finalize(code));
 
     if (opts.input !== undefined && child.stdin) {
       try {

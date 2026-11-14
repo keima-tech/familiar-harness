@@ -1847,6 +1847,28 @@ console.log("— scenario V: office templates —");
   assert(resolveOfficeTemplate(home, undefined, "docx") === undefined, "deleting a template removes it", "");
 }
 
+// ---------------------------------------------------------------------------
+// Scenario: exec timeout kills the whole process tree (grandchildren included)
+// ---------------------------------------------------------------------------
+console.log("— scenario: exec process-tree kill on timeout —");
+if (process.platform !== "win32") {
+  const { runSpawn } = await import(
+    path.join(repoRoot, "packages", "core", "dist", "exec", "local.js")
+  );
+  const marker = path.join(tmpBase, "grandchild-survived.txt");
+  const res = await runSpawn("bash", ["-c", `( sleep 4; echo alive > '${marker}' ) & sleep 30`], {
+    cwd: project,
+    timeoutMs: 800,
+  });
+  assert(res.timedOut === true, "runSpawn reports the timeout", JSON.stringify(res).slice(0, 200));
+  await new Promise((r) => setTimeout(r, 5000));
+  assert(
+    !fs.existsSync(marker),
+    "the backgrounded grandchild was killed with the tree (no orphan)",
+    fs.existsSync(marker) ? "grandchild survived" : "",
+  );
+}
+
 console.log(
   failures === 0 ? "\nsmoke: all checks passed" : `\nsmoke: ${failures} failure(s)`,
 );

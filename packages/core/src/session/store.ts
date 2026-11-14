@@ -7,6 +7,7 @@ import type {
   ToolCall,
 } from "@familiar/protocol";
 import { repairToolArguments } from "../providers/tool-args.js";
+import type { FileChange } from "../tools/registry.js";
 import { ensureDir } from "../paths.js";
 
 /**
@@ -59,6 +60,19 @@ export interface SessionStore {
     },
   ): SessionRecord | null;
   deleteSession(id: string): boolean;
+  /**
+   * Persist reversible file mutations (write/edit) for one turn so `/undo`
+   * can restore the previous state.
+   */
+  recordFileEdits(sessionId: string, turnId: string, changes: FileChange[]): void;
+  /**
+   * The most recent turn that still has recorded edits, newest edit first so
+   * repeated edits to one file revert in the right order. Null when nothing is
+   * left to undo.
+   */
+  peekUndoTurn(sessionId: string): { turnId: string; changes: FileChange[] } | null;
+  /** Forget a turn's edits once they have been applied (or abandoned). */
+  dropTurnFileEdits(sessionId: string, turnId: string): number;
   close(): void;
 }
 
@@ -89,6 +103,17 @@ CREATE TABLE IF NOT EXISTS messages (
   UNIQUE(session_id, seq)
 );
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq);
+CREATE TABLE IF NOT EXISTS file_edits (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  turn_id TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  path TEXT NOT NULL,
+  before TEXT,
+  after TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_file_edits_session ON file_edits(session_id, seq);
 `;
 
 interface SessionRow {
@@ -232,7 +257,51 @@ export class SqliteSessionStore implements SessionStore {
   deleteSession(id: string): boolean {
     const res = this.db.prepare(`DELETE FROM sessions WHERE id = ?`).run(id);
     this.db.prepare(`DELETE FROM messages WHERE session_id = ?`).run(id);
+    this.db.prepare(`DELETE FROM file_edits WHERE session_id = ?`).run(id);
     return Number(res.changes) > 0;
+  }
+
+  recordFileEdits(sessionId: string, turnId: string, changes: FileChange[]): void {
+    if (changes.length === 0) return;
+    const now = Date.now();
+    const insert = this.db.prepare(
+      `INSERT INTO file_edits (id, session_id, turn_id, seq, path, before, after, created_at)
+       VALUES (?, ?, ?, COALESCE((SELECT MAX(seq) + 1 FROM file_edits WHERE session_id = ?), 0), ?, ?, ?, ?)`,
+    );
+    this.db.exec("BEGIN");
+    try {
+      for (const c of changes) {
+        insert.run(crypto.randomUUID(), sessionId, turnId, sessionId, c.path, c.before, c.after, now);
+      }
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
+  peekUndoTurn(sessionId: string): { turnId: string; changes: FileChange[] } | null {
+    const last = this.db
+      .prepare(`SELECT turn_id FROM file_edits WHERE session_id = ? ORDER BY seq DESC LIMIT 1`)
+      .get(sessionId) as { turn_id: string } | undefined;
+    if (!last) return null;
+    const rows = this.db
+      .prepare(
+        `SELECT path, before, after FROM file_edits
+         WHERE session_id = ? AND turn_id = ? ORDER BY seq DESC`,
+      )
+      .all(sessionId, last.turn_id) as { path: string; before: string | null; after: string | null }[];
+    return {
+      turnId: last.turn_id,
+      changes: rows.map((r) => ({ path: r.path, before: r.before, after: r.after })),
+    };
+  }
+
+  dropTurnFileEdits(sessionId: string, turnId: string): number {
+    const res = this.db
+      .prepare(`DELETE FROM file_edits WHERE session_id = ? AND turn_id = ?`)
+      .run(sessionId, turnId);
+    return Number(res.changes ?? 0);
   }
 
   appendMessage(sessionId: string, msg: ChatMessage): void {

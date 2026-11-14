@@ -586,6 +586,8 @@ export class AgentServer {
         return this.steer(params);
       case "session.compact":
         return this.compact(params, ctx);
+      case "session.undo":
+        return this.undo(params);
       case "session.abort":
         return this.abortTurn(params);
       case "permission.respond": {
@@ -1990,6 +1992,47 @@ export class AgentServer {
     return this.runner.compactSession(id, {
       onEvent: (event) => ctx.onEvent?.(id, event),
     });
+  }
+
+  /**
+   * `/undo`: restore the files the most recent turn's write/edit tools changed.
+   * The turn's recorded edits are applied in reverse (newest first) on the
+   * session's own backend, then forgotten so the next `/undo` steps further
+   * back. Refused while a turn is running (it may be mid-edit).
+   */
+  private async undo(
+    params: Record<string, unknown>,
+  ): Promise<{ undone: boolean; turnId?: string; paths: string[]; failed: string[] }> {
+    const id = str(params, "id");
+    if (!id) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "session id is required");
+    this.requireSession(id);
+    if (this.activeTurns.has(id)) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, "a turn is running — stop it before undoing");
+    }
+    const turn = this.store.peekUndoTurn(id);
+    if (!turn) return { undone: false, paths: [], failed: [] };
+    const backend = this.backendFor({ session: id });
+    const paths: string[] = [];
+    const failed: string[] = [];
+    for (const change of turn.changes) {
+      try {
+        if (change.before === null) {
+          // the file was created by that turn → remove it
+          try {
+            await backend.remove(change.path);
+          } catch {
+            /* already gone */
+          }
+        } else {
+          await backend.writeFile(change.path, change.before);
+        }
+        paths.push(change.path);
+      } catch {
+        failed.push(change.path);
+      }
+    }
+    this.store.dropTurnFileEdits(id, turn.turnId);
+    return { undone: true, turnId: turn.turnId, paths, failed };
   }
 
   /** Drain the steering messages queued for a running session. */

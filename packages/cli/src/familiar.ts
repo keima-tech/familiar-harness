@@ -508,6 +508,7 @@ async function cmdChat(flags: Record<string, string | boolean>): Promise<void> {
               "  /plan [off]         toggle plan mode\n" +
               "  /retry              resend the previous message\n" +
               "  /compact            summarize and shrink the context now\n" +
+              "  /undo               revert the last turn's file changes\n" +
               "  /export [file]      dump the transcript as markdown\n" +
               "  /clear              clear the screen\n" +
               "  /exit               quit\n" +
@@ -554,6 +555,26 @@ async function cmdChat(flags: Record<string, string | boolean>): Promise<void> {
                 : "nothing to compact\n",
             ),
           );
+        }
+      } else if (line === "/undo") {
+        if (!session) {
+          process.stderr.write(red("no session yet\n"));
+        } else {
+          const res = (await transport.dispatch("session.undo", { id: session.id })) as {
+            undone: boolean;
+            paths: string[];
+            failed: string[];
+          };
+          if (!res.undone) process.stdout.write(dim("nothing to undo\n"));
+          else {
+            process.stdout.write(
+              dim(
+                `reverted ${res.paths.length} file(s)` +
+                  (res.failed.length > 0 ? ` (${res.failed.length} failed)` : "") +
+                  "\n",
+              ),
+            );
+          }
         }
       } else if (line.startsWith("/cwd")) {
         const value = line.slice("/cwd".length).trim();
@@ -880,6 +901,7 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
           "  /plan [off]     toggle plan mode",
           "  /retry          resend the previous message",
           "  /compact        summarize and shrink the context now",
+          "  /undo           revert the last turn's file changes",
           "  /export <file>  dump the transcript as markdown",
           "  /clear          clear the transcript",
           "  /exit           quit",
@@ -934,6 +956,23 @@ async function cmdTui(flags: Record<string, string | boolean>): Promise<void> {
         res.compacted
           ? `compacted: dropped ${res.dropped} message(s), kept ${res.kept}`
           : "nothing to compact",
+      );
+      return;
+    }
+    if (line === "/undo") {
+      if (!session) {
+        die("no session yet");
+        return;
+      }
+      const res = (await transport.dispatch("session.undo", { id: session.id })) as {
+        undone: boolean;
+        paths: string[];
+        failed: string[];
+      };
+      tui.setInfo(
+        res.undone
+          ? `reverted ${res.paths.length} file(s)` + (res.failed.length > 0 ? ` (${res.failed.length} failed)` : "")
+          : "nothing to undo",
       );
       return;
     }

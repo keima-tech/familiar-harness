@@ -2,7 +2,7 @@ import type { PlatformPath } from "node:path";
 import path from "node:path";
 import { unifiedDiff } from "./diff.js";
 import type { Tool } from "./registry.js";
-import type { ToolContext, ToolOutput } from "./registry.js";
+import type { FileChange, ToolContext, ToolOutput } from "./registry.js";
 
 const READ_SIZE_CAP = 256 * 1024;
 const READ_TRANSFER_CAP = 8 * 1024 * 1024;
@@ -151,6 +151,24 @@ function pathApprovalSummary(absolute: string): string {
   return `write file: ${absolute}`;
 }
 
+/** Undo snapshots are text-only and capped; bigger files are not reversible. */
+const UNDO_MAX_BYTES = 512 * 1024;
+
+/**
+ * Wrap a file mutation as a single-element `fileChanges` payload for `/undo`.
+ * Returns `{}` (nothing recorded) when either side exceeds the snapshot cap,
+ * so an oversized write is simply not undoable rather than silently wrong.
+ */
+function reversibleChange(
+  path: string,
+  before: string | null,
+  after: string | null,
+): { fileChanges?: FileChange[] } {
+  const size = (s: string | null): number => (s === null ? 0 : Buffer.byteLength(s, "utf8"));
+  if (size(before) > UNDO_MAX_BYTES || size(after) > UNDO_MAX_BYTES) return {};
+  return { fileChanges: [{ path, before, after }] };
+}
+
 /**
  * Approval gate for filesystem writes. Inside cwd nothing asks unless the
  * mode is "ask"; outside cwd the "edit" mode runs freely while "ask" asks.
@@ -227,8 +245,10 @@ export function createWriteTool(): Tool {
       try {
         await ctx.backend.mkdirp(backendPath(ctx).dirname(absolute));
         let before = "";
+        let existed = false;
         try {
           const prev = await ctx.backend.readFile(absolute, 512 * 1024);
+          existed = true;
           if (!isBinary(prev)) before = prev.toString("utf8");
         } catch {
           /* new file */
@@ -239,6 +259,7 @@ export function createWriteTool(): Tool {
           content: `wrote ${absolute} (${Buffer.byteLength(content, "utf8")} bytes)`,
           isError: false,
           ...(diff ? { diff } : {}),
+          ...reversibleChange(absolute, existed ? before : null, content),
         };
       } catch (err) {
         return { content: `cannot write ${absolute}: ${describeErr(err)}`, isError: true };
@@ -317,6 +338,7 @@ export function createEditTool(): Tool {
           content: `edited ${absolute} (${count} replacement${count === 1 ? "" : "s"})`,
           isError: false,
           diff: unifiedDiff(text, updated),
+          ...reversibleChange(absolute, text, updated),
         };
       } catch (err) {
         return { content: `cannot edit ${absolute}: ${describeErr(err)}`, isError: true };

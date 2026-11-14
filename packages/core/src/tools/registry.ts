@@ -37,6 +37,20 @@ export interface ToolOutput {
   isError?: boolean;
   /** Optional unified-diff text (edit/write) shown as a colored block in the GUI. */
   diff?: string;
+  /**
+   * Reversible file mutations this call performed (write/edit). The turn loop
+   * collects them so `/undo` can restore the previous state. `before === null`
+   * means the file was created; `after === null` means it was removed. Large
+   * files are not recorded (undo is unavailable for them).
+   */
+  fileChanges?: FileChange[];
+}
+
+/** One reversible file mutation recorded by a tool for `/undo`. */
+export interface FileChange {
+  path: string;
+  before: string | null;
+  after: string | null;
 }
 
 export interface Tool {

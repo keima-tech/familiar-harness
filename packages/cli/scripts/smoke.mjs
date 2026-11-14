@@ -809,6 +809,41 @@ console.log("— scenario I: web ui transport —");
     JSON.stringify(yoloSend.result ?? yoloSend.error ?? {}).slice(0, 160),
   );
 
+  // /undo: session.undo reverts the previous turn's write/edit file changes
+  const undoSession = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 8, method: "session.create", params: {} }),
+  }).then((r) => r.json());
+  const undoFile = path.join(project, "undo-me.txt");
+  if (fs.existsSync(undoFile)) fs.rmSync(undoFile);
+  await fetch(`http://127.0.0.1:${PORT}/rpc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 9,
+      method: "session.send",
+      params: { id: undoSession.result.id, text: `@write ${undoFile}`, permissionMode: "yolo" },
+    }),
+  }).then((r) => r.json());
+  assert(fs.existsSync(undoFile), "undo: the write tool created the file", undoFile);
+  const undoRes = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 10,
+      method: "session.undo",
+      params: { id: undoSession.result.id },
+    }),
+  }).then((r) => r.json());
+  assert(
+    undoRes.result?.undone === true && !fs.existsSync(undoFile),
+    "session.undo reverts the previous turn's writes",
+    JSON.stringify(undoRes.result ?? undoRes.error ?? {}).slice(0, 200),
+  );
+
   // steering: a message sent while a turn runs joins it at the next step
   const post = (id, method, params) =>
     fetch(`http://127.0.0.1:${PORT}/rpc`, {

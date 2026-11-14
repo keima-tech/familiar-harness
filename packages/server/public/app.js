@@ -597,11 +597,17 @@ const STR = {
     "cmd.export": "Markdown で出力",
     "cmd.retry": "直前のターンを再実行",
     "cmd.compact": "コンテキストを圧縮",
+    "cmd.undo": "直前の変更を取り消し",
     "compact.noSession": "セッションがありません",
     "compact.busy": "実行中のため圧縮できません（停止してから行ってください）",
     "compact.done": "コンテキストを圧縮しました（{0} 件削除 / {1} 件保持）",
     "compact.nothing": "圧縮するものがありません",
     "compact.failed": "圧縮できませんでした: {0}",
+    "undo.noSession": "セッションがありません",
+    "undo.busy": "実行中のため取り消せません（停止してから行ってください）",
+    "undo.done": "直前のターンの変更を取り消しました（{0} 件のファイル）",
+    "undo.nothing": "取り消す変更がありません",
+    "undo.failed": "取り消せませんでした: {0}",
     "cmd.settings": "設定を開く",
     "cmd.search": "トランスクリプト内検索",
     "top.todo": "タスク (todo)",
@@ -1137,11 +1143,17 @@ const STR = {
     "cmd.export": "export as markdown",
     "cmd.retry": "retry the last turn",
     "cmd.compact": "compact the context",
+    "cmd.undo": "revert the last turn's changes",
     "compact.noSession": "no session",
     "compact.busy": "a turn is running — stop it before compacting",
     "compact.done": "compacted the context ({0} dropped / {1} kept)",
     "compact.nothing": "nothing to compact",
     "compact.failed": "compaction failed: {0}",
+    "undo.noSession": "no session",
+    "undo.busy": "a turn is running — stop it before undoing",
+    "undo.done": "reverted the last turn's changes ({0} file(s))",
+    "undo.nothing": "nothing to undo",
+    "undo.failed": "undo failed: {0}",
     "cmd.settings": "open settings",
     "cmd.search": "search the transcript",
     "top.todo": "tasks (todo)",
@@ -2529,6 +2541,7 @@ const COMMANDS = [
   { cmd: "/export", key: "cmd.export", run: () => void exportMarkdown() },
   { cmd: "/retry", key: "cmd.retry", run: () => retryLastTurn() },
   { cmd: "/compact", key: "cmd.compact", run: () => void compactContext() },
+  { cmd: "/undo", key: "cmd.undo", run: () => void undoLastTurn() },
   { cmd: "/settings", key: "cmd.settings", run: () => openSettingsModal() },
   { cmd: "/search", key: "cmd.search", run: () => toggleSearch() },
 ];
@@ -7014,6 +7027,30 @@ async function compactContext() {
     }
   } catch (err) {
     toast(t("compact.failed", err.message), "err");
+  }
+}
+
+/** Revert the files the previous turn's write/edit tools changed. */
+async function undoLastTurn() {
+  if (!state.sessionId) {
+    toast(t("undo.noSession"), "err");
+    return;
+  }
+  if (state.busy) {
+    toast(t("undo.busy"), "info");
+    return;
+  }
+  try {
+    const res = await rpc("session.undo", { id: state.sessionId });
+    if (res?.undone) {
+      toast(t("undo.done", String((res.paths ?? []).length)), "ok");
+      if ((res.failed ?? []).length > 0) toast(t("undo.failed", String(res.failed.length)), "err");
+      await openSession(state.sessionId); // refresh any open file previews
+    } else {
+      toast(t("undo.nothing"), "info");
+    }
+  } catch (err) {
+    toast(t("undo.failed", err.message), "err");
   }
 }
 

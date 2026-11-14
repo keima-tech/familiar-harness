@@ -22,7 +22,7 @@ import {
 } from "../tools/index.js";
 import { createBackend } from "../exec/index.js";
 import { DenyApprovalAdapter, type ApprovalAdapter, type PermissionMode } from "../tools/permissions.js";
-import type { ToolOutput } from "../tools/registry.js";
+import type { FileChange, ToolOutput } from "../tools/registry.js";
 import { buildSystemPrompt, todoSection } from "./prompts.js";
 import type { SelfImproveContext } from "../selfimprove/context.js";
 import { memorySection, skillsSection } from "../selfimprove/memory/inject.js";
@@ -164,6 +164,8 @@ export class AgentRunner {
     const yolo = (opts.yolo ?? false) || opts.permissionMode === "yolo";
 
     const turnId = crypto.randomUUID();
+    /** reversible file mutations from this turn's tools, for `/undo` */
+    const fileChanges: FileChange[] = [];
     const usage: Usage = {};
     /** prompt tokens reported by the LAST step — the real context size */
     let lastStepPromptTokens = 0;
@@ -466,6 +468,9 @@ export class AgentRunner {
           const output = await this.executeToolCall(call, toolCtx, plan, effectiveTools);
           const durationMs = Date.now() - startedAt;
           const isError = output.isError === true;
+          if (!isError && output.fileChanges && output.fileChanges.length > 0) {
+            fileChanges.push(...output.fileChanges);
+          }
           const diff = output.diff && output.diff !== "" ? output.diff : undefined;
           await this.hooks?.run("post_tool_use", {
             event: "post_tool_use",
@@ -562,6 +567,16 @@ export class AgentRunner {
       }
       // Rethrow so the client (CLI/server) can exit non-zero.
       throw err;
+    } finally {
+      // Record reversible file mutations (write/edit) so `/undo` can restore
+      // this turn's state — even if it aborted or errored mid-way.
+      if (fileChanges.length > 0) {
+        try {
+          this.store.recordFileEdits(session.id, turnId, fileChanges);
+        } catch {
+          /* undo bookkeeping is best-effort — never fail the turn over it */
+        }
+      }
     }
   }
 

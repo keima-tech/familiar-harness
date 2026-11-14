@@ -975,6 +975,19 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   孫プロセスが孤児化しなくなる)。タイムアウト時は強制 `exitCode = -1`。
 - smoke に「背景の孫プロセスがタイムアウトで停止し、マーカーを書かない」を追加。
 
+### 3. `/undo`(直前ターンのファイル変更を取り消し)
+
+- `ToolOutput.fileChanges` を追加し、`write`/`edit` が変更前後のテキストを返す
+  (512KB 超は記録せず undo 不可)。ループがターン内の変更を集約し、`finally` で
+  `store.recordFileEdits` に保存(abort/error でも記録)。
+- store に `file_edits` テーブルと `recordFileEdits`/`peekUndoTurn`/`dropTurnFileEdits`。
+  新しい RPC `session.undo` は実行中ターンを拒否し、最新ターンの変更を**逆順**で
+  セッションバックエンドに適用(before=null は削除、それ以外は書き戻し)してから記録を破棄
+  = 連続 `/undo` で 1 ターンずつ遡れる。
+- CLI(REPL/TUI/パレット)と Web UI の作曲欄コマンドに `/undo` を追加。smoke に
+  「write で作成 → session.undo で削除」を追加。office_create などバイナリ生成は
+  対象外(テキスト変更のみ)。
+
 ## v0.1.0 の実装メモ 60(2026-11-15、全体再精査で見つけた不具合の修正)
 
 `packages/core` / `packages/server` / `packages/cli` / Web UI を横断で再精査し、

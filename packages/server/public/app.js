@@ -615,6 +615,9 @@ const STR = {
     "cmd.settings": "設定を開く",
     "cmd.search": "トランスクリプト内検索",
     "cmd.find": "全セッションを検索",
+    "cmd.import": "トランスクリプトを取り込み",
+    "import.done": "取り込みました（{0} 件のメッセージ）",
+    "import.failed": "取り込めませんでした: {0}",
     "find.title": "全セッション検索",
     "find.placeholder": "検索語を入力…",
     "find.none": "一致するメッセージがありません",
@@ -1171,6 +1174,9 @@ const STR = {
     "cmd.settings": "open settings",
     "cmd.search": "search the transcript",
     "cmd.find": "search all sessions",
+    "cmd.import": "import a transcript",
+    "import.done": "imported {0} message(s)",
+    "import.failed": "import failed: {0}",
     "find.title": "Search all sessions",
     "find.placeholder": "type to search…",
     "find.none": "no matching messages",
@@ -2565,6 +2571,7 @@ const COMMANDS = [
   { cmd: "/settings", key: "cmd.settings", run: () => openSettingsModal() },
   { cmd: "/search", key: "cmd.search", run: () => toggleSearch() },
   { cmd: "/find", key: "cmd.find", run: () => openFindPanel() },
+  { cmd: "/import", key: "cmd.import", run: () => importTranscript() },
 ];
 
 /** The trailing "@" token of the composer value, or null when absent. */
@@ -7063,6 +7070,26 @@ async function compactContext() {
   } catch (err) {
     toast(t("compact.failed", err.message), "err");
   }
+}
+
+/** Import a JSON transcript (from /export --format json) as a new session. */
+function importTranscript() {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".json,application/json";
+  input.addEventListener("change", async () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    try {
+      const content = await file.text();
+      const res = await rpc("session.import", { content });
+      toast(t("import.done", String(res?.imported ?? 0)), "ok");
+      if (res?.session?.id) await openSession(res.session.id);
+    } catch (err) {
+      toast(t("import.failed", err.message), "err");
+    }
+  });
+  input.click();
 }
 
 /** Cross-session full-text search overlay (/)find. */

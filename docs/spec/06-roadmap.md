@@ -1006,6 +1006,16 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   (CLI は行表示、TUI/GUI は通知)。`enforce: true` なら上限超過後の `session.send` を拒否。
 - smoke に「最初のターンは通り budget.warning が出る / enforce で次のターンが拒否」を追加。
 
+### 6. トランスクリプトのエクスポート/インポート
+
+- RPC `session.export {id,format:"markdown"|"json"}`(JSON は lossless、ephemeral 除外)と
+  `session.import {content,cwd?,title?}`(JSON から新セッションを作成、provider/model/cwd は
+  妥当化してフォールバック、メッセージは新しい id を採番)。
+- CLI `familiar export <id> [--out FILE] [--format md|json]` / `familiar import <file.json>`
+  (既存の REPL `/export` と GUI の Markdown 出力はそのまま)。
+- Web UI に `/import`(JSON ファイル選択→取り込んで新セッションを開く)。smoke に
+  JSON export→import の往復を追加。
+
 ## v0.1.0 の実装メモ 60(2026-11-15、全体再精査で見つけた不具合の修正)
 
 `packages/core` / `packages/server` / `packages/cli` / Web UI を横断で再精査し、

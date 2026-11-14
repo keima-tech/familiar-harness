@@ -596,6 +596,10 @@ export class AgentServer {
         const limit = typeof params["limit"] === "number" ? params["limit"] : undefined;
         return { hits: this.store.searchMessages(query, limit) };
       }
+      case "session.export":
+        return this.exportSession(params);
+      case "session.import":
+        return this.importSession(params);
       case "session.abort":
         return this.abortTurn(params);
       case "permission.respond": {
@@ -2052,6 +2056,107 @@ export class AgentServer {
     }
     this.store.dropTurnFileEdits(id, turn.turnId);
     return { undone: true, turnId: turn.turnId, paths, failed };
+  }
+
+  /** `/export`: the transcript as markdown or a lossless JSON document. */
+  private exportSession(
+    params: Record<string, unknown>,
+  ): { format: "markdown" | "json"; filename: string; content: string } {
+    const id = str(params, "id");
+    if (!id) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "session id is required");
+    const session = this.requireSession(id);
+    const format = str(params, "format") === "json" ? "json" : "markdown";
+    const messages = this.store.getMessages(id).filter(
+      (m) => (m.meta as { ephemeral?: boolean } | undefined)?.ephemeral !== true,
+    );
+    const slug =
+      (session.title || "session")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 40) || "session";
+    const filename = `${slug}-${id.slice(0, 8)}.${format === "json" ? "json" : "md"}`;
+    if (format === "json") {
+      return {
+        format,
+        filename,
+        content: JSON.stringify({ version: 1, session, messages }, null, 2),
+      };
+    }
+    const out: string[] = [
+      `# ${session.title || session.id.slice(0, 8)}`,
+      "",
+      `- provider: ${session.provider}${session.model ? `/${session.model}` : ""}`,
+      `- cwd: ${session.cwd}`,
+      `- created: ${new Date(session.createdAt).toISOString()}`,
+      "",
+    ];
+    for (const m of messages) {
+      if (m.role === "user") out.push("## User", "", m.content ?? "", "");
+      else if (m.role === "assistant") out.push("## Assistant", "", m.content ?? "", "");
+      else out.push(`### ${m.name ?? "tool"}`, "", "```", String(m.content ?? "").slice(0, 4000), "```", "");
+    }
+    return { format, filename, content: out.join("\n") };
+  }
+
+  /** `/import`: build a new session from a JSON transcript (export format). */
+  private importSession(
+    params: Record<string, unknown>,
+  ): { session: SessionRecord; imported: number } {
+    const content = str(params, "content");
+    if (!content) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "content is required");
+    let parsed: {
+      session?: Partial<SessionRecord>;
+      messages?: unknown[];
+    };
+    try {
+      parsed = JSON.parse(content) as typeof parsed;
+    } catch {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, "content must be a JSON transcript");
+    }
+    const messages = Array.isArray(parsed.messages) ? parsed.messages : null;
+    if (!messages) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, "transcript has no messages array");
+    }
+    const src: Partial<SessionRecord> = parsed.session ?? {};
+    const provider =
+      (src.provider && this.cfg.providers[src.provider] ? src.provider : undefined) ??
+      this.cfg.default_provider;
+    const pc = this.cfg.providers[provider];
+    const model =
+      src.model ??
+      pc?.default_model ??
+      this.cfg.default_model ??
+      resolveDefaultModel(pc?.kind ?? "mock");
+    if (!model) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, `"model" is required for provider "${provider}"`);
+    }
+    const session = this.store.createSession({
+      title: str(params, "title") ?? src.title ?? "Imported session",
+      provider,
+      model,
+      ...(src.profile ? { profile: src.profile } : {}),
+      ...(src.effort ? { effort: src.effort } : {}),
+      cwd: str(params, "cwd") ?? src.cwd ?? process.cwd(),
+    });
+    let imported = 0;
+    for (const raw of messages) {
+      const m = raw as Partial<ChatMessage> | null;
+      if (!m || typeof m.role !== "string") continue;
+      const msg: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: m.role,
+        content: String(m.content ?? ""),
+        createdAt: Number.isFinite(m.createdAt) ? Number(m.createdAt) : Date.now(),
+        ...(m.name ? { name: m.name } : {}),
+        ...(m.toolCallId ? { toolCallId: m.toolCallId } : {}),
+        ...(m.toolCalls ? { toolCalls: m.toolCalls } : {}),
+        ...(m.meta ? { meta: m.meta } : {}),
+      };
+      this.store.appendMessage(session.id, msg);
+      imported += 1;
+    }
+    return { session: this.store.getSession(session.id) ?? session, imported };
   }
 
   /** Today's calendar day (UTC) used as the day-budget bucket. */

@@ -55,6 +55,8 @@ Usage:
   familiar token [--write] [--clear]   # M2 bearer token for familiar serve
   familiar sessions list | show <id> [--messages] | delete <id>
   familiar search <query>            # full-text search across all sessions
+  familiar export <id> [--out FILE] [--format md|json]
+  familiar import <file.json> [--cwd DIR]
   familiar model list [provider]
   familiar memory [list] | pending | approve <id> | reject <id> | approval on|off
   familiar skills [list] | view <name> | pending | approve <id|all> | reject <id>
@@ -1438,6 +1440,44 @@ async function cmdServe(flags: Record<string, string | boolean>): Promise<void> 
   process.on("SIGTERM", shutdown);
 }
 
+async function cmdExport(flags: Record<string, string | boolean>, positionals: string[]): Promise<void> {
+  const id = positionals[0];
+  if (!id) fail("usage: familiar export <session-id> [--out FILE] [--format md|json]");
+  const server = new AgentServer({ config: loadCliConfig(flags) });
+  const full = resolveSessionPrefix(server, id);
+  if (!full) fail(`session not found: ${id}`);
+  const res = (await server.dispatch("session.export", {
+    id: full,
+    format: flag(flags, "format") === "json" ? "json" : "markdown",
+  })) as { filename: string; content: string };
+  const out = flag(flags, "out");
+  if (typeof out === "string" && out) {
+    await fs.promises.writeFile(out, res.content, "utf8");
+    process.stdout.write(dim(`wrote ${out} (${res.content.length} bytes)\n`));
+  } else {
+    process.stdout.write(`${res.content}\n`);
+  }
+}
+
+async function cmdImport(flags: Record<string, string | boolean>, positionals: string[]): Promise<void> {
+  const file = positionals[0];
+  if (!file) fail("usage: familiar import <file.json> [--cwd DIR]");
+  let content: string;
+  try {
+    content = await fs.promises.readFile(file, "utf8");
+  } catch (err) {
+    fail(`cannot read ${file}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  const server = new AgentServer({ config: loadCliConfig(flags) });
+  const res = (await server.dispatch("session.import", {
+    content,
+    cwd: resolveCwd(flags),
+  })) as { session: { id: string; title: string }; imported: number };
+  process.stdout.write(
+    `${dim("imported")} ${res.imported} message(s) → ${cyan(res.session.id.slice(0, 8))} (${res.session.title})\n`,
+  );
+}
+
 async function cmdSearch(flags: Record<string, string | boolean>, positionals: string[]): Promise<void> {
   const query = positionals.join(" ").trim();
   if (!query) fail("usage: familiar search <query>");
@@ -2169,6 +2209,12 @@ async function main(): Promise<void> {
         break;
       case "search":
         await cmdSearch(flags, rest);
+        break;
+      case "export":
+        await cmdExport(flags, rest);
+        break;
+      case "import":
+        await cmdImport(flags, rest);
         break;
       case "model":
         await cmdModel(flags, rest);

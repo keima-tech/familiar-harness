@@ -866,6 +866,28 @@ console.log("— scenario I: web ui transport —");
     JSON.stringify(shortRes.result ?? shortRes.error ?? {}).slice(0, 200),
   );
 
+  // export / import round-trip (JSON transcript)
+  const exp = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 13, method: "session.export", params: { id: undoSession.result.id, format: "json" } }),
+  }).then((r) => r.json());
+  assert(
+    typeof exp.result?.content === "string" && exp.result.content.includes('"messages"'),
+    "session.export returns a JSON transcript",
+    JSON.stringify(exp.result ?? exp.error ?? {}).slice(0, 160),
+  );
+  const imp = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 14, method: "session.import", params: { content: exp.result.content } }),
+  }).then((r) => r.json());
+  assert(
+    imp.result?.imported > 0 && typeof imp.result.session?.id === "string",
+    "session.import recreates the session",
+    JSON.stringify(imp.result ?? imp.error ?? {}).slice(0, 200),
+  );
+
   // steering: a message sent while a turn runs joins it at the next step
   const post = (id, method, params) =>
     fetch(`http://127.0.0.1:${PORT}/rpc`, {

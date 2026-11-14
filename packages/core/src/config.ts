@@ -166,7 +166,19 @@ export interface LspConfig {
 
 export interface PermissionsConfig {
   bash: BashPermissionConfig;
-  files: { bounds: "cwd" | "unrestricted" };
+  files: {
+    /**
+     * "cwd" (default): reads/writes are free inside the session folder and
+     * gated outside it. "unrestricted": legacy — nothing is gated by location.
+     */
+    bounds: "cwd" | "unrestricted";
+    /**
+     * Policy for *reads* that fall outside `bounds` (read/glob/grep):
+     * "ask" (default) prompts, "allow" lets them through, "deny" blocks.
+     * Writes outside the bounds always go through approveWrite.
+     */
+    read: "ask" | "allow" | "deny";
+  };
   webfetch: DomainPermissionConfig;
   websearch: WebSearchConfig;
 }
@@ -346,7 +358,7 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
       ],
       max_timeout_ms: 600_000,
     },
-    files: { bounds: "cwd" },
+    files: { bounds: "cwd", read: "ask" },
     webfetch: {
       allow_domains: [],
       deny_domains: ["localhost", "127.*", "::1", "10.*", "192.168.*", "172.16.*", "172.17.*", "172.18.*", "172.19.*", "172.20.*", "172.21.*", "172.22.*", "172.23.*", "172.24.*", "172.25.*", "172.26.*", "172.27.*", "172.28.*", "172.29.*", "172.30.*", "172.31.*", "169.254.*", "0.0.0.0", "*.local"],
@@ -862,6 +874,14 @@ permissions:
     #      mkfs / dd / redirects on /dev/sd*, /dev/nvme*, ...
     # A list given here replaces the built-in one.
     max_timeout_ms: 600000
+  files:
+    # cwd (default): reads/writes are free inside the session folder.
+    #   Reads OUTSIDE it follow "read" below; writes outside always ask.
+    # unrestricted: legacy — location never gates anything.
+    bounds: cwd
+    # ask (default) | allow | deny : policy for reads (read/glob/grep) that
+    # fall outside the bounds. Keeps ~/.familiar/secrets/*, ~/.ssh/*, ... visible.
+    read: ask
   webfetch:
     allow_domains: []
     # internal addresses are denied by default (SSRF protection)

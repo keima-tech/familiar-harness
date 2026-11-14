@@ -94,7 +94,11 @@ permissions:
       # ここに書いたリストは組み込みと union(追加のみ)。1つ足しても既定の保護は消えない。
     max_timeout_ms: 600000
   files:
-    bounds: cwd            # cwd | unrestricted(write/edit の系団・制限)
+    bounds: cwd            # cwd | unrestricted。cwd はセッションフォルダ内の
+                           # 読み書きを自由、外側をゲートする
+    read: ask              # ask | allow | deny。bounds 外の read/glob/grep の扱い
+                           # (ask=承認、allow=素通し、deny=常時ブロック)。
+                           # 外側への write/edit は従来どおり approveWrite が承認
   webfetch:                # M2
     allow_domains: []      # ワイルドカード可(*)
     deny_domains:          # 既定で内部アドレスを拒否(SSRF 対策)

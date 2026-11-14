@@ -187,6 +187,52 @@ console.log("— scenario B: plan mode enforcement —");
 }
 
 // ---------------------------------------------------------------------------
+// Scenario B2: files.bounds read gate (read/glob/grep outside cwd)
+// ---------------------------------------------------------------------------
+console.log("— scenario B2: files.bounds read gate —");
+{
+  // inside cwd needs no approver
+  const inside = await run(
+    ["run", "-p", "@read planets.txt", "--cwd", project, "--json"],
+    project,
+    familiarHome,
+  );
+  const insideRes = inside.parsed.find((e) => e?.type === "tool.result" && e.name === "read");
+  assert(
+    !!insideRes && insideRes.isError !== true && String(insideRes.content).includes("Earth is the third planet"),
+    "read inside cwd is allowed without an approver",
+    JSON.stringify(insideRes).slice(0, 200),
+  );
+
+  // outside cwd → default read policy "ask" → headless deny-all refuses
+  const outsideFile = path.join(familiarHome, "config.yaml");
+  const outside = await run(
+    ["run", "-p", `@read ${outsideFile}`, "--cwd", project, "--json"],
+    project,
+    familiarHome,
+  );
+  const outRes = outside.parsed.find((e) => e?.type === "tool.result" && e.name === "read");
+  assert(
+    !!outRes && outRes.isError === true && /outside the session folder/.test(String(outRes.content)),
+    "read outside cwd is denied without an approver (bounds=cwd)",
+    JSON.stringify(outRes).slice(0, 200),
+  );
+
+  // --yolo bypasses the gate (Full access)
+  const yoloRead = await run(
+    ["run", "-p", `@read ${outsideFile}`, "--cwd", project, "--json", "--yolo"],
+    project,
+    familiarHome,
+  );
+  const yoloRes = yoloRead.parsed.find((e) => e?.type === "tool.result" && e.name === "read");
+  assert(
+    !!yoloRes && yoloRes.isError !== true && String(yoloRes.content).includes("default_provider"),
+    "--yolo allows reading outside cwd",
+    JSON.stringify(yoloRes).slice(0, 200),
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Scenario C: fallback chain fail-over (mock fails pre-stream → mock2)
 // ---------------------------------------------------------------------------
 console.log("— scenario C: provider fallback —");

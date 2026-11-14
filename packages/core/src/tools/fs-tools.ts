@@ -102,6 +102,13 @@ export function createReadTool(): Tool {
       const argPath = typeof args.path === "string" ? args.path : "";
       if (!argPath) return { content: "argument 'path' is required", isError: true };
       const absolute = resolveInCwd(argPath, ctx);
+      {
+        const approved = await approveRead(ctx, absolute, {
+          tool: "read",
+          summary: `read file outside the session folder: ${absolute}`,
+        });
+        if (!approved) return { content: `[denied: read outside the session folder: ${absolute}]`, isError: true };
+      }
 
       try {
         const buf = await ctx.backend.readFile(absolute, READ_TRANSFER_CAP);
@@ -162,6 +169,32 @@ export async function approveWrite(
   if (mode === "edit") return true;
   const inside = isInside(backendPath(ctx), ctx.cwd, absolute);
   if (inside) return true;
+  return ctx.approval.request(req);
+}
+
+/**
+ * Approval gate for filesystem reads. Inside cwd (or when bounds are
+ * "unrestricted") nothing asks; outside cwd the `permissions.files.read`
+ * policy applies (default "ask"). This is what makes reading e.g.
+ * ~/.familiar/secrets/* or ~/.ssh/* a deliberate, visible action.
+ */
+export async function approveRead(
+  ctx: ToolContext,
+  absolute: string,
+  req: { tool: string; summary: string },
+): Promise<boolean> {
+  const files = ctx.config?.permissions?.files;
+  // no bounds configured (bare tool context) or explicitly unrestricted → free
+  if (!files || files.bounds === "unrestricted") return true;
+  if (ctx.yolo || ctx.permissionMode === "yolo") return true;
+  const p = backendPath(ctx);
+  if (isInside(p, ctx.cwd, absolute)) return true;
+  const policy = files.read ?? "ask";
+  if (policy === "deny") return false; // explicit hard block, not bypassed by "edit"
+  if (policy === "allow") return true;
+  // "edit" mode trusts filesystem work (mirrors approveWrite) — reading a file
+  // is a prerequisite for editing it.
+  if (ctx.permissionMode === "edit") return true;
   return ctx.approval.request(req);
 }
 
@@ -318,6 +351,13 @@ export function createGlobTool(): Tool {
         typeof args.path === "string" && args.path !== ""
           ? resolveInCwd(args.path, ctx)
           : ctx.cwd;
+      {
+        const approved = await approveRead(ctx, rootDir, {
+          tool: "glob",
+          summary: `search outside the session folder: ${rootDir}`,
+        });
+        if (!approved) return { content: `[denied: search outside the session folder: ${rootDir}]`, isError: true };
+      }
 
       const re = globToRegExp(pattern);
       const matched: string[] = [];
@@ -386,6 +426,14 @@ export function createGrepTool(): Tool {
         if (!stat) return { content: `path not found: ${candidate}`, isError: true };
         if (stat.isFile) singleFile = candidate;
         else rootDir = candidate;
+      }
+      {
+        const target = singleFile ?? rootDir;
+        const approved = await approveRead(ctx, target, {
+          tool: "grep",
+          summary: `search outside the session folder: ${target}`,
+        });
+        if (!approved) return { content: `[denied: search outside the session folder: ${target}]`, isError: true };
       }
 
       const flags = args.case_sensitive === false ? "gim" : "gm";

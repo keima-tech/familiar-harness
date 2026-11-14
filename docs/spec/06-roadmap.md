@@ -952,6 +952,19 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
 - **結論**: **Electron シェル(`packages/desktop`)を継続**。サイズは別途
   electron-builder 設定(locale 削減等)で圧縮する。
 
+## v0.1.0 の実装メモ 61(2026-11-15、機能追加バッチ)
+
+レビュー提案の 10 機能を順に実装する(1機能=1コミット、typecheck/smoke/e2e)。
+
+### 1. `permissions.files.bounds` の実効化
+
+- `permissions.files` に `read: ask | allow | deny`(既定 `ask`)を追加。`bounds: cwd`
+  のとき `read`/`glob`/`grep` が cwd 外を対象にすると `approveRead` を通す
+  (cwd 内は無条件、`--yolo`・Full access・`edit` モードは trusted、`deny` は常時ブロック)。
+  これで `~/.familiar/secrets/*` や `~/.ssh/*` の読み取りが可視化される。
+- 設定テンプレートと `docs/spec/05-config.md` を更新。smoke に
+  「cwd 内は承認なし / cwd 外はヘッドレスで拒否 / --yolo で許可」を追加。
+
 ## v0.1.0 の実装メモ 60(2026-11-15、全体再精査で見つけた不具合の修正)
 
 `packages/core` / `packages/server` / `packages/cli` / Web UI を横断で再精査し、

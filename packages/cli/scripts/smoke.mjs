@@ -888,6 +888,20 @@ console.log("— scenario I: web ui transport —");
     JSON.stringify(imp.result ?? imp.error ?? {}).slice(0, 200),
   );
 
+  // permissions: rule tester (allow / ask / deny)
+  const permTest = (id, command) =>
+    fetch(`http://127.0.0.1:${PORT}/rpc`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id, method: "permissions.test", params: { command } }),
+    }).then((r) => r.json());
+  const pAllow = await permTest(15, "git status");
+  const pAsk = await permTest(16, "rm -rf /tmp/familiar-x");
+  const pDeny = await permTest(17, "mkfs.ext4 /dev/sda1");
+  assert(pAllow.result?.action === "allow", "permissions.test: safe command → allow", JSON.stringify(pAllow.result ?? pAllow.error ?? {}).slice(0, 160));
+  assert(pAsk.result?.action === "ask", "permissions.test: rm -rf → ask", JSON.stringify(pAsk.result ?? pAsk.error ?? {}).slice(0, 160));
+  assert(pDeny.result?.action === "deny", "permissions.test: mkfs on a device → deny", JSON.stringify(pDeny.result ?? pDeny.error ?? {}).slice(0, 160));
+
   // steering: a message sent while a turn runs joins it at the next step
   const post = (id, method, params) =>
     fetch(`http://127.0.0.1:${PORT}/rpc`, {

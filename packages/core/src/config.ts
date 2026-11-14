@@ -722,6 +722,66 @@ export function writeCronJobEnabled(
   return true;
 }
 
+export interface BashPolicyInput {
+  mode?: "allow" | "ask";
+  allow?: string[];
+  ask?: string[];
+  deny?: string[];
+}
+
+/** Read the user's (unmerged) bash policy from config.yaml for an editor. */
+export function readBashPolicy(options: LoadConfigOptions = {}): BashPolicyInput {
+  const file = configFilePath(options.configFile);
+  if (!fs.existsSync(file)) return {};
+  const parsed = parseYaml(fs.readFileSync(file, "utf8"));
+  if (!isPlainObject(parsed)) return {};
+  const doc = parsed as Record<string, unknown>;
+  const perms = isPlainObject(doc["permissions"]) ? (doc["permissions"] as Record<string, unknown>) : undefined;
+  const bash = perms && isPlainObject(perms["bash"]) ? (perms["bash"] as Record<string, unknown>) : undefined;
+  if (!bash) return {};
+  const strArr = (v: unknown): string[] | undefined =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : undefined;
+  const out: BashPolicyInput = {};
+  if (bash["mode"] === "allow" || bash["mode"] === "ask") out.mode = bash["mode"];
+  const a = strArr(bash["allow"]);
+  const s = strArr(bash["ask"]);
+  const d = strArr(bash["deny"]);
+  if (a) out.allow = a;
+  if (s) out.ask = s;
+  if (d) out.deny = d;
+  return out;
+}
+
+/**
+ * Persist the user's bash policy (mode + the three lists) to config.yaml. The
+ * built-in patterns are never removed from the file — loadConfig unions them at
+ * load time, so writing only the user's entries keeps the defaults intact.
+ */
+export function writeBashPolicy(policy: BashPolicyInput, options: LoadConfigOptions = {}): void {
+  const file = configFilePath(options.configFile);
+  let doc: Record<string, unknown> = {};
+  if (fs.existsSync(file)) {
+    const parsed = parseYaml(fs.readFileSync(file, "utf8"));
+    if (isPlainObject(parsed)) doc = parsed as Record<string, unknown>;
+  }
+  const perms = isPlainObject(doc["permissions"])
+    ? (doc["permissions"] as Record<string, unknown>)
+    : ((doc["permissions"] = {}) as Record<string, unknown>);
+  const bash = isPlainObject(perms["bash"])
+    ? (perms["bash"] as Record<string, unknown>)
+    : ((perms["bash"] = {}) as Record<string, unknown>);
+  if (policy.mode) bash["mode"] = policy.mode;
+  const clean = (a?: string[]): string[] => (a ?? []).map((s) => s.trim()).filter((s) => s !== "");
+  if (policy.allow !== undefined) bash["allow"] = clean(policy.allow);
+  if (policy.ask !== undefined) bash["ask"] = clean(policy.ask);
+  if (policy.deny !== undefined) bash["deny"] = clean(policy.deny);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(tmp, stringifyYaml(doc), { mode: 0o600 });
+  fs.renameSync(tmp, file);
+  log.info("bash permission policy written");
+}
+
 export function configFilePath(explicit?: string): string {
   if (explicit) return expandHome(explicit);
   return familiarPaths.config();

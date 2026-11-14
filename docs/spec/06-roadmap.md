@@ -1027,6 +1027,15 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   Web UI 設定に「Cron」セクション(ジョブ一覧 + 今すぐ実行 + 一時停止/再開)。
 - smoke に「一覧 / 有効化 / config 永続化 / 即時実行」を追加。
 
+### 8. 承認ポリシーのエディタとルールテスタ
+
+- config に `readBashPolicy`(ユーザー定義のみ) と `writeBashPolicy`(mode + 3 リスト)を追加。
+  組み込みパターンは保存せず、`loadConfig` が読み込み時に union する従来挙動を維持。
+- RPC `permissions.policy`(user + effective)、`permissions.test {command}`(`commandDecision`
+  で allow/ask/deny と理由)、`permissions.setPolicy`(保存 + 稼働中インスタンスへ反映)。
+- Web UI 設定に「権限」セクション: 既定モードの select、allow/ask/deny のテキストエリア、
+  保存、そしてコマンド判定テスタ(結果を色分け表示)。smoke に tester の 3 判定を追加。
+
 ## v0.1.0 の実装メモ 60(2026-11-15、全体再精査で見つけた不具合の修正)
 
 `packages/core` / `packages/server` / `packages/cli` / Web UI を横断で再精査し、

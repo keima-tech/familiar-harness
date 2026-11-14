@@ -33,6 +33,10 @@ import {
   writeConnectorsToDisk,
   writeProviderToDisk,
   writeCronJobEnabled,
+  readBashPolicy,
+  writeBashPolicy,
+  commandDecision,
+  DEFAULT_CONFIG,
   describeAuthSource,
   normalizeEffort,
   familiarPaths,
@@ -759,6 +763,40 @@ export class AgentServer {
           await this.runCronJob(job);
         }
         return { started: true };
+      }
+      case "permissions.policy":
+        return { user: readBashPolicy(), effective: this.cfg.permissions.bash };
+      case "permissions.test": {
+        const command = str(params, "command") ?? "";
+        if (command.trim() === "") {
+          throw new RpcError(RPC_ERROR_INVALID_PARAMS, "command is required");
+        }
+        return commandDecision(command, this.cfg.permissions.bash);
+      }
+      case "permissions.setPolicy": {
+        const asList = (v: unknown): string[] | undefined =>
+          Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : undefined;
+        const modeRaw = params["mode"];
+        const user: { mode?: "allow" | "ask"; allow?: string[]; ask?: string[]; deny?: string[] } = {};
+        if (modeRaw === "allow" || modeRaw === "ask") user.mode = modeRaw;
+        const allow = asList(params["allow"]);
+        const ask = asList(params["ask"]);
+        const deny = asList(params["deny"]);
+        if (allow) user.allow = allow;
+        if (ask) user.ask = ask;
+        if (deny) user.deny = deny;
+        writeBashPolicy(user);
+        // hot-swap the effective policy (built-ins stay unioned)
+        const builtin = DEFAULT_CONFIG.permissions.bash;
+        const union = (a: string[], b?: string[]): string[] => [...new Set([...a, ...(b ?? [])])];
+        this.cfg.permissions.bash = {
+          mode: user.mode ?? this.cfg.permissions.bash.mode,
+          allow: allow ? union(builtin.allow, allow) : this.cfg.permissions.bash.allow,
+          ask: ask ? union(builtin.ask, ask) : this.cfg.permissions.bash.ask,
+          deny: deny ? union(builtin.deny, deny) : this.cfg.permissions.bash.deny,
+          max_timeout_ms: this.cfg.permissions.bash.max_timeout_ms,
+        };
+        return { ok: true, effective: this.cfg.permissions.bash };
       }
       case "cron.setEnabled": {
         const name = str(params, "name");

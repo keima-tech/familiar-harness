@@ -341,7 +341,27 @@ const STR = {
     "nav.connectors": "コネクタ",
     "nav.connections": "接続",
     "nav.cron": "Cron",
+    "nav.approvals": "権限",
     "nav.system": "このアプリについて",
+    "perm.desc": "bash コマンドの allow/ask/deny ポリシーを編集できます。組み込みの保護パターンは常に union されます。下のテスターで判定を確認できます。",
+    "perm.mode": "既定モード",
+    "perm.modeHint": "allow=一致しない限り実行 / ask=毎回承認",
+    "perm.modeAllow": "allow(自動実行)",
+    "perm.modeAsk": "ask(毎回承認)",
+    "perm.allow": "allow(承認なしで実行するパターン)",
+    "perm.ask": "ask(承認が必要なパターン)",
+    "perm.deny": "deny(常にブロック)",
+    "perm.save": "保存",
+    "perm.saved": "権限ポリシーを保存しました",
+    "perm.saveFailed": "保存できませんでした: {0}",
+    "perm.loadFailed": "読み込めませんでした: {0}",
+    "perm.testTitle": "ルールテスタ",
+    "perm.testPh": "例: rm -rf /tmp/x",
+    "perm.test": "判定",
+    "perm.testFailed": "判定できませんでした: {0}",
+    "perm.decision.allow": "許可(承認なしで実行)",
+    "perm.decision.ask": "承認が必要",
+    "perm.decision.deny": "ブロック",
     "cron.desc": "config の cron.jobs で定義したスケジュール実行。ここから手動実行・一時停止できます。",
     "cron.empty": "スケジュールされたジョブはありません",
     "cron.once": "起動時に1回",
@@ -912,7 +932,27 @@ const STR = {
     "nav.connectors": "Connectors",
     "nav.connections": "Connections",
     "nav.cron": "Cron",
+    "nav.approvals": "Permissions",
     "nav.system": "About",
+    "perm.desc": "Edit the bash allow/ask/deny policy. Built-in guards are always unioned in. Use the tester below to check a command.",
+    "perm.mode": "Default mode",
+    "perm.modeHint": "allow = run unless matched / ask = approve every command",
+    "perm.modeAllow": "allow (auto-run)",
+    "perm.modeAsk": "ask (approve each)",
+    "perm.allow": "allow (run without approval)",
+    "perm.ask": "ask (needs approval)",
+    "perm.deny": "deny (always blocked)",
+    "perm.save": "Save",
+    "perm.saved": "permission policy saved",
+    "perm.saveFailed": "save failed: {0}",
+    "perm.loadFailed": "load failed: {0}",
+    "perm.testTitle": "Rule tester",
+    "perm.testPh": "e.g. rm -rf /tmp/x",
+    "perm.test": "Test",
+    "perm.testFailed": "test failed: {0}",
+    "perm.decision.allow": "allowed (runs without approval)",
+    "perm.decision.ask": "needs approval",
+    "perm.decision.deny": "blocked",
     "cron.desc": "Scheduled runs from cron.jobs in config. Run now or pause from here.",
     "cron.empty": "no scheduled jobs",
     "cron.once": "once at boot",
@@ -4378,6 +4418,7 @@ const SETTINGS_SECTIONS = [
   { id: "connectors", labelKey: "nav.connectors", icon: "🔗" },
   { id: "connections", labelKey: "nav.connections", icon: "🖥" },
   { id: "cron", labelKey: "nav.cron", icon: "⏱" },
+  { id: "approvals", labelKey: "nav.approvals", icon: "🛡" },
   { id: "system", labelKey: "nav.system", icon: "◍" },
 ];
 let settingsSection = "general";
@@ -4429,6 +4470,7 @@ function renderSettingsSection(id) {
   else if (id === "connectors") void renderConnectorsSection(content, stale);
   else if (id === "connections") void renderConnectionsSection(content, stale);
   else if (id === "cron") void renderCronSection(content, stale);
+  else if (id === "approvals") void renderApprovalsSection(content, stale);
   else if (id === "system") void renderSystemSection(content, stale);
 }
 
@@ -5718,6 +5760,115 @@ async function renderConnectionsSection(content, stale = () => false) {
 }
 
 /** Settings → templates: register Office files whose design office_create reuses. */
+async function renderApprovalsSection(content, stale = () => false) {
+  const c = card(t("nav.approvals"), t("perm.desc"));
+  content.appendChild(c);
+  let policy;
+  try {
+    policy = await rpc("permissions.policy", {});
+  } catch (err) {
+    const note = document.createElement("div");
+    note.className = "note";
+    note.textContent = t("perm.loadFailed", err.message);
+    c.appendChild(note);
+    return;
+  }
+  if (stale()) return;
+  const user = policy?.user ?? {};
+  const list = (v) => (Array.isArray(v) ? v.join("\n") : "");
+
+  const modeSel = selectControl(
+    [
+      [t("perm.modeAllow"), "allow"],
+      [t("perm.modeAsk"), "ask"],
+    ],
+    user.mode ?? "allow",
+    () => {},
+  );
+  c.appendChild(settingRow(t("perm.mode"), t("perm.modeHint"), modeSel));
+
+  const area = (label, value) => {
+    const wrap = document.createElement("div");
+    wrap.className = "perm-list";
+    const head = document.createElement("div");
+    head.className = "perm-list-head";
+    head.textContent = label;
+    const ta = document.createElement("textarea");
+    ta.className = "perm-textarea";
+    ta.rows = 5;
+    ta.spellcheck = false;
+    ta.value = value;
+    wrap.append(head, ta);
+    return { wrap, ta };
+  };
+  const allow = area(t("perm.allow"), list(user.allow));
+  const ask = area(t("perm.ask"), list(user.ask));
+  const deny = area(t("perm.deny"), list(user.deny));
+  c.append(allow.wrap, ask.wrap, deny.wrap);
+
+  const save = document.createElement("button");
+  save.type = "button";
+  save.className = "perm-save";
+  save.textContent = t("perm.save");
+  save.addEventListener("click", async () => {
+    save.disabled = true;
+    const split = (v) => v.split("\n").map((s) => s.trim()).filter(Boolean);
+    try {
+      await rpc("permissions.setPolicy", {
+        mode: modeSel.value,
+        allow: split(allow.ta.value),
+        ask: split(ask.ta.value),
+        deny: split(deny.ta.value),
+      });
+      toast(t("perm.saved"), "ok");
+    } catch (err) {
+      toast(t("perm.saveFailed", err.message), "err");
+    } finally {
+      save.disabled = false;
+    }
+  });
+  c.appendChild(save);
+
+  // rule tester
+  const tester = document.createElement("div");
+  tester.className = "perm-tester";
+  const tHead = document.createElement("div");
+  tHead.className = "perm-list-head";
+  tHead.textContent = t("perm.testTitle");
+  const tRow = document.createElement("div");
+  tRow.className = "perm-test-row";
+  const tInput = document.createElement("input");
+  tInput.type = "text";
+  tInput.className = "perm-input";
+  tInput.placeholder = t("perm.testPh");
+  const tBtn = document.createElement("button");
+  tBtn.type = "button";
+  tBtn.className = "ghost";
+  tBtn.textContent = t("perm.test");
+  const tOut = document.createElement("div");
+  tOut.className = "perm-test-out";
+  tBtn.addEventListener("click", async () => {
+    const command = tInput.value.trim();
+    if (!command) return;
+    tBtn.disabled = true;
+    try {
+      const res = await rpc("permissions.test", { command });
+      const key =
+        res.action === "deny" ? "perm.decision.deny" : res.action === "ask" ? "perm.decision.ask" : "perm.decision.allow";
+      tOut.textContent = `${t(key)}${res.reason ? ` — ${res.reason}` : ""}`;
+      tOut.dataset.action = res.action;
+    } catch (err) {
+      tOut.textContent = t("perm.testFailed", err.message);
+      tOut.dataset.action = "err";
+    } finally {
+      tBtn.disabled = false;
+    }
+  });
+  tRow.append(tInput, tBtn);
+  tester.append(tHead, tRow, tOut);
+  c.appendChild(tester);
+}
+
 async function renderCronSection(content, stale = () => false) {
   const c = card(t("nav.cron"), t("cron.desc"));
   content.appendChild(c);
@@ -5756,7 +5907,7 @@ async function renderCronSection(content, stale = () => false) {
     actions.className = "cron-actions";
     const toggle = document.createElement("button");
     toggle.type = "button";
-    toggle.className = "btn";
+    toggle.className = "ghost";
     toggle.textContent = enabled ? t("cron.pause") : t("cron.resume");
     toggle.addEventListener("click", async () => {
       toggle.disabled = true;
@@ -5770,7 +5921,7 @@ async function renderCronSection(content, stale = () => false) {
     });
     const run = document.createElement("button");
     run.type = "button";
-    run.className = "btn";
+    run.className = "ghost";
     run.textContent = t("cron.run");
     run.addEventListener("click", async () => {
       run.disabled = true;

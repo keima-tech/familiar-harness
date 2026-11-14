@@ -1505,7 +1505,9 @@ export class AgentServer {
       throw new RpcError(RPC_ERROR_INVALID_PARAMS, `attachment too large (max ${MAX / 1024 / 1024}MB)`);
     }
     const sessionId = str(params, "session");
-    const bucket = sessionId ? sessionId.slice(0, 8) : "adhoc";
+    // The bucket is derived from a client-supplied id: keep it to a safe slug so
+    // it can never climb out of ~/.familiar/uploads via ".." segments.
+    const bucket = (sessionId ? sessionId.slice(0, 8) : "adhoc").replace(/[^A-Za-z0-9_-]/g, "_") || "adhoc";
     const p = backend.path;
     const home = await backend.home();
     const dir = p.join(home, ".familiar", "uploads", bucket);
@@ -1702,7 +1704,7 @@ export class AgentServer {
   }
 
   /** Patch a session's title / provider / model / profile (v1.1 GUI needs). */
-  private updateSession(params: Record<string, unknown>): SessionRecord {
+  private async updateSession(params: Record<string, unknown>): Promise<SessionRecord> {
     const id = str(params, "id");
     if (!id) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "session id is required");
     const session = this.requireSession(id);
@@ -1738,17 +1740,38 @@ export class AgentServer {
     if (params["cwd"] !== undefined) {
       const cwd = str(params, "cwd");
       if (!cwd) throw new RpcError(RPC_ERROR_INVALID_PARAMS, '"cwd" cannot be empty');
-      const resolved = path.resolve(cwd);
-      let isDir = false;
-      try {
-        isDir = fs.statSync(resolved).isDirectory();
-      } catch {
-        /* leave false -> error below */
+      if (session.remote) {
+        // An ssh session's folder lives on the remote host: resolve it with that
+        // backend (posix flavor + remote home) and stat it there. The local
+        // path.resolve/statSync would reject every valid remote directory.
+        const backend = this.backendFor({ session: id });
+        const resolved = await this.resolveOnBackend(backend, cwd);
+        let isDir = false;
+        try {
+          isDir = (await backend.stat(resolved)).isDir;
+        } catch {
+          /* leave false -> error below */
+        }
+        if (!isDir) {
+          throw new RpcError(
+            RPC_ERROR_INVALID_PARAMS,
+            `"cwd" is not an existing directory on ${backend.label}: ${cwd}`,
+          );
+        }
+        patch.cwd = resolved;
+      } else {
+        const resolved = path.resolve(cwd);
+        let isDir = false;
+        try {
+          isDir = fs.statSync(resolved).isDirectory();
+        } catch {
+          /* leave false -> error below */
+        }
+        if (!isDir) {
+          throw new RpcError(RPC_ERROR_INVALID_PARAMS, `"cwd" is not an existing directory: ${cwd}`);
+        }
+        patch.cwd = resolved;
       }
-      if (!isDir) {
-        throw new RpcError(RPC_ERROR_INVALID_PARAMS, `"cwd" is not an existing directory: ${cwd}`);
-      }
-      patch.cwd = resolved;
     }
     if (params["profile"] !== undefined) {
       const raw = params["profile"];
@@ -1802,14 +1825,18 @@ export class AgentServer {
     }
     const controller = new AbortController();
     this.activeTurns.set(sessionId, { controller, text, startedAt: Date.now() });
+    // Hoisted so the HTTP-400 repair retry below replays the same options
+    // (proxy sessions must not fall back to the local MCP toolset).
+    let remoteTools: Awaited<ReturnType<typeof this.mcpToolsFor>> | undefined;
+    let contextWindowTokens = 0;
     try {
       // Proxy sessions advertise the host's MCP tools instead of local ones.
-      const remoteTools = session.remote ? await this.mcpToolsFor(session.remote) : undefined;
+      remoteTools = session.remote ? await this.mcpToolsFor(session.remote) : undefined;
       // Compaction ratio needs the model window; the GUI's models.list warms
       // this cache, and we ask for it in the background when still unknown.
       const providerForWindow = str(params, "provider") ?? session.provider;
       const modelForWindow = str(params, "model") ?? session.model;
-      const contextWindowTokens = this.cachedContextWindow(providerForWindow, modelForWindow);
+      contextWindowTokens = this.cachedContextWindow(providerForWindow, modelForWindow);
       if (contextWindowTokens === 0) this.warmModelWindows(providerForWindow);
       const res = await this.runner.runTurn({
         sessionId,
@@ -1852,7 +1879,9 @@ export class AgentServer {
       // tool-call argument that was truncated mid-stream: repair the history
       // and retry once so the session heals instead of staying broken.
       const message = err instanceof Error ? err.message : String(err);
-      if (/HTTP 40[0-9]/.test(message)) {
+      // Only a *bad request* (400) can be the truncated tool-call argument
+      // poison. 401/403/404 (auth, unknown model) must not mutate history.
+      if (/HTTP 400\b/.test(message)) {
         const fixed = this.store.repairToolCallArguments(sessionId);
         if (fixed > 0) {
           // the failed attempt already appended the user message (and possibly
@@ -1875,6 +1904,9 @@ export class AgentServer {
               signal: controller.signal,
               onEvent: events,
               takeInjections: () => this.takeInjections(sessionId),
+              ...(contextWindowTokens > 0 ? { contextWindowTokens } : {}),
+              ...(remoteTools ? { extraTools: remoteTools } : {}),
+              ...(session.remote ? { excludeToolPrefix: "mcp__" } : {}),
             });
             return retry;
           } catch {
@@ -1889,21 +1921,31 @@ export class AgentServer {
       this.activeTurns.delete(sessionId);
       // A steering message that landed after the loop's final drain: run it as
       // its own turn so it is never silently dropped (a tiny race window).
+      // After an abort the user asked to stop — drop them instead of starting
+      // a fresh turn behind their back.
       const leftover = this.injections.get(sessionId) ?? [];
       this.injections.delete(sessionId);
-      const [first, ...rest] = leftover;
-      if (rest.length > 0) this.injections.set(sessionId, rest);
-      if (first) {
-        void this.send(
-          {
-            id: sessionId,
-            text: first.text,
-            ...(first.attachments && first.attachments.length > 0
-              ? { attachments: first.attachments }
-              : {}),
-          },
-          ctx,
-        ).catch(() => {});
+      if (!controller.signal.aborted && leftover.length > 0) {
+        const [first, ...rest] = leftover;
+        if (rest.length > 0) this.injections.set(sessionId, rest);
+        if (first) {
+          void this.send(
+            {
+              id: sessionId,
+              text: first.text,
+              ...(first.attachments && first.attachments.length > 0
+                ? { attachments: first.attachments }
+                : {}),
+            },
+            ctx,
+          ).catch(() => {
+            // The follow-up could not start (another turn grabbed the session in
+            // the meantime) — put the message back so that running turn drains
+            // it instead of losing it.
+            const queued = this.injections.get(sessionId) ?? [];
+            this.injections.set(sessionId, [first, ...queued]);
+          });
+        }
       }
     }
   }

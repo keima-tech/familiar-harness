@@ -360,6 +360,7 @@ const STR = {
     "ssh.remoteBin": "リモートの familiar パス (任意)",
     "ssh.save": "保存",
     "ssh.edit": "編集",
+    "ssh.addSsh": "SSH 接続を追加",
     "ssh.delete": "削除",
     "ssh.connect": "接続",
     "ssh.test": "接続テスト",
@@ -899,6 +900,7 @@ const STR = {
     "ssh.remoteBin": "Remote familiar path (optional)",
     "ssh.save": "Save",
     "ssh.edit": "Edit",
+    "ssh.addSsh": "Add an SSH connection",
     "ssh.delete": "Delete",
     "ssh.connect": "Connect",
     "ssh.test": "Test connection",
@@ -1129,7 +1131,6 @@ const STR = {
     "cmd.new": "new session",
     "cmd.model": "pick a model",
     "cmd.plan": "switch to Plan mode (read-only)",
-    "cmd.build": "switch to Build mode (allow edits)",
     "cmd.ask": "ask before edits and commands",
     "cmd.edit": "allow file edits; ask for the rest",
     "cmd.yolo": "full access — never ask",
@@ -5824,7 +5825,8 @@ async function renderConnectorsSection(content, stale = () => false) {
     try {
       await gSaveSettings();
       const r = await rpc("google.authUrl", { origin: location.origin });
-      window.open(r.url, "_blank");
+      // noopener: the opened page must not reach back through window.opener
+      window.open(r.url, "_blank", "noopener,noreferrer");
       gResult.textContent = t("conn.googleAuthHint");
       gResult.style.color = "var(--dim)";
     } catch (err) {

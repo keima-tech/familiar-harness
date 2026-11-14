@@ -325,8 +325,24 @@ export function startHttpTransport(
       return;
     }
     const chunks: Buffer[] = [];
-    req.on("data", (c: Buffer) => chunks.push(c));
+    // cap the body: an unbounded POST /rpc would let a client exhaust memory
+    const MAX_BODY = 32 * 1024 * 1024;
+    let total = 0;
+    let overflowed = false;
+    req.on("data", (c: Buffer) => {
+      if (overflowed) return;
+      total += c.length;
+      if (total > MAX_BODY) {
+        overflowed = true;
+        res.writeHead(413, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "request body too large" }));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
     req.on("end", async () => {
+      if (overflowed) return;
       const ctx: RpcContext = { onEvent: broadcast };
       const body = Buffer.concat(chunks).toString("utf8");
       const reply = await handleRpc(agent, body, ctx);

@@ -31,6 +31,7 @@ export class RpcApprovalAdapter implements ApprovalAdapter {
         this.pending.delete(requestId);
         resolve(false); // safe default
       }, this.timeoutMs);
+      timer.unref?.(); // do not hold the event loop open for a pending prompt
       this.pending.set(requestId, { resolve, timer });
     });
   }
@@ -39,6 +40,7 @@ export class RpcApprovalAdapter implements ApprovalAdapter {
     const entry = this.pending.get(requestId);
     if (!entry) return false;
     this.pending.delete(requestId);
+    clearTimeout(entry.timer); // or the 300s timer outlives the resolved prompt
     entry.resolve(approved);
     return true;
   }

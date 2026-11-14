@@ -48,8 +48,13 @@ export class SkillStore {
 
   /** Locate a skill directory across all roots (familiar first). */
   private findDir(name: string): { dir: string; source: string } | undefined {
+    // `name` reaches here from the model (skill_view) as well as the GUI: never
+    // let it climb out of a root (…/.. or an absolute path).
+    if (name === "" || name === "." || name === ".." || /[\\/]/.test(name)) return undefined;
     for (const root of this.allRoots()) {
       const dir = path.join(root, name);
+      const rel = path.relative(root, dir);
+      if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) continue;
       try {
         if (fs.statSync(dir).isDirectory() && fs.existsSync(path.join(dir, "SKILL.md"))) {
           return { dir, source: root === this.root ? "familiar" : root };

@@ -1045,7 +1045,10 @@ export function createOfficeCreateTool(): Tool {
       }
       if (!argPath) return { content: "argument 'path' is required", isError: true };
 
-      let absolute = path.isAbsolute(argPath) ? path.normalize(argPath) : path.resolve(ctx.cwd, argPath);
+      // use the backend's path flavor: a Windows client driving an ssh (posix)
+      // session must not resolve the target with the host path module
+      const bp = ctx.backend.path;
+      let absolute = bp.isAbsolute(argPath) ? bp.normalize(argPath) : bp.resolve(ctx.cwd, argPath);
       if (!absolute.toLowerCase().endsWith(KIND_EXT[kind]!)) {
         // keep the type and the extension in agreement
         absolute = absolute.replace(/\.(docx|xlsx|pptx)$/i, "") + KIND_EXT[kind];
@@ -1105,7 +1108,7 @@ export function createOfficeCreateTool(): Tool {
       }
 
       try {
-        await ctx.backend.mkdirp(path.dirname(absolute));
+        await ctx.backend.mkdirp(ctx.backend.path.dirname(absolute));
         await ctx.backend.writeFile(absolute, buf);
         return {
           content:

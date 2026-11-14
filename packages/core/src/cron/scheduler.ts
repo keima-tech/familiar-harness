@@ -27,6 +27,8 @@ export interface CronSchedulerOptions {
 export class CronScheduler {
   private readonly statuses = new Map<string, CronJobRuntimeStatus>();
   private timers: NodeJS.Timeout[] = [];
+  /** jobs currently running — a slow run must not overlap its next tick */
+  private readonly inFlight = new Set<string>();
 
   constructor(
     private readonly jobs: CronJob[],
@@ -63,7 +65,7 @@ export class CronScheduler {
       const tick = setInterval(() => {
         const st = this.statuses.get(this.key(job))!;
         const due = st.lastRunAt === undefined || Date.now() - st.lastRunAt >= periodMs;
-        if (due) void this.execute(job);
+        if (due && !this.inFlight.has(this.key(job))) void this.execute(job);
       }, Math.min(periodMs, 30_000));
       tick.unref?.();
       this.timers.push(tick);
@@ -74,9 +76,12 @@ export class CronScheduler {
   }
 
   private async execute(job: CronJob): Promise<void> {
-    const st = this.statuses.get(this.key(job))!;
+    const k = this.key(job);
+    if (this.inFlight.has(k)) return; // never overlap a run with itself
+    const st = this.statuses.get(k)!;
     const started = Date.now();
     st.lastRunAt = started;
+    this.inFlight.add(k);
     try {
       await this.run(job);
       st.lastStatus = "ok";
@@ -86,6 +91,7 @@ export class CronScheduler {
         `cron ${st.name} failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     } finally {
+      this.inFlight.delete(k);
       st.ranOnce = true;
       st.nextRunAt = st.onceAtBoot ? undefined : (st.lastRunAt ?? 0) + job.every_minutes * 60_000;
       void started;

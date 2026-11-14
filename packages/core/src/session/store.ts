@@ -236,19 +236,18 @@ export class SqliteSessionStore implements SessionStore {
   }
 
   appendMessage(sessionId: string, msg: ChatMessage): void {
-    const maxRow = this.db
-      .prepare(`SELECT MAX(seq) AS max_seq FROM messages WHERE session_id = ?`)
-      .get(sessionId) as { max_seq: number | null };
-    const seq = (maxRow.max_seq ?? -1) + 1;
+    // One statement so the seq is read and written under the same lock: a
+    // separate MAX()+INSERT races another process (serve + `familiar run` sharing
+    // the DB) and both would pick the same seq (UNIQUE violation).
     this.db
       .prepare(
         `INSERT INTO messages (id, session_id, seq, role, content, name, tool_call_id, tool_calls, meta, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         SELECT ?, ?, COALESCE(MAX(seq) + 1, 0), ?, ?, ?, ?, ?, ?, ?
+         FROM messages WHERE session_id = ?`,
       )
       .run(
         msg.id,
         sessionId,
-        seq,
         msg.role,
         msg.content,
         msg.name ?? null,
@@ -256,6 +255,7 @@ export class SqliteSessionStore implements SessionStore {
         msg.toolCalls ? JSON.stringify(msg.toolCalls) : null,
         msg.meta ? JSON.stringify(msg.meta) : null,
         msg.createdAt,
+        sessionId,
       );
     this.db.prepare(`UPDATE sessions SET updated_at = ? WHERE id = ?`).run(Date.now(), sessionId);
   }

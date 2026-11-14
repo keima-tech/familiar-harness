@@ -17,7 +17,10 @@ export function memorySection(
   let used = 0;
   for (const e of ordered) {
     const stamp = new Date(e.updatedAt).toISOString().slice(0, 10);
-    const tag = e.tags.length > 0 ? ` [${e.tags.join(", ")}]` : "";
+    // entries are read from disk and may lack tags (hand-written / legacy) —
+    // a throw here would fail the whole turn before the first model call
+    const tags = Array.isArray(e.tags) ? e.tags : [];
+    const tag = tags.length > 0 ? ` [${tags.join(", ")}]` : "";
     const line = `- (${e.id}, ${stamp}${tag}) ${e.content}`;
     if (used + line.length > capChars) {
       dropped += 1;

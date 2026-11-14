@@ -113,6 +113,12 @@ export async function consumeSse(
       // event:/id:/retry: fields are irrelevant here
     }
   }
+  // a final line may arrive without a trailing newline (the stream can end
+  // right after `data: {...}`) — process it before flushing, or it is dropped
+  if (buffer !== "") {
+    const rawLine = buffer.replace(/\r$/, "");
+    if (rawLine.startsWith("data:")) dataLines.push(rawLine.slice(5).trimStart());
+  }
   flush();
 }
 

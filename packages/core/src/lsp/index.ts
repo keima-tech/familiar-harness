@@ -501,6 +501,9 @@ export class LspHub {
         this.rootUri ?? (this.rootUri = "file:///"),
         this.transportFor(route.config),
       );
+      // register it, or every diagnose() would spawn another server and
+      // status()/stopAll() would never see (or stop) them
+      this.clients.set(route.name, client);
     }
     const res = await client.diagnose(file);
     return { language: route.name, server: route.config.command, ...res };

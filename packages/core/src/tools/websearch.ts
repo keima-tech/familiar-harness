@@ -4,12 +4,12 @@ import type { Tool } from "./registry.js";
 function cleanText(s: string): string {
   return s
     .replace(/<[^>]*>/g, "")
-    .replace(/&/g, "&")
-    .replace(/"/g, '"')
-    .replace(/&#x27;|&#39;/g, "'")
-    .replace(/</g, "<")
-    .replace(/>/g, ">")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;|&#39;|&apos;/g, "'")
     .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&") // last, so &amp;lt; does not become "<"
     .trim();
 }
 

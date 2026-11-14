@@ -270,7 +270,8 @@ export class McpHub {
           read_only: readOnly,
           execute: async (args: Record<string, unknown>, ctx: ToolContext): Promise<ToolOutput> => {
             const json = JSON.stringify(args ?? {});
-            if (readOnly !== true) {
+            // respect Full access / --yolo the same way bash/write/edit do
+            if (readOnly !== true && ctx.yolo !== true) {
               const allowed = await ctx.approval.request({
                 tool: fullName,
                 summary: `MCP tool call: ${serverName} / ${toolName}`,

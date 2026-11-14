@@ -279,6 +279,15 @@ export function createPrettyPrinter(): (event: AgentEvent) => void {
       case "compaction":
         process.stdout.write(c.faint(`\n  … compacted ${event.dropped} older messages\n`));
         break;
+      case "budget.warning": {
+        const pct = Math.round(event.ratio * 100);
+        const label = event.scope === "session" ? "session" : "day";
+        process.stdout.write(
+          `\n  ${event.exceeded ? c.err("⚠") : c.faint("•")} ${label} token budget ` +
+            `${event.exceeded ? "exceeded" : "near limit"}: ${event.used}/${event.limit} tokens (${pct}%)\n`,
+        );
+        break;
+      }
       case "turn.error":
         spinner.stop();
         process.stdout.write(`\n${c.err(`✖ ${event.error}`)}\n`);

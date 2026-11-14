@@ -608,6 +608,10 @@ const STR = {
     "undo.done": "直前のターンの変更を取り消しました（{0} 件のファイル）",
     "undo.nothing": "取り消す変更がありません",
     "undo.failed": "取り消せませんでした: {0}",
+    "budget.scopeSession": "セッション",
+    "budget.scopeDay": "本日",
+    "budget.near": "{0}のトークン予算が上限に近づいています（{1}/{2} トークン, {3}%）",
+    "budget.exceeded": "{0}のトークン予算を超過しました（{1}/{2} トークン, {3}%）",
     "cmd.settings": "設定を開く",
     "cmd.search": "トランスクリプト内検索",
     "cmd.find": "全セッションを検索",
@@ -1160,6 +1164,10 @@ const STR = {
     "undo.done": "reverted the last turn's changes ({0} file(s))",
     "undo.nothing": "nothing to undo",
     "undo.failed": "undo failed: {0}",
+    "budget.scopeSession": "session",
+    "budget.scopeDay": "daily",
+    "budget.near": "{0} token budget is near its limit ({1}/{2} tokens, {3}%)",
+    "budget.exceeded": "{0} token budget exceeded ({1}/{2} tokens, {3}%)",
     "cmd.settings": "open settings",
     "cmd.search": "search the transcript",
     "cmd.find": "search all sessions",
@@ -3339,6 +3347,20 @@ function onEvent(sessionId, e) {
         ),
       );
       break;
+    case "budget.warning": {
+      const pct = Math.round((e.ratio ?? 0) * 100);
+      toast(
+        t(
+          e.exceeded ? "budget.exceeded" : "budget.near",
+          e.scope === "session" ? t("budget.scopeSession") : t("budget.scopeDay"),
+          String(e.used ?? 0),
+          String(e.limit ?? 0),
+          String(pct),
+        ),
+        e.exceeded ? "err" : "info",
+      );
+      break;
+    }
     default:
       break;
   }

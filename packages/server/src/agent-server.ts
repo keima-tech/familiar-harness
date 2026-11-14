@@ -1833,6 +1833,15 @@ export class AgentServer {
         { runningText: running.text, runningStartedAt: running.startedAt },
       );
     }
+    // Token budget guard: refuse to start when a hard limit is already exceeded.
+    const breach = this.budgetBreach(sessionId);
+    if (breach && this.cfg.budget?.enforce) {
+      throw new RpcError(
+        RPC_ERROR_INVALID_PARAMS,
+        `${breach.scope} token budget exceeded (${breach.used}/${breach.limit}) — ` +
+          `raise budget.max_tokens_per_${breach.scope} or set budget.enforce: false`,
+      );
+    }
     const controller = new AbortController();
     this.activeTurns.set(sessionId, { controller, text, startedAt: Date.now() });
     // Hoisted so the HTTP-400 repair retry below replays the same options
@@ -1867,6 +1876,8 @@ export class AgentServer {
         ...(remoteTools ? { extraTools: remoteTools } : {}),
         ...(session.remote ? { excludeToolPrefix: "mcp__" } : {}),
       });
+      // Budget: record this turn's tokens and warn if a threshold was crossed.
+      this.recordUsage(sessionId, res.usage, events);
       // M3: background self-review of this turn (stage-only). It must not
       // hold the per-session turn lock — a review can take up to a minute and
       // would reject the user's next message the whole time.
@@ -2041,6 +2052,51 @@ export class AgentServer {
     }
     this.store.dropTurnFileEdits(id, turn.turnId);
     return { undone: true, turnId: turn.turnId, paths, failed };
+  }
+
+  /** Today's calendar day (UTC) used as the day-budget bucket. */
+  private usageDay(): string {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  /** A hard token limit that is already reached, if any (session first). */
+  private budgetBreach(
+    sessionId: string,
+  ): { scope: "session" | "day"; used: number; limit: number } | null {
+    const budget = this.cfg.budget;
+    if (!budget) return null;
+    if (budget.max_tokens_per_session > 0) {
+      const used = this.store.sessionUsage(sessionId);
+      if (used >= budget.max_tokens_per_session) {
+        return { scope: "session", used, limit: budget.max_tokens_per_session };
+      }
+    }
+    if (budget.max_tokens_per_day > 0) {
+      const used = this.store.dayUsage(this.usageDay());
+      if (used >= budget.max_tokens_per_day) {
+        return { scope: "day", used, limit: budget.max_tokens_per_day };
+      }
+    }
+    return null;
+  }
+
+  /** Persist a turn's token usage and emit a warning past warn_ratio / limit. */
+  private recordUsage(sessionId: string, usage: Usage, events: (event: unknown) => void): void {
+    const tokens =
+      (usage.totalPromptTokens ?? usage.promptTokens ?? 0) + (usage.completionTokens ?? 0);
+    if (tokens > 0) this.store.addUsage(sessionId, this.usageDay(), tokens);
+    const budget = this.cfg.budget;
+    if (!budget) return;
+    const warnAt = budget.warn_ratio > 0 ? budget.warn_ratio : 1;
+    const check = (scope: "session" | "day", used: number, limit: number): void => {
+      if (limit <= 0) return;
+      const ratio = used / limit;
+      if (used >= limit || ratio >= warnAt) {
+        events({ type: "budget.warning", scope, used, limit, ratio, exceeded: used >= limit });
+      }
+    };
+    check("session", this.store.sessionUsage(sessionId), budget.max_tokens_per_session);
+    check("day", this.store.dayUsage(this.usageDay()), budget.max_tokens_per_day);
   }
 
   /** Drain the steering messages queued for a running session. */

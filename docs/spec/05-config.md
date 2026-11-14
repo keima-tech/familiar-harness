@@ -107,6 +107,11 @@ permissions:
   websearch:               # M2
     provider: searxng
     base_url: ""           # 例: http://127.0.0.1:8080 (未設定なら websearch ツールはエラー+ヒント)
+budget:                    # トークン予算ガード(全 0 = 無効)
+  max_tokens_per_session: 0 # 1 セッションの上限(例 2000000)
+  max_tokens_per_day: 0     # 1 日(UTC)合計の上限(例 10000000)
+  warn_ratio: 0.8           # 上限の何割で警告イベントを出すか(0 で無効)
+  enforce: false            # true: 上限超過後の新規ターンを拒否
 context:
   token_soft_limit: 0      # 絶対トークン上限で圧縮をかけたい場合のみ(0 = 無効)
   keep_last: 10            # compaction で残す直近メッセージ数

@@ -164,6 +164,17 @@ export interface LspConfig {
   servers: Record<string, LspServerConfig>;
 }
 
+export interface BudgetConfig {
+  /** max prompt+completion tokens per session (0 = off) */
+  max_tokens_per_session: number;
+  /** max tokens across all sessions per calendar day (0 = off) */
+  max_tokens_per_day: number;
+  /** warn once usage passes this fraction of a limit (0..1; 0 disables) */
+  warn_ratio: number;
+  /** true: refuse to start a new turn once a hard limit is exceeded */
+  enforce: boolean;
+}
+
 export interface PermissionsConfig {
   bash: BashPermissionConfig;
   files: {
@@ -209,6 +220,8 @@ export interface ResolvedConfig {
   auxiliary: Record<string, AuxiliarySlot>;
   profiles: Record<string, { system_prompt_file?: string }>;
   permissions: PermissionsConfig;
+  /** token budget guard (all limits 0 = off) */
+  budget: BudgetConfig;
   /** M3: self-improvement */
   memory: MemoryConfig;
   skills: SkillsConfig;
@@ -365,6 +378,7 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
     },
     websearch: { provider: "duckduckgo", base_url: "" },
   },
+  budget: { max_tokens_per_session: 0, max_tokens_per_day: 0, warn_ratio: 0.8, enforce: false },
   memory: { write_approval: true, max_prompt_chars: 4000 },
   skills: { write_approval: true, include_global: true, paths: [] },
   self_review: { enabled: true },
@@ -888,6 +902,15 @@ permissions:
   websearch:
     provider: searxng
     base_url: ""    # e.g. http://127.0.0.1:8080
+
+# Token budget guard (all limits 0 = off). Usage counts prompt+completion
+# tokens per turn (the last step's prompt + completion), tracked per session
+# and per calendar day.
+budget:
+  max_tokens_per_session: 0   # e.g. 2000000
+  max_tokens_per_day: 0       # e.g. 10000000
+  warn_ratio: 0.8             # warn once usage passes this fraction of a limit
+  enforce: false              # true: refuse to start a turn past a hard limit
 
 # M3: 自己改善
 memory:

@@ -87,6 +87,12 @@ export interface SessionStore {
   dropTurnFileEdits(sessionId: string, turnId: string): number;
   /** Cross-session full-text search over message bodies (newest first). */
   searchMessages(query: string, limit?: number): SessionSearchHit[];
+  /** Add tokens used by a turn (tracked per session + calendar day). */
+  addUsage(sessionId: string, day: string, tokens: number): void;
+  /** Total tokens used by a session across all days. */
+  sessionUsage(sessionId: string): number;
+  /** Total tokens used on a calendar day (YYYY-MM-DD) across sessions. */
+  dayUsage(day: string): number;
   close(): void;
 }
 
@@ -128,6 +134,12 @@ CREATE TABLE IF NOT EXISTS file_edits (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_file_edits_session ON file_edits(session_id, seq);
+CREATE TABLE IF NOT EXISTS usage (
+  session_id TEXT NOT NULL,
+  day TEXT NOT NULL,
+  tokens INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (session_id, day)
+);
 -- Full-text search over message bodies. trigram tokenizer so Japanese substring
 -- queries work (unicode61 would treat a whole CJK run as one token).
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
@@ -334,6 +346,7 @@ export class SqliteSessionStore implements SessionStore {
     const res = this.db.prepare(`DELETE FROM sessions WHERE id = ?`).run(id);
     this.db.prepare(`DELETE FROM messages WHERE session_id = ?`).run(id);
     this.db.prepare(`DELETE FROM file_edits WHERE session_id = ?`).run(id);
+    this.db.prepare(`DELETE FROM usage WHERE session_id = ?`).run(id);
     return Number(res.changes) > 0;
   }
 
@@ -421,6 +434,30 @@ export class SqliteSessionStore implements SessionStore {
       )
       .all(...likes, cap) as unknown as (SearchRow & { body: string })[];
     return rows.map((r) => ({ ...toHit(r), snippet: makeSnippet(r.body, tokens[0] ?? "") }));
+  }
+
+  addUsage(sessionId: string, day: string, tokens: number): void {
+    if (!Number.isFinite(tokens) || tokens <= 0) return;
+    this.db
+      .prepare(
+        `INSERT INTO usage (session_id, day, tokens) VALUES (?, ?, ?)
+         ON CONFLICT(session_id, day) DO UPDATE SET tokens = tokens + excluded.tokens`,
+      )
+      .run(sessionId, day, Math.floor(tokens));
+  }
+
+  sessionUsage(sessionId: string): number {
+    const row = this.db
+      .prepare(`SELECT COALESCE(SUM(tokens), 0) AS n FROM usage WHERE session_id = ?`)
+      .get(sessionId) as { n: number };
+    return row.n ?? 0;
+  }
+
+  dayUsage(day: string): number {
+    const row = this.db
+      .prepare(`SELECT COALESCE(SUM(tokens), 0) AS n FROM usage WHERE day = ?`)
+      .get(day) as { n: number };
+    return row.n ?? 0;
   }
 
   appendMessage(sessionId: string, msg: ChatMessage): void {

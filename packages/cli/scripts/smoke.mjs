@@ -1926,6 +1926,84 @@ if (process.platform !== "win32") {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Scenario: token budget guard (warn + enforce)
+// ---------------------------------------------------------------------------
+console.log("— scenario: token budget guard —");
+{
+  const { createRequire } = await import("node:module");
+  const { WebSocket } = createRequire(import.meta.filename)("ws");
+  const PORT = 46229;
+  const budgetHome = path.join(tmpBase, "home-budget");
+  fs.mkdirSync(budgetHome, { recursive: true });
+  fs.writeFileSync(
+    path.join(budgetHome, "config.yaml"),
+    `version: 1
+default_provider: mock
+providers:
+  mock:
+    kind: mock
+budget:
+  max_tokens_per_session: 1
+  max_tokens_per_day: 0
+  warn_ratio: 0.5
+  enforce: true
+server:
+  port: ${PORT}
+  bind: 127.0.0.1
+`,
+  );
+  const serve = spawn(process.execPath, [familiarBin, "serve", "--port", String(PORT)], {
+    cwd: project,
+    env: env(budgetHome),
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let serveLog = "";
+  serve.stdout.on("data", (d) => (serveLog += d));
+  serve.stderr.on("data", (d) => (serveLog += d));
+  let health = false;
+  for (let i = 0; i < 50 && !health; i++) {
+    await new Promise((r) => setTimeout(r, 200));
+    try {
+      health = (await fetch(`http://127.0.0.1:${PORT}/healthz`).then((r) => r.json())).ok === true;
+    } catch {
+      health = false;
+    }
+  }
+  assert(health, "budget server /healthz responds", serveLog.slice(0, 200));
+  const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+  const frames = [];
+  await new Promise((res) => ws.once("open", res));
+  ws.on("message", (d) => {
+    const f = JSON.parse(d.toString());
+    if (f.type === "event") frames.push(f);
+  });
+  await new Promise((r) => setTimeout(r, 200));
+  const bpost = (id, method, params) =>
+    fetch(`http://127.0.0.1:${PORT}/rpc`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
+    }).then((r) => r.json());
+  const s = await bpost(1, "session.create", {});
+  const first = await bpost(2, "session.send", { id: s.result.id, text: "hello budget" });
+  assert(!first.error, "first turn runs under the budget", JSON.stringify(first.error ?? {}).slice(0, 160));
+  await new Promise((r) => setTimeout(r, 300));
+  assert(
+    frames.some((f) => f.event?.type === "budget.warning"),
+    "budget.warning emitted after the turn",
+    JSON.stringify(frames.map((f) => f.event?.type)).slice(0, 200),
+  );
+  const second = await bpost(3, "session.send", { id: s.result.id, text: "again" });
+  assert(
+    /budget exceeded/.test(second.error?.message ?? ""),
+    "enforce refuses the next turn past the limit",
+    JSON.stringify(second.error ?? {}).slice(0, 200),
+  );
+  ws.close();
+  serve.kill("SIGTERM");
+}
+
 console.log(
   failures === 0 ? "\nsmoke: all checks passed" : `\nsmoke: ${failures} failure(s)`,
 );

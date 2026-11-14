@@ -44,7 +44,19 @@ export type AgentEvent =
   /** M3: memory entries dropped from the prompt injection due to the char cap */
   | { type: "memory.truncation"; dropped: number }
   /** M5: a cron job finished running its prompt on a dedicated session */
-  | { type: "cron.run"; name: string; status: "ok" | "error"; durationMs: number };
+  | { type: "cron.run"; name: string; status: "ok" | "error"; durationMs: number }
+  /**
+   * Token budget guard: the session or day total crossed its warn threshold
+   * (`exceeded` false) or its hard limit (`exceeded` true).
+   */
+  | {
+      type: "budget.warning";
+      scope: "session" | "day";
+      used: number;
+      limit: number;
+      ratio: number;
+      exceeded: boolean;
+    };
 
 export const isTerminalEvent = (e: AgentEvent): boolean =>
   e.type === "turn.end" || e.type === "turn.error" || e.type === "turn.aborted";

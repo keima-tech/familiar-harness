@@ -998,6 +998,14 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   `/find`(オーバーレイで結果一覧、クリックでそのセッションを開く)。smoke に
   FTS ヒットと短語フォールバックの 2 ケースを追加。
 
+### 5. トークン予算ガード
+
+- `budget.{max_tokens_per_session, max_tokens_per_day, warn_ratio, enforce}`(すべて既定 0=無効)。
+  `turn.end` の usage を `usage(session_id, day, tokens)` テーブルに加算(セッション別・
+  UTC 日別)。`warn_ratio` 超過または上限到達で `budget.warning` イベントを発火
+  (CLI は行表示、TUI/GUI は通知)。`enforce: true` なら上限超過後の `session.send` を拒否。
+- smoke に「最初のターンは通り budget.warning が出る / enforce で次のターンが拒否」を追加。
+
 ## v0.1.0 の実装メモ 60(2026-11-15、全体再精査で見つけた不具合の修正)
 
 `packages/core` / `packages/server` / `packages/cli` / Web UI を横断で再精査し、

@@ -794,6 +794,16 @@ export class FullScreenTui {
         this.blocks.push({ kind: "info", text: `… compacted ${event.dropped} older messages` });
         this.frameSoon();
         break;
+      case "budget.warning": {
+        const pct = Math.round(event.ratio * 100);
+        const label = event.scope === "session" ? "session" : "day";
+        this.blocks.push({
+          kind: "info",
+          text: `⚠ ${label} token budget ${event.exceeded ? "exceeded" : "near limit"}: ${event.used}/${event.limit} (${pct}%)`,
+        });
+        this.frameSoon();
+        break;
+      }
       default:
         break;
     }

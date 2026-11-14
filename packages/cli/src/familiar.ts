@@ -2196,10 +2196,14 @@ async function cmdDoctor(): Promise<void> {
     } catch (err) {
       warn(`state.db check skipped: ${err instanceof Error ? err.message : String(err)}`);
     }
-    // external tools the ssh/exec backends rely on
-    for (const bin of ["git", "ssh"]) {
+    // external tools the ssh/exec backends rely on (ssh uses -V, not --version)
+    const probes: Array<[string, string[]]> = [
+      ["git", ["--version"]],
+      ["ssh", ["-V"]],
+    ];
+    for (const [bin, args] of probes) {
       try {
-        execFileSync(bin, ["--version"], { stdio: "ignore" });
+        execFileSync(bin, args, { stdio: "ignore" });
         ok(`${bin} on PATH`);
       } catch {
         warn(`${bin} not found on PATH`);

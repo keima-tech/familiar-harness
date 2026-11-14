@@ -10,6 +10,18 @@ import { repairToolArguments } from "../providers/tool-args.js";
 import type { FileChange } from "../tools/registry.js";
 import { ensureDir } from "../paths.js";
 
+/** One hit from cross-session full-text search. */
+export interface SessionSearchHit {
+  sessionId: string;
+  sessionTitle: string;
+  messageId: string;
+  role: string;
+  seq: number;
+  createdAt: number;
+  /** Matched excerpt; the match is wrapped in << >>. */
+  snippet: string;
+}
+
 /**
  * SQLite-backed session persistence (node:sqlite, zero native deps).
  * Interface kept narrow so backing store can be swapped (spec 06 risk table).
@@ -73,6 +85,8 @@ export interface SessionStore {
   peekUndoTurn(sessionId: string): { turnId: string; changes: FileChange[] } | null;
   /** Forget a turn's edits once they have been applied (or abandoned). */
   dropTurnFileEdits(sessionId: string, turnId: string): number;
+  /** Cross-session full-text search over message bodies (newest first). */
+  searchMessages(query: string, limit?: number): SessionSearchHit[];
   close(): void;
 }
 
@@ -114,6 +128,24 @@ CREATE TABLE IF NOT EXISTS file_edits (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_file_edits_session ON file_edits(session_id, seq);
+-- Full-text search over message bodies. trigram tokenizer so Japanese substring
+-- queries work (unicode61 would treat a whole CJK run as one token).
+CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+  content,
+  content='messages',
+  content_rowid='rowid',
+  tokenize='trigram'
+);
+CREATE TRIGGER IF NOT EXISTS messages_fts_ai AFTER INSERT ON messages BEGIN
+  INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content);
+END;
+CREATE TRIGGER IF NOT EXISTS messages_fts_ad AFTER DELETE ON messages BEGIN
+  INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.rowid, old.content);
+END;
+CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE ON messages BEGIN
+  INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.rowid, old.content);
+  INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content);
+END;
 `;
 
 interface SessionRow {
@@ -127,6 +159,44 @@ interface SessionRow {
   created_at: number;
   updated_at: number;
   effort: string | null;
+}
+
+interface SearchRow {
+  messageId: string;
+  sessionId: string;
+  role: string;
+  seq: number;
+  createdAt: number;
+  title: string | null;
+  snippet: string;
+}
+
+/** Shape a raw search row into a SessionSearchHit. */
+function toHit(r: SearchRow): SessionSearchHit {
+  return {
+    sessionId: r.sessionId,
+    sessionTitle: r.title ?? "",
+    messageId: r.messageId,
+    role: r.role,
+    seq: r.seq,
+    createdAt: r.createdAt,
+    snippet: r.snippet ?? "",
+  };
+}
+
+/** Build a `<<match>>` excerpt for the LIKE fallback path. */
+function makeSnippet(body: string, needle: string): string {
+  const flat = body.replace(/\s+/g, " ").trim();
+  const idx = needle ? flat.toLowerCase().indexOf(needle.toLowerCase()) : -1;
+  if (idx === -1) return flat.slice(0, 160);
+  const start = Math.max(0, idx - 60);
+  const end = Math.min(flat.length, idx + needle.length + 80);
+  const excerpt = flat.slice(start, end);
+  const marked = excerpt.replace(
+    new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"),
+    (m) => `<<${m}>>`,
+  );
+  return (start > 0 ? "…" : "") + marked + (end < flat.length ? "…" : "");
 }
 
 export class SqliteSessionStore implements SessionStore {
@@ -144,6 +214,12 @@ export class SqliteSessionStore implements SessionStore {
     // migration: ssh proxy sessions carry a remote target (JSON)
     if (!cols.some((c) => c.name === "remote")) {
       this.db.exec(`ALTER TABLE sessions ADD COLUMN remote TEXT`);
+    }
+    // backfill the FTS index for messages written before messages_fts existed
+    const msgCount = (this.db.prepare(`SELECT COUNT(*) AS n FROM messages`).get() as { n: number }).n;
+    const ftsCount = (this.db.prepare(`SELECT COUNT(*) AS n FROM messages_fts`).get() as { n: number }).n;
+    if (ftsCount !== msgCount) {
+      this.db.exec(`INSERT INTO messages_fts(messages_fts) VALUES('rebuild')`);
     }
   }
 
@@ -302,6 +378,49 @@ export class SqliteSessionStore implements SessionStore {
       .prepare(`DELETE FROM file_edits WHERE session_id = ? AND turn_id = ?`)
       .run(sessionId, turnId);
     return Number(res.changes ?? 0);
+  }
+
+  searchMessages(query: string, limit = 30): SessionSearchHit[] {
+    const q = query.trim();
+    if (q === "") return [];
+    const cap = Math.max(1, Math.min(200, Math.floor(limit)));
+    const tokens = q.split(/\s+/).filter(Boolean).map((t) => t.replace(/"/g, ""));
+    if (tokens.length === 0) return [];
+    // The trigram tokenizer needs >= 3 chars per token; shorter (e.g. a 2-char
+    // Japanese word) queries fall back to a LIKE scan.
+    const useFts = tokens.every((t) => t.length >= 3);
+    if (useFts) {
+      const match = tokens.map((t) => `"${t}"`).join(" ");
+      const rows = this.db
+        .prepare(
+          `SELECT m.id AS messageId, m.session_id AS sessionId, m.role AS role,
+                  m.seq AS seq, m.created_at AS createdAt, s.title AS title,
+                  snippet(messages_fts, 0, '<<', '>>', '…', 12) AS snippet
+           FROM messages_fts
+           JOIN messages m ON m.rowid = messages_fts.rowid
+           LEFT JOIN sessions s ON s.id = m.session_id
+           WHERE messages_fts MATCH ?
+           ORDER BY rank
+           LIMIT ?`,
+        )
+        .all(match, cap) as unknown as SearchRow[];
+      return rows.map(toHit);
+    }
+    const where = tokens.map(() => `m.content LIKE ? ESCAPE '\\'`).join(" AND ");
+    const likes = tokens.map((t) => `%${t.replace(/[\\%_]/g, "\\$&")}%`);
+    const rows = this.db
+      .prepare(
+        `SELECT m.id AS messageId, m.session_id AS sessionId, m.role AS role,
+                m.seq AS seq, m.created_at AS createdAt, s.title AS title,
+                m.content AS body
+         FROM messages m
+         LEFT JOIN sessions s ON s.id = m.session_id
+         WHERE ${where}
+         ORDER BY m.created_at DESC
+         LIMIT ?`,
+      )
+      .all(...likes, cap) as unknown as (SearchRow & { body: string })[];
+    return rows.map((r) => ({ ...toHit(r), snippet: makeSnippet(r.body, tokens[0] ?? "") }));
   }
 
   appendMessage(sessionId: string, msg: ChatMessage): void {

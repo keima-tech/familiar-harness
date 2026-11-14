@@ -588,6 +588,14 @@ export class AgentServer {
         return this.compact(params, ctx);
       case "session.undo":
         return this.undo(params);
+      case "session.search": {
+        const query = str(params, "query") ?? "";
+        if (query.trim() === "") {
+          throw new RpcError(RPC_ERROR_INVALID_PARAMS, "query is required");
+        }
+        const limit = typeof params["limit"] === "number" ? params["limit"] : undefined;
+        return { hits: this.store.searchMessages(query, limit) };
+      }
       case "session.abort":
         return this.abortTurn(params);
       case "permission.respond": {

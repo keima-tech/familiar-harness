@@ -1570,3 +1570,36 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
   background: var(--bg); color: var(--text); cursor: default; border-style: dashed;
 }
 .skill-editor-body[readonly]:focus { border-color: var(--border); }
+
+/* cross-session search overlay (/find) */
+.find-panel {
+  position: fixed; top: 8vh; left: 50%; transform: translateX(-50%);
+  width: min(680px, 92vw); max-height: 76vh; display: flex; flex-direction: column;
+  background: var(--panel, var(--bg)); color: var(--text);
+  border: 1px solid var(--border); border-radius: 12px; z-index: 60;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45); overflow: hidden;
+}
+.find-panel[hidden] { display: none; }
+.find-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px; font-weight: 600; border-bottom: 1px solid var(--border);
+}
+.find-close {
+  background: none; border: none; color: var(--dim); cursor: pointer; font-size: 14px;
+}
+.find-input {
+  margin: 10px 14px; padding: 8px 10px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--bg); color: var(--text); font: inherit;
+}
+.find-input:focus { outline: none; border-color: var(--accent, var(--border)); }
+.find-results { overflow-y: auto; padding: 0 8px 10px; }
+.find-row {
+  display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left;
+  padding: 8px 10px; border: none; border-radius: 8px; background: none;
+  color: var(--text); cursor: pointer; font: inherit;
+}
+.find-row:hover { background: var(--hover, rgba(127, 127, 127, 0.12)); }
+.find-row.find-empty { color: var(--dim); cursor: default; }
+.find-meta { font-size: 12px; color: var(--dim); }
+.find-snip { font-size: 13px; line-height: 1.4; word-break: break-word; }
+.find-snip b { color: var(--accent, inherit); }

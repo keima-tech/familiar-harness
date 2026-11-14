@@ -844,6 +844,28 @@ console.log("— scenario I: web ui transport —");
     JSON.stringify(undoRes.result ?? undoRes.error ?? {}).slice(0, 200),
   );
 
+  // cross-session full-text search (FTS5 trigram + LIKE fallback)
+  const searchRes = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 11, method: "session.search", params: { query: "MOCK-OK" } }),
+  }).then((r) => r.json());
+  assert(
+    (searchRes.result?.hits ?? []).length > 0,
+    "session.search finds text across sessions (FTS)",
+    JSON.stringify(searchRes.result ?? searchRes.error ?? {}).slice(0, 200),
+  );
+  const shortRes = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 12, method: "session.search", params: { query: "mo" } }),
+  }).then((r) => r.json());
+  assert(
+    (shortRes.result?.hits ?? []).length > 0,
+    "session.search handles short queries (LIKE fallback)",
+    JSON.stringify(shortRes.result ?? shortRes.error ?? {}).slice(0, 200),
+  );
+
   // steering: a message sent while a turn runs joins it at the next step
   const post = (id, method, params) =>
     fetch(`http://127.0.0.1:${PORT}/rpc`, {

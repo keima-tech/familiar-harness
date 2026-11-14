@@ -610,6 +610,12 @@ const STR = {
     "undo.failed": "取り消せませんでした: {0}",
     "cmd.settings": "設定を開く",
     "cmd.search": "トランスクリプト内検索",
+    "cmd.find": "全セッションを検索",
+    "find.title": "全セッション検索",
+    "find.placeholder": "検索語を入力…",
+    "find.none": "一致するメッセージがありません",
+    "find.untitled": "(無題)",
+    "find.failed": "検索できませんでした: {0}",
     "top.todo": "タスク (todo)",
     "drawer.todo": "タスク (todo)",
     "todo.empty": "タスクはありません。エージェントに「TODO: ...」形式で依頼するとここに表示されます",
@@ -1156,6 +1162,12 @@ const STR = {
     "undo.failed": "undo failed: {0}",
     "cmd.settings": "open settings",
     "cmd.search": "search the transcript",
+    "cmd.find": "search all sessions",
+    "find.title": "Search all sessions",
+    "find.placeholder": "type to search…",
+    "find.none": "no matching messages",
+    "find.untitled": "(untitled)",
+    "find.failed": "search failed: {0}",
     "top.todo": "tasks (todo)",
     "drawer.todo": "tasks (todo)",
     "todo.empty": "no tasks yet — ask the agent with a \"TODO: …\" list and it shows up here",
@@ -2544,6 +2556,7 @@ const COMMANDS = [
   { cmd: "/undo", key: "cmd.undo", run: () => void undoLastTurn() },
   { cmd: "/settings", key: "cmd.settings", run: () => openSettingsModal() },
   { cmd: "/search", key: "cmd.search", run: () => toggleSearch() },
+  { cmd: "/find", key: "cmd.find", run: () => openFindPanel() },
 ];
 
 /** The trailing "@" token of the composer value, or null when absent. */
@@ -7027,6 +7040,92 @@ async function compactContext() {
     }
   } catch (err) {
     toast(t("compact.failed", err.message), "err");
+  }
+}
+
+/** Cross-session full-text search overlay (/)find. */
+function openFindPanel() {
+  let panel = document.getElementById("find-panel");
+  if (!panel) {
+    panel = document.createElement("div");
+    panel.id = "find-panel";
+    panel.className = "find-panel";
+    const head = document.createElement("div");
+    head.className = "find-head";
+    head.textContent = t("find.title");
+    const input = document.createElement("input");
+    input.className = "find-input";
+    input.type = "search";
+    input.placeholder = t("find.placeholder");
+    const results = document.createElement("div");
+    results.className = "find-results";
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "find-close";
+    close.textContent = "✕";
+    close.addEventListener("click", () => panel.remove());
+    head.appendChild(close);
+    panel.append(head, input, results);
+    document.body.appendChild(panel);
+    let timer = null;
+    input.addEventListener("input", () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => void runFind(input.value), 250);
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") panel.remove();
+      e.stopPropagation();
+    });
+  }
+  panel.hidden = false;
+  const input = panel.querySelector(".find-input");
+  input.value = "";
+  panel.querySelector(".find-results").innerHTML = "";
+  input.focus();
+}
+
+async function runFind(query) {
+  const panel = document.getElementById("find-panel");
+  if (!panel) return;
+  const box = panel.querySelector(".find-results");
+  const q = (query || "").trim();
+  if (q === "") {
+    box.innerHTML = "";
+    return;
+  }
+  let hits = [];
+  try {
+    const res = await rpc("session.search", { query: q, limit: 40 });
+    hits = res?.hits ?? [];
+  } catch (err) {
+    box.innerHTML = `<div class="find-row find-empty">${esc(t("find.failed", err.message))}</div>`;
+    return;
+  }
+  box.innerHTML = "";
+  if (hits.length === 0) {
+    const none = document.createElement("div");
+    none.className = "find-row find-empty";
+    none.textContent = t("find.none");
+    box.appendChild(none);
+    return;
+  }
+  for (const h of hits) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "find-row";
+    const meta = document.createElement("span");
+    meta.className = "find-meta";
+    meta.textContent = `${h.sessionTitle || t("find.untitled")} · ${h.role}`;
+    const snip = document.createElement("span");
+    snip.className = "find-snip";
+    // snippet uses <<match>> markers; render them safely
+    snip.innerHTML = esc(h.snippet || "").replace(/&lt;&lt;/g, "<b>").replace(/&gt;&gt;/g, "</b>");
+    row.append(meta, snip);
+    row.addEventListener("click", () => {
+      panel.remove();
+      void openSession(h.sessionId);
+    });
+    box.appendChild(row);
   }
 }
 

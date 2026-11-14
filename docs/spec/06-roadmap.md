@@ -988,6 +988,16 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   「write で作成 → session.undo で削除」を追加。office_create などバイナリ生成は
   対象外(テキスト変更のみ)。
 
+### 4. セッション横断の全文検索(FTS5)
+
+- `messages` の外部コンテンツ FTS5(`tokenize='trigram'`)をトリガ同期で維持
+  (trigram なので日本語の部分一致も可)。起動時に件数不一致なら `rebuild` で
+  既存メッセージを索引。
+- 3 文字未満の語は trigram が効かないため LIKE フォールバック(該当箇所を `<<>>` で強調)。
+- RPC `session.search {query,limit}` + CLI `familiar search <query>` + Web UI の
+  `/find`(オーバーレイで結果一覧、クリックでそのセッションを開く)。smoke に
+  FTS ヒットと短語フォールバックの 2 ケースを追加。
+
 ## v0.1.0 の実装メモ 60(2026-11-15、全体再精査で見つけた不具合の修正)
 
 `packages/core` / `packages/server` / `packages/cli` / Web UI を横断で再精査し、

@@ -54,6 +54,7 @@ Usage:
                         # self-update from release assets (install.sh installs)
   familiar token [--write] [--clear]   # M2 bearer token for familiar serve
   familiar sessions list | show <id> [--messages] | delete <id>
+  familiar search <query>            # full-text search across all sessions
   familiar model list [provider]
   familiar memory [list] | pending | approve <id> | reject <id> | approval on|off
   familiar skills [list] | view <name> | pending | approve <id|all> | reject <id>
@@ -1437,6 +1438,36 @@ async function cmdServe(flags: Record<string, string | boolean>): Promise<void> 
   process.on("SIGTERM", shutdown);
 }
 
+async function cmdSearch(flags: Record<string, string | boolean>, positionals: string[]): Promise<void> {
+  const query = positionals.join(" ").trim();
+  if (!query) fail("usage: familiar search <query>");
+  const server = new AgentServer({ config: loadCliConfig(flags) });
+  const res = (await server.dispatch("session.search", {
+    query,
+    limit: toNumber(flag(flags, "limit")) ?? 50,
+  })) as {
+    hits: Array<{
+      sessionId: string;
+      sessionTitle: string;
+      role: string;
+      createdAt: number;
+      snippet: string;
+    }>;
+  };
+  const hits = res.hits ?? [];
+  if (hits.length === 0) {
+    process.stdout.write(dim("(no matches)\n"));
+    return;
+  }
+  for (const h of hits) {
+    const date = new Date(h.createdAt).toISOString().slice(0, 16).replace("T", " ");
+    process.stdout.write(
+      `${dim(h.sessionId.slice(0, 8))}  ${dim(date)}  ${cyan(h.role)}  ${h.sessionTitle || dim("(untitled)")}\n` +
+        `  ${h.snippet}\n`,
+    );
+  }
+}
+
 async function cmdSessions(flags: Record<string, string | boolean>, positionals: string[]): Promise<void> {
   const sub = positionals[0] ?? "list";
   const server = new AgentServer({ config: loadCliConfig(flags) });
@@ -2135,6 +2166,9 @@ async function main(): Promise<void> {
         break;
       case "sessions":
         await cmdSessions(flags, rest);
+        break;
+      case "search":
+        await cmdSearch(flags, rest);
         break;
       case "model":
         await cmdModel(flags, rest);

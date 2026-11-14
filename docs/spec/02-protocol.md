@@ -44,6 +44,11 @@ POST /rpc
 | `session.delete` | `{ id }` | `{ deleted: true }` |
 | `session.send` | `{ id, text, provider?, model?, effort?, maxSteps?, yolo?, plan?, permissionMode? }` | `{ turnId, steps, toolCalls, usage }`(イベントは WS / onEvent で流れる) |
 | `session.repair` | `{ id }` | `{ repaired: n }` — 壊れた tool_call 引数(切り詰め JSON)を修復 |
+| `session.compact` | `{ id }` | `{ compacted, dropped, kept }` — 実行中は拒否。中盤を要約して履歴を置換 |
+| `session.undo` | `{ id }` | `{ undone, turnId?, paths[], failed[] }` — 直前ターンの write/edit を逆適用。実行中は拒否 |
+| `session.search` | `{ query, limit? }` | `{ hits: [{ sessionId, sessionTitle, messageId, role, seq, createdAt, snippet }] }` — 全セッション横断検索(FTS5) |
+| `session.export` | `{ id, format?: "markdown"\|"json" }` | `{ format, filename, content }` |
+| `session.import` | `{ content, cwd?, title? }` | `{ session, imported }` — JSON トランスクリプトから新セッション |
 | `office.templates` | `{}` | `{ templates: [{ name, kind, file, size }] }` — 登録済み Office テンプレート |
 | `office.templates.import` | `{ path }` または `{ name, dataBase64 }` | `{ template, templates }` — テンプレートを `~/.familiar/templates/` に登録 |
 | `office.templates.delete` | `{ name }` | `{ removed, templates }` |
@@ -64,8 +69,14 @@ POST /rpc
 | `skills.reject`(M3) | `{ prefix }` | `{ rejected: n }` |
 | `curator.status`(M4) | `{}` | `{ curator: { enabled, paused, consolidate, lastRunAt?, nextDueAt?, stale[], archived[], snapshots } }` |
 | `curator.run`(M4) | `{ dryRun?, consolidate? }` | `{ phase1, consolidation? }` — phase-1 遷移 + (opt-in) 統合提案の staging |
-| `mcp.status`(M5) | `{}` | `{ servers: [{ name, state, tools[], error? }] }` — 各 MCP サーバの接続状態とツール一覧 |
-| `cron.status`(M5) | `{}` | `{ started, jobs: [{ name, everyMinutes, prompt, lastRunAt?, lastStatus?, nextRunAt?, onceAtBoot, ranOnce }] }` |
+| `mcp.status`(M5) | `{}` or `{ session? }` | `{ servers: [{ name, state, tools[], error?, reconnects, lastOkAt? }], remote? }` — 接続状態・ツール・再接続回数 |
+| `mcp.restart`(M5) | `{ name, session? }` | `{ name, servers }` — 1 サーバを再起動して再 discovery |
+| `cron.status`(M5) | `{}` | `{ started, jobs: [{ name, everyMinutes, prompt, lastRunAt?, lastStatus?, nextRunAt?, onceAtBoot, ranOnce, enabled }] }` |
+| `cron.run` | `{ name }` | `{ started: true }` — ジョブを即時実行(スケジューラ未起動でも可) |
+| `cron.setEnabled` | `{ name, enabled }` | `{ name, enabled }` — 稼働中へ反映 + config.yaml に永続化 |
+| `permissions.policy` | `{}` | `{ user, effective }` — bash ポリシー(ユーザー定義 + 実効) |
+| `permissions.test` | `{ command }` | `{ action: "allow"\|"ask"\|"deny", reason? }` — ルールテスタ |
+| `permissions.setPolicy` | `{ mode?, allow?, ask?, deny? }` | `{ ok: true, effective }` — 保存 + 反映 |
 
 ### serve の静的配信(M4)
 

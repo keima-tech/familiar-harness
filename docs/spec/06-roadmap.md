@@ -952,6 +952,57 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
 - **結論**: **Electron シェル(`packages/desktop`)を継続**。サイズは別途
   electron-builder 設定(locale 削減等)で圧縮する。
 
+## v0.1.0 の実装メモ 60(2026-11-15、全体再精査で見つけた不具合の修正)
+
+`packages/core` / `packages/server` / `packages/cli` / Web UI を横断で再精査し、
+潜在不具合のうち**低リスクで価値の高いものを修正**した。挙動を変えるもの
+(exec のプロセスツリー停止、`permissions.files.bounds` の実効化)は提案に留める。
+
+セキュリティ / クラッシュ:
+- **`fs.upload` のパストラバーサル**: クライアント供給の session id を upload バケット名に
+  そのまま使い、`session: "../../.."` で `~/.familiar/uploads` の外へ書き込めた →
+  `[A-Za-z0-9_-]` に slug 化。
+- **`skill_view` の読み取りトラバーサル**: `name` を無検証で `path.join(root, name)` に
+  渡していた → 区切り/`..`/絶対パスを拒否し、解決先が root 内か再確認。
+- **`POST /rpc` の本文無制限**: 巨大ボディで `familiar serve` を OOM させ得る →
+  32MB 上限(413 + destroy)。
+- **メモリ注入のクラッシュ**: `tags` の無い `memories/*.json` でターン開始前に例外 →
+  `Array.isArray` で許容。
+- **`session.update` のリモート cwd**: ssh セッションでもローカルの `path.resolve`/
+  `statSync` で検証し、正しいリモートフォルダを拒否していた → バックエンドで解決/stat。
+
+リソース / 競合:
+- **LSP クライアント未登録**: `diagnose()` が作った `LspClient` を `this.clients` に
+  入れず、呼ぶたび別サーバを起動(リーク・`stopAll` 不可) → 登録。
+- **cron の多重起動**: 実行が周期より長いと次 tick で重複起動 → `inFlight` で排他。
+- **`appendMessage` の seq 競合**: `MAX(seq)+1` と INSERT が別文で、serve と
+  `familiar run` の同時書き込みで UNIQUE 違反 → `INSERT … SELECT COALESCE(MAX(seq)+1,0)` に単文化。
+- **承認タイマー未クリア**: 解決済みプロンプトが 300s タイマーを残す → `clearTimeout` + `unref`。
+- **HTTP 400 リトライの過剰一致**: `40[0-9]` が 401/403/404 でも履歴を書き換えた →
+  `HTTP 400\b` のみ。リトライ時に `contextWindowTokens`/`extraTools`/`excludeToolPrefix`
+  を引き継ぐ(プロキシでローカル MCP ツールへフォールバックする穴)。abort 後は残留
+  ステアリングで新ターンを始めない。
+
+正しさ / UX:
+- **`office_create` のパス種別**: ホストの `node:path` を使っていた(Windows から
+  ssh(posix) セッションだと壊れる) → `ctx.backend.path`。
+- **SSE 最終行の取りこぼし**: 改行なしで終わる最終 `data:` を捨てていた → 残余バッファを処理。
+- **MCP ツールが Full access でも承認を求める** → `ctx.yolo` を尊重。
+- **websearch の実体デコードが無効**(`&lt;` 等を素の `&`/`<` に置換していた)→ 正しい
+  デコードに修正(`&amp;` は最後)。
+- **CLI の WebSocket ハング**: `/ws` ハンドシェイク失敗時に promise が settling せず
+  `dispatch` が永久待ち → error/close で reject。
+- **CLI 承認の二重 readline**: 承認の y/N を REPL も読み、誤メッセージが送信されていた →
+  プロンプト中は REPL を pause/resume。
+- **i18n**: 未定義の `ssh.addSsh` が生キー表示(ja/en 追加)、未使用の `cmd.build` を削除、
+  Google 認証タブを `noopener,noreferrer` で開く。
+
+**テスト**: typecheck / smoke 通過、ssh-e2e 全項目通過(office プレビュー用モックに
+`backend.path` を補完)。`exec/local.ts`+`exec/ssh.ts` のタイムアウトが**プロセスツリーを
+殺さない**(孫プロセスが孤児化、`runSpawn` が exit 前に resolve)件は SIGINT 挙動を
+変えるため未修正(提案)。`permissions.files.bounds`(`read`/`glob`/`grep` が絶対パスで
+`~/.familiar/secrets/*` 等を読める)も未実効のまま(提案)。
+
 ## v0.1.0 の実装メモ 59(2026-11-14、コンパクションの保険と手動 /compact)
 
 - **リアクティブ保険(溢れからの自動回復)**: プロアクティブ判定(窓×ratio / 128k フォールバック)

@@ -2050,6 +2050,62 @@ try {
   check(langSwitch?.changed === true, "switching language updates the settings nav immediately", JSON.stringify(langSwitch));
   check(langSwitch?.cjkInContent === false, "switching language updates the settings panel immediately", JSON.stringify(langSwitch));
 
+  // ---- left rail collapse / session tabs / labelled settings button --------
+  const chrome = await evalOnce(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const out = {};
+    try {
+      const app = document.querySelector("#app");
+      const toggle = document.querySelector("#sidebar-toggle");
+      out.toggleVisible = getComputedStyle(toggle).display !== "none";
+      toggle.click(); await sleep(60);
+      out.collapsed = app.classList.contains("side-collapsed") && getComputedStyle(document.querySelector("#sidebar")).display === "none";
+      toggle.click(); await sleep(60);
+      out.expanded = !app.classList.contains("side-collapsed");
+
+      const sb = document.querySelector("#open-settings");
+      out.settingsLabel = sb?.querySelector(".sb-label")?.textContent ?? "";
+      out.settingsVisible = !!sb && getComputedStyle(sb).display !== "none";
+
+      const cwd = state.currentSession?.cwd || "/tmp";
+      const a = await rpc("session.create", { cwd });
+      const b = await rpc("session.create", { cwd });
+      await openSession(a.id); await sleep(150);
+      await openSession(b.id); await sleep(150);
+      const bar = document.querySelector("#tabs");
+      const tabsOf = () => [...bar.querySelectorAll(".tab")];
+      out.tabCount = tabsOf().length;
+      const other = tabsOf().find((t) => t.dataset.id !== state.sessionId) ?? null;
+      out.otherTab = other?.dataset.id ?? null;
+      other?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await sleep(200);
+      out.tabSwitch = !!other && state.sessionId === other.dataset.id;
+      bar.querySelector(".tab.active .tab-close")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await sleep(200);
+      out.tabCloseCount = tabsOf().length;
+      await rpc("session.delete", { id: a.id }).catch(() => {});
+      await rpc("session.delete", { id: b.id }).catch(() => {});
+    } catch (err) {
+      out.error = String(err && err.stack ? err.stack : err);
+    }
+    return out;
+  })()`);
+  check(
+    chrome?.toggleVisible === true && chrome?.collapsed === true && chrome?.expanded === true,
+    "the session rail collapses and expands",
+    JSON.stringify(chrome),
+  );
+  check(
+    typeof chrome?.settingsLabel === "string" && chrome.settingsLabel.length > 0 && chrome?.settingsVisible === true,
+    "the settings button is a visible labeled control",
+    JSON.stringify(chrome),
+  );
+  check(
+    chrome?.tabCount >= 2 && chrome?.tabSwitch === true && chrome?.tabCloseCount === chrome.tabCount - 1,
+    "sessions of one folder open as switchable tabs",
+    JSON.stringify(chrome),
+  );
+
   // ---- failure path: unreachable host --------------------------------------
   const failedTest = await evalOnce(`(async () => {
     const r = await window.familiarDesktop.saveConnection({ host: "badhost", name: "bad" });

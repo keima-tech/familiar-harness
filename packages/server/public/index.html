@@ -60,7 +60,9 @@
             <span id="turn-spinner" class="spinner" hidden></span><span id="turn-label"></span>
           </div>
           <span id="todo-progress" class="todo-progress" hidden></span>
-          <button id="open-settings" class="iconbtn" title="設定" data-i18n-title="side.settings">⚙</button>
+          <button id="open-settings" class="iconbtn settings-btn" title="設定" data-i18n-title="side.settings">
+            <span class="sb-ic" aria-hidden="true">⚙</span><span class="sb-label" data-i18n="side.settings">設定</span>
+          </button>
           <button id="ctx-gauge" class="gauge" title="コンテキスト使用量" data-i18n-title="chip.ctx">
             <svg viewBox="0 0 22 22" width="20" height="20">
               <circle class="gauge-track" cx="11" cy="11" r="8"></circle>
@@ -73,6 +75,8 @@
           </button>
         </div>
       </header>
+
+      <div id="tabs" class="tabs" role="tablist" hidden></div>
 
       <div id="conn-banner" class="conn-banner" hidden>
         <span class="conn-banner-ic">⚡</span>

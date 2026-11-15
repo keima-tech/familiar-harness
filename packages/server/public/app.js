@@ -101,6 +101,7 @@ const STR = {
     "side.foldAll": "すべてのフォルダーを折りたたむ",
     "side.unfoldAll": "すべてのフォルダーを展開する",
     "side.settings": "設定",
+    "tabs.close": "タブを閉じる",
     "top.inbox": "承認インボックス",
     "top.status": "ステータス",
     "del.confirm": "セッション「{0}」を削除しますか? この操作は元に戻せません",
@@ -697,6 +698,7 @@ const STR = {
     "side.foldAll": "collapse all folders",
     "side.unfoldAll": "expand all folders",
     "side.settings": "Settings",
+    "tabs.close": "close tab",
     "top.inbox": "approvals",
     "top.status": "status",
     "del.confirm": "delete session \"{0}\"? this cannot be undone",
@@ -1327,6 +1329,7 @@ function rerenderLocalizedChrome() {
     renderSettingsSection(settingsSection);
   }
   if ($("#sessions")) renderSessions();
+  renderTabs();
   void refreshTodoProgress();
   const rp = $("#rightpane");
   if (rp && !rp.hidden) {
@@ -1660,6 +1663,8 @@ const state = {
   lastUserText: "",
   /** instructions typed while a turn runs; sent one by one after it ends */
   queue: [],
+  /** sessions opened as tabs (ids); only the active folder's are shown */
+  openTabs: [],
 };
 
 const ns = {
@@ -1935,6 +1940,7 @@ function renderSessions() {
   }
   renderFoldAllButton();
   applySessionFilter();
+  renderTabs(); // keep tab titles / running dots in sync, prune gone sessions
 }
 
 function esc(text) {
@@ -2271,8 +2277,125 @@ async function contextWindowFor(provider, model) {
   return state.modelCtxCache[key];
 }
 
+// ---------------------------------------------------------------------------
+// session tabs (several sessions of the same folder, kept open side by side)
+// ---------------------------------------------------------------------------
+function loadOpenTabs() {
+  try {
+    const raw = localStorage.getItem("familiar.openTabs");
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr.filter((x) => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveOpenTabs() {
+  try {
+    localStorage.setItem("familiar.openTabs", JSON.stringify(state.openTabs.slice(-24)));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+function sessionById(id) {
+  return (
+    state.sessions.find((s) => s.id === id) ??
+    (state.currentSession?.id === id ? state.currentSession : undefined)
+  );
+}
+
+function tabGroupKey(s) {
+  return `${sessionTarget(s)}|${s.cwd || ""}`;
+}
+
+function activeGroupKey() {
+  const active = sessionById(state.sessionId);
+  return active ? tabGroupKey(active) : null;
+}
+
+function addOpenTab(id) {
+  if (!id || state.openTabs.includes(id)) return;
+  state.openTabs.push(id);
+  saveOpenTabs();
+}
+
+function removeOpenTab(id) {
+  const i = state.openTabs.indexOf(id);
+  if (i === -1) return;
+  state.openTabs.splice(i, 1);
+  saveOpenTabs();
+}
+
+/** Tabs of the active session's folder, in open order. */
+function currentGroupTabs() {
+  const group = activeGroupKey();
+  if (group === null) return [];
+  return state.openTabs
+    .map((id) => sessionById(id))
+    .filter((s) => s && tabGroupKey(s) === group);
+}
+
+function renderTabs() {
+  const bar = $("#tabs");
+  if (!bar) return;
+  const tabs = currentGroupTabs();
+  bar.hidden = tabs.length === 0;
+  bar.innerHTML = "";
+  for (const s of tabs) {
+    const running =
+      state.runningTextBySession.has(s.id) || state.busySessionId === s.id || s.running === true;
+    const tab = document.createElement("button");
+    tab.type = "button";
+    tab.className = `tab${s.id === state.sessionId ? " active" : ""}`;
+    tab.setAttribute("role", "tab");
+    tab.dataset.id = s.id;
+    const title = document.createElement("span");
+    title.className = "tab-title";
+    title.textContent = s.title || s.id.slice(0, 8);
+    title.title = s.title || s.id.slice(0, 8);
+    tab.appendChild(title);
+    if (running) {
+      const dot = document.createElement("span");
+      dot.className = "tab-run";
+      tab.appendChild(dot);
+    }
+    const close = document.createElement("span");
+    close.className = "tab-close";
+    close.textContent = "✕";
+    close.title = t("tabs.close");
+    close.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      closeTab(s.id);
+    });
+    tab.appendChild(close);
+    tab.addEventListener("click", () => {
+      if (s.id !== state.sessionId) void openSession(s.id);
+    });
+    bar.appendChild(tab);
+  }
+}
+
+function closeTab(id) {
+  const wasActive = id === state.sessionId;
+  const group = activeGroupKey();
+  removeOpenTab(id);
+  if (!wasActive) {
+    renderTabs();
+    return;
+  }
+  // the active tab closed: fall back to the last remaining tab of the folder
+  const remaining = state.openTabs
+    .map((tid) => sessionById(tid))
+    .filter((s) => s && group !== null && tabGroupKey(s) === group);
+  const next = remaining[remaining.length - 1];
+  if (next) void openSession(next.id);
+  else renderTabs();
+}
+
 async function openSession(id) {
   state.sessionId = id;
+  addOpenTab(id);
   state.pendingEvents.delete(id);
   for (const li of document.querySelectorAll("#sessions li")) {
     li.classList.toggle("active", li.dataset.id === id);
@@ -2283,6 +2406,9 @@ async function openSession(id) {
   if (state.sessionId !== id) return;
   const s = data.session;
   state.currentSession = s;
+  // keep the tab machinery working for a session that is not in the list yet
+  // (e.g. one just created): make sure it is addressable by id
+  if (!state.sessions.some((x) => x.id === s.id)) state.sessions.push(s);
   $("#session-title").textContent = s.title || s.id.slice(0, 8);
   const bits = [s.provider];
   if (s.model) bits.push(s.model);
@@ -2316,6 +2442,7 @@ async function openSession(id) {
     filesSessionKey = null;
     void renderFilesTab();
   }
+  renderTabs();
 }
 
 /** Header chip showing the session's working folder (click to change). */
@@ -2429,6 +2556,7 @@ async function deleteSession(id) {
     toast(t("toast.deleteFailed", err.message), "err");
     return;
   }
+  removeOpenTab(id);
   if (state.sessionId === id) {
     state.sessionId = null;
     state.currentSession = null;
@@ -7883,6 +8011,7 @@ function boot() {
     if (currentModePref() === "system") applyTheme();
   });
 
+  state.openTabs = loadOpenTabs();
   $("#new-session").addEventListener("click", () => openNewSessionModal());
   const closeSidebar = () => {
     $("#sidebar").classList.remove("open");
@@ -7892,9 +8021,24 @@ function boot() {
     $("#sidebar").classList.add("open");
     if (window.matchMedia("(max-width: 900px)").matches) $("#drawer-backdrop").hidden = false;
   };
+  // desktop: the hamburger collapses/expands the rail; the choice persists.
+  const setSidebarCollapsed = (collapsed) => {
+    $("#app").classList.toggle("side-collapsed", collapsed);
+    $("#sidebar-toggle").setAttribute("aria-expanded", String(!collapsed));
+    try { localStorage.setItem("familiar.sidebarCollapsed", collapsed ? "1" : "0"); } catch { /* ignore */ }
+  };
+  try {
+    setSidebarCollapsed(localStorage.getItem("familiar.sidebarCollapsed") === "1");
+  } catch {
+    /* storage unavailable */
+  }
   $("#sidebar-toggle").addEventListener("click", () => {
-    if ($("#sidebar").classList.contains("open")) closeSidebar();
-    else openSidebar();
+    if (window.matchMedia("(max-width: 900px)").matches) {
+      if ($("#sidebar").classList.contains("open")) closeSidebar();
+      else openSidebar();
+    } else {
+      setSidebarCollapsed(!$("#app").classList.contains("side-collapsed"));
+    }
   });
   $("#close-sidebar").addEventListener("click", closeSidebar);
   $("#drawer-backdrop").addEventListener("click", closeSidebar);

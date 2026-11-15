@@ -1271,7 +1271,9 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
     max-height: calc(100vh - 72px); overflow-y: auto;
   }
 }
-#sidebar-toggle { display: none; }
+/* the sidebar toggle works on every width: on desktop it collapses the rail,
+   on narrow screens it opens the drawer. */
+#sidebar-toggle { display: inline-flex; }
 @media (max-width: 900px) {
   #app { grid-template-columns: 1fr; grid-template-areas: "main"; }
   #sidebar {
@@ -1633,3 +1635,49 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
 .perm-input { flex: 1 1 auto; }
 .perm-save { margin-top: 12px; padding: 7px 16px; border: none; border-radius: 8px; background: var(--accent, #6ea8fe); color: #0d0d12; cursor: pointer; }
 .perm-save:disabled { opacity: 0.6; }
+
+/* ---- collapsible left rail (desktop) -------------------------------------- */
+/* the hamburger toggles this; the choice persists in localStorage. */
+#app.side-collapsed { grid-template-columns: 0 minmax(520px, 1fr) auto; }
+#app.side-collapsed #sidebar { display: none; }
+
+/* ---- session tabs (same folder) ------------------------------------------- */
+.tabs {
+  display: flex; align-items: stretch; gap: 2px; flex: none;
+  padding: 0 12px; overflow-x: auto; border-bottom: 1px solid var(--border);
+}
+.tabs[hidden] { display: none; }
+.tab {
+  display: flex; align-items: center; gap: 6px; max-width: 230px;
+  padding: 6px 6px 6px 12px; cursor: pointer; white-space: nowrap;
+  background: transparent; border: 1px solid transparent; border-bottom: none;
+  border-radius: 8px 8px 0 0; color: var(--dim); font: inherit; font-size: 12.5px;
+}
+.tab:hover { color: var(--text); background: var(--panel2); }
+.tab.active { background: var(--panel); color: var(--text); border-color: var(--border); }
+.tab .tab-title { overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+.tab .tab-run { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
+.tab .tab-close {
+  border: none; background: transparent; color: var(--dim); cursor: pointer;
+  padding: 0 3px; font-size: 13px; line-height: 1; border-radius: 5px; flex: none;
+}
+.tab .tab-close:hover { color: var(--err); background: var(--hover); }
+.tab-add {
+  flex: none; align-self: center; margin-left: 4px; padding: 3px 9px;
+  border: 1px solid var(--border); border-radius: 8px; background: transparent;
+  color: var(--dim); cursor: pointer; font-size: 13px; line-height: 1;
+}
+.tab-add:hover { color: var(--text); border-color: var(--accent); }
+
+/* ---- settings button: labeled so it is easy to find ----------------------- */
+.top-actions .iconbtn.settings-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 11px; font-size: 13px; font-weight: 600;
+  border: 1px solid var(--border); background: var(--panel2);
+}
+.top-actions .iconbtn.settings-btn:hover { border-color: var(--accent); background: var(--hover); }
+.settings-btn .sb-ic { font-size: 15px; line-height: 1; }
+@media (max-width: 900px) {
+  .top-actions .iconbtn.settings-btn { padding: 5px 9px; }
+  .settings-btn .sb-label { display: none; }
+}

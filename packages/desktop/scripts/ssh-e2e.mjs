@@ -2027,6 +2027,29 @@ try {
   check(modalCjk === false, "EN mode: new-session dialog renders without CJK");
   await evalOnce(`setLang("ja"); applyI18n(); closeNewSessionModal(); 1`);
 
+  // switching the language from Settings must update the JS-rendered chrome
+  // (settings nav + panel), not only the static data-i18n shell.
+  const langSwitch = await evalOnce(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    setLang("ja");
+    openSettingsModal("general");
+    await sleep(200);
+    const navText = () => [...document.querySelectorAll("#settings-nav .nav-item")].map((e) => e.textContent).join("|");
+    const navJa = navText();
+    const sel = [...document.querySelectorAll("#settings-content select")].find((s) => [...s.options].some((o) => o.value === "en"));
+    if (!sel) return { changed: false, reason: "no language select" };
+    sel.value = "en";
+    sel.dispatchEvent(new Event("change", { bubbles: true }));
+    await sleep(300);
+    const navEn = navText();
+    const content = (document.querySelector("#settings-content")?.textContent ?? "").slice(0, 120);
+    closeSettingsModal();
+    setLang("ja");
+    return { changed: navJa !== navEn, cjkInContent: /[\\u3040-\\u30ff\\u3400-\\u9fff]/.test(content) };
+  })()`);
+  check(langSwitch?.changed === true, "switching language updates the settings nav immediately", JSON.stringify(langSwitch));
+  check(langSwitch?.cjkInContent === false, "switching language updates the settings panel immediately", JSON.stringify(langSwitch));
+
   // ---- failure path: unreachable host --------------------------------------
   const failedTest = await evalOnce(`(async () => {
     const r = await window.familiarDesktop.saveConnection({ host: "badhost", name: "bad" });

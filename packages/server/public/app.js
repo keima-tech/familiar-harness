@@ -1310,6 +1310,29 @@ function setLang(value) {
   document.documentElement.lang = lang;
   try { localStorage.setItem("familiar.lang", lang); } catch { /* ignore */ }
   applyI18n();
+  // String built by JS renderers baked t() in at render time — re-render them
+  // now so nothing stays in the old language until an unrelated interaction.
+  rerenderLocalizedChrome();
+}
+
+/**
+ * Re-render the JS-built chrome whose text is set with t() at render time
+ * (the static shell is handled by applyI18n through data-i18n attributes).
+ * Called on a language change; guarded so it is safe before boot finishes.
+ */
+function rerenderLocalizedChrome() {
+  const settings = $("#settings-overlay");
+  if (settings && !settings.hidden) {
+    renderSettingsNav();
+    renderSettingsSection(settingsSection);
+  }
+  if ($("#sessions")) renderSessions();
+  void refreshTodoProgress();
+  const rp = $("#rightpane");
+  if (rp && !rp.hidden) {
+    const tab = activePaneTab();
+    if (tab) showPane(tab);
+  }
 }
 
 /**
@@ -4532,8 +4555,7 @@ function renderGeneralSection(content) {
     t("set.lang"),
     t("set.langDesc"),
     selectControl([["日本語", "ja"], ["English", "en"]], lang, (value) => {
-      setLang(value);
-      renderSettingsSection("general");
+      setLang(value); // re-renders the settings nav + section itself
     }),
   ));
   content.appendChild(c);

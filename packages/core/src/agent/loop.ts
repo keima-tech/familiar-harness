@@ -166,6 +166,8 @@ export class AgentRunner {
     const turnId = crypto.randomUUID();
     /** reversible file mutations from this turn's tools, for `/undo` */
     const fileChanges: FileChange[] = [];
+    /** estimated prompt composition of the last step (for the context report) */
+    let lastContext: ContextBreakdown | undefined;
     const usage: Usage = {};
     /** prompt tokens reported by the LAST step — the real context size */
     let lastStepPromptTokens = 0;
@@ -316,6 +318,8 @@ export class AgentRunner {
           signal: opts.signal,
           effort,
         };
+        // token composition of what we are about to send (context report)
+        lastContext = estimateContext(system, chatParams.tools, history);
         const onChunk = (chunk: Parameters<Parameters<typeof provider.chat>[1]>[0]): void => {
           if (chunk.type === "text") {
             textParts.push(chunk.text);
@@ -399,6 +403,8 @@ export class AgentRunner {
             // per-step usage — lets the web UI show the real context size after
             // a reload instead of guessing from the transcript
             ...(result.usage && (result.usage.promptTokens ?? 0) > 0 ? { usage: result.usage } : {}),
+            // token composition — shown in the context popover, kept on reload
+            ...(lastContext ? { context: lastContext } : {}),
           },
         };
         this.store.appendMessage(session.id, assistantMsg);
@@ -543,7 +549,12 @@ export class AgentRunner {
             : {}),
         ...(usage.completionTokens ? { completionTokens: usage.completionTokens } : {}),
       };
-      opts.onEvent({ type: "turn.end", turnId, usage: finalUsage });
+      opts.onEvent({
+        type: "turn.end",
+        turnId,
+        usage: finalUsage,
+        ...(lastContext ? { context: lastContext } : {}),
+      });
       await this.hooks?.run("turn_complete", {
         event: "turn_complete",
         sessionId: session.id,
@@ -855,6 +866,47 @@ export function isContextLengthError(err: unknown): boolean {
     (msg.includes("too long") &&
       (msg.includes("prompt") || msg.includes("context") || msg.includes("input") || msg.includes("message")))
   );
+}
+
+/** Estimated token composition of the prompt that will be sent next. */
+export interface ContextBreakdown {
+  system: number;
+  tools: number;
+  history: number;
+  toolResults: number;
+  total: number;
+}
+
+/**
+ * Rough token composition (4 chars ≈ 1 token, the same heuristic compaction
+ * uses). Splits the prompt into the system prompt, tool schemas, plain
+ * conversation history, and tool results, so the UI can show where context
+ * goes and the tool-result compressor can target the biggest slice.
+ */
+export function estimateContext(
+  system: string | undefined,
+  tools: { name: string; description?: string; parameters?: unknown }[] | undefined,
+  messages: ChatMessage[],
+): ContextBreakdown {
+  const tokens = (chars: number): number => Math.ceil(chars / 4);
+  let historyChars = 0;
+  let toolChars = 0;
+  for (const m of messages) {
+    const len = (m.content ?? "").length + (m.toolCalls ? JSON.stringify(m.toolCalls).length : 0);
+    if (m.role === "tool") toolChars += len;
+    else historyChars += len;
+  }
+  const systemTokens = tokens((system ?? "").length);
+  const toolsTokens = tokens(JSON.stringify(tools ?? []).length);
+  const historyTokens = tokens(historyChars);
+  const toolResultTokens = tokens(toolChars);
+  return {
+    system: systemTokens,
+    tools: toolsTokens,
+    history: historyTokens,
+    toolResults: toolResultTokens,
+    total: systemTokens + toolsTokens + historyTokens + toolResultTokens,
+  };
 }
 
 function lastPromptTokens(history: ChatMessage[]): number | undefined {

@@ -258,6 +258,11 @@ const STR = {
     "ctx.noteHint": "{0} / {1} tok を使用",
     "ctx.noteEstimated": "履歴から推定した値(≈)です。ターン実行後に実測値へ更新されます。",
     "ctx.assumed": "(既定)",
+    "ctx.breakdownTitle": "プロンプト内訳",
+    "ctx.system": "システム",
+    "ctx.tools": "ツール定義",
+    "ctx.history": "会話履歴",
+    "ctx.toolResults": "ツール結果",
     "ns.title": "新規セッション",
     "ns.search": "フォルダーを検索・入力… (例: ~/work)",
     "ns.pickFolder": "作業フォルダーを選択",
@@ -854,6 +859,11 @@ const STR = {
     "ctx.noteNoWindow": "This model's context window is unknown (not exposed by the model list)",
     "ctx.noteEstimated": "Estimated from the stored history (≈); updated with the real value after a turn runs.",
     "ctx.assumed": "(default)",
+    "ctx.breakdownTitle": "Prompt composition",
+    "ctx.system": "System",
+    "ctx.tools": "Tool schemas",
+    "ctx.history": "History",
+    "ctx.toolResults": "Tool results",
     "ctx.noteHint": "{0} / {1} tok used",
     "ns.title": "New session",
     "ns.search": "search or type a folder… (e.g. ~/work)",
@@ -1652,6 +1662,8 @@ const state = {
   usageBySession: {},
   /** last turn's prompt tokens per session ≈ current context size. */
   lastPromptTokensBySession: {},
+  /** last prompt's token composition per session (system/tools/history/toolResults) */
+  contextBySession: {},
   ctxEstimated: {},          // sessionId -> true while the gauge shows a history estimate
   modelCtxIsDefault: {},     // "provider/model" -> true when the window is the fallback
   /** cached context window sizes (provider/model → tokens|null). */
@@ -2110,6 +2122,9 @@ function seedContextFromHistory(sessionId, messages) {
       break;
     }
   }
+  // the same assistant message carries the prompt's token composition
+  const ctx = visible[idx]?.meta?.context;
+  if (ctx && typeof ctx === "object") state.contextBySession[sessionId] = ctx;
   let extra = 0;
   for (let i = idx + 1; i < visible.length; i++) {
     const m = visible[i];
@@ -2175,6 +2190,45 @@ function renderTopbarGauge() {
   }
 }
 
+/**
+ * Token composition of the last prompt (system / tool schemas / history /
+ * tool results) as a labelled bar list. Returns null when nothing was measured
+ * yet. Shared by the popover and the right-pane context tab.
+ */
+function contextBreakdownNode() {
+  const c = state.contextBySession[state.sessionId];
+  if (!c || typeof c !== "object") return null;
+  const wrap = document.createElement("div");
+  wrap.className = "ctx-breakdown-body";
+  const rows = [
+    ["ctx.system", c.system],
+    ["ctx.tools", c.tools],
+    ["ctx.history", c.history],
+    ["ctx.toolResults", c.toolResults],
+  ];
+  const total = rows.reduce((n, [, v]) => n + (Number(v) || 0), 0) || 1;
+  for (const [key, val] of rows) {
+    const v = Number(val) || 0;
+    const row = document.createElement("div");
+    row.className = "ctx-bd-row";
+    const label = document.createElement("span");
+    label.className = "ctx-bd-label";
+    label.textContent = t(key);
+    const bar = document.createElement("span");
+    bar.className = "ctx-bd-bar";
+    const fill = document.createElement("span");
+    fill.className = "ctx-bd-fill";
+    fill.style.width = `${Math.max(v > 0 ? 2 : 0, Math.round((v / total) * 100))}%`;
+    bar.appendChild(fill);
+    const num = document.createElement("span");
+    num.className = "ctx-bd-num";
+    num.textContent = formatTokens(v);
+    row.append(label, bar, num);
+    wrap.appendChild(row);
+  }
+  return wrap;
+}
+
 /** The composer gauge + its pane (context usage details). */
 function renderCtxPane() {
   const { used, win, estimated, assumed } = ctxNumbers();
@@ -2208,6 +2262,18 @@ function renderCtxPane() {
   note.classList.toggle("over", used !== undefined && !!win && used >= win);
   $("#ctx-btn").classList.toggle("over", used !== undefined && !!win && used >= win);
   $("#ctx-head-pct").classList.toggle("over", used !== undefined && !!win && used >= win);
+  const bd = $("#ctx-breakdown");
+  if (bd) {
+    bd.innerHTML = "";
+    const node = contextBreakdownNode();
+    bd.hidden = !node;
+    if (node) {
+      const title = document.createElement("div");
+      title.className = "ctx-bd-title";
+      title.textContent = t("ctx.breakdownTitle");
+      bd.append(title, node);
+    }
+  }
 }
 
 /** The context tab inside the right pane (same numbers, card layout). */
@@ -2249,6 +2315,12 @@ function renderCtxPaneBody() {
   else if (!win) note.textContent = t("ctx.noteNoWindow");
   else note.textContent = t("ctx.noteHint", formatTokens(used), formatTokens(win));
   body.appendChild(note);
+  const bd = contextBreakdownNode();
+  if (bd) {
+    const card = sectionCard(t("ctx.breakdownTitle"), []);
+    card.appendChild(bd);
+    body.appendChild(card);
+  }
 }
 
 const DEFAULT_CTX_TOKENS = 128_000;
@@ -3503,6 +3575,7 @@ function onEvent(sessionId, e) {
         state.lastPromptTokensBySession[sessionId] = ctxTokens;
         delete state.ctxEstimated[sessionId]; // real value — drop the ≈ marker
       }
+      if (e.context) state.contextBySession[sessionId] = e.context;
       const secs = parseFloat(state.lastElapsed ?? "") || 0;
       const hasUsage = ctxTokens !== undefined;
       let completion = u.completionTokens ?? 0;

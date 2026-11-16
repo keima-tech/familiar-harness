@@ -2122,6 +2122,31 @@ try {
     JSON.stringify(chrome),
   );
 
+  // ---- context composition report (system / tools / history / tool results) --
+  const ctxInfo = await evalOnce(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const out = {};
+    try {
+      const s = await rpc("session.create", { cwd: "/tmp" });
+      await openSession(s.id); await sleep(120);
+      await rpc("session.send", { id: s.id, text: "count the context" });
+      await sleep(500);
+      const c = state.contextBySession[s.id] ?? null;
+      const node = c ? contextBreakdownNode() : null;
+      out.present = !!c;
+      out.rows = node ? node.querySelectorAll(".ctx-bd-row").length : 0;
+      out.total = c ? c.total : 0;
+      out.hasTools = (c?.tools ?? 0) > 0;
+      await rpc("session.delete", { id: s.id }).catch(() => {});
+    } catch (err) { out.error = String(err && err.stack ? err.stack : err); }
+    return out;
+  })()`);
+  check(
+    ctxInfo?.present === true && ctxInfo?.rows === 4 && ctxInfo?.total > 0 && ctxInfo?.hasTools === true,
+    "the context popover shows the prompt composition",
+    JSON.stringify(ctxInfo),
+  );
+
   // ---- failure path: unreachable host --------------------------------------
   const failedTest = await evalOnce(`(async () => {
     const r = await window.familiarDesktop.saveConnection({ host: "badhost", name: "bad" });

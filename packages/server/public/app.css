@@ -1676,3 +1676,17 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
 /* ---- settings button: plain icon button, matched to the other topbar icons */
 .top-actions .iconbtn.settings-btn { display: inline-flex; align-items: center; justify-content: center; }
 .settings-btn svg { display: block; }
+
+/* ---- context composition (system / tools / history / tool results) -------- */
+.ctx-breakdown { margin-top: 8px; }
+.ctx-breakdown[hidden] { display: none; }
+.ctx-bd-title { font-size: 11px; color: var(--dim); margin-bottom: 2px; }
+.ctx-breakdown-body { display: flex; flex-direction: column; gap: 5px; margin-top: 4px; }
+.ctx-bd-row {
+  display: grid; grid-template-columns: 84px 1fr 52px; align-items: center; gap: 6px;
+  font-size: 12px;
+}
+.ctx-bd-label { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctx-bd-bar { height: 6px; border-radius: 4px; background: var(--panel2); overflow: hidden; }
+.ctx-bd-fill { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+.ctx-bd-num { text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; }

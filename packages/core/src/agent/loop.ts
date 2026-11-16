@@ -142,6 +142,16 @@ export class AgentRunner {
 
     const providerId = opts.provider ?? session.provider;
     const model = opts.model ?? session.model;
+    // Privacy mode: refuse to send this turn to a non-local provider.
+    if (this.cfg.privacy?.local_only) {
+      const pc = this.cfg.providers[providerId];
+      if (!providerIsLocal(pc)) {
+        throw new Error(
+          `privacy.local_only is set but provider "${providerId}" is not local ` +
+            `(${pc?.base_url ?? "no base_url"}) — use a localhost/ollama/mock provider`,
+        );
+      }
+    }
     const profile = opts.profile ?? session.profile;
     const effort = normalizeEffort(opts.effort ?? (session as { effort?: string | null }).effort);
     // `maxSteps` is the size of one step window. When the caller did not pin
@@ -328,6 +338,7 @@ export class AgentRunner {
           })),
           signal: opts.signal,
           effort,
+          promptCache: this.cfg.context?.prompt_cache !== false,
         };
         // token composition of what we are about to send (context report)
         lastContext = estimateContext(system, chatParams.tools, history);
@@ -570,6 +581,13 @@ export class AgentRunner {
             : {}),
         ...(usage.completionTokens ? { completionTokens: usage.completionTokens } : {}),
       };
+      // per-turn cost estimate when the model has a configured price
+      const price = priceFor(this.cfg, providerId, model);
+      if (price) {
+        const inTok = finalUsage.totalPromptTokens ?? finalUsage.promptTokens ?? 0;
+        const outTok = finalUsage.completionTokens ?? 0;
+        finalUsage.costUsd = (inTok * price.input + outTok * price.output) / 1_000_000;
+      }
       opts.onEvent({
         type: "turn.end",
         turnId,
@@ -912,6 +930,36 @@ export function isContextLengthError(err: unknown): boolean {
     (msg.includes("too long") &&
       (msg.includes("prompt") || msg.includes("context") || msg.includes("input") || msg.includes("message")))
   );
+}
+
+/** True when a provider runs on this machine (loopback / mock / *.local). */
+function providerIsLocal(pc: { kind?: string; base_url?: string } | undefined): boolean {
+  if (!pc) return false;
+  if (pc.kind === "mock") return true;
+  const base = pc.base_url ?? "";
+  if (base === "") return false; // hosted defaults (e.g. api.anthropic.com)
+  try {
+    const host = new URL(base).hostname.toLowerCase();
+    return (
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host === "::1" ||
+      host === "0.0.0.0" ||
+      host.endsWith(".local")
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Configured price (USD per 1M tokens) for a model; "provider/model" wins. */
+function priceFor(
+  cfg: { pricing?: Record<string, { input: number; output: number }> },
+  provider: string,
+  model: string | undefined,
+): { input: number; output: number } | undefined {
+  const pricing = cfg.pricing ?? {};
+  return pricing[`${provider}/${model}`] ?? pricing[provider] ?? (model ? pricing[model] : undefined);
 }
 
 /** Estimated token composition of the prompt that will be sent next. */

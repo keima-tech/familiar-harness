@@ -112,6 +112,12 @@ budget:                    # トークン予算ガード(全 0 = 無効)
   max_tokens_per_day: 0     # 1 日(UTC)合計の上限(例 10000000)
   warn_ratio: 0.8           # 上限の何割で警告イベントを出すか(0 で無効)
   enforce: false            # true: 上限超過後の新規ターンを拒否
+pricing:                   # ターン毎のコスト概算(USD / 100万トークン)。キーは
+                           # "provider/model" → "provider" → "model" の順で一致
+  "openai/gpt-6.1-sol": { input: 1.25, output: 10 }   # 例
+privacy:
+  local_only: false        # true: 非ローカル provider への送信を拒否
+                           # (mock / localhost / 127.0.0.1 / ::1 / *.local のみ許可)
 context:
   token_soft_limit: 0      # 絶対トークン上限で圧縮をかけたい場合のみ(0 = 無効)
   keep_last: 10            # compaction で残す直近メッセージ数

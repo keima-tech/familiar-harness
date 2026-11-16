@@ -22,6 +22,8 @@ export interface ChatParams {
   maxTokens?: number;
   /** reasoning effort for models that support it (session/turn level) */
   effort?: ReasoningEffort;
+  /** mark the system + tools prefix cacheable (provider-specific; Anthropic) */
+  promptCache?: boolean;
   signal?: AbortSignal;
 }
 

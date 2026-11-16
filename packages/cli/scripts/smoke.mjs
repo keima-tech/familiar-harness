@@ -2232,6 +2232,160 @@ console.log("— scenario: tool budget (connectors) —");
     "unconfigured connector tools are hidden from the prompt",
     names.slice(0, 300),
   );
+
+  // the system prompt should nudge the model to batch independent tool calls
+  const p = await run(
+    ["run", "-p", "@dump-prompt Batch independent tool calls", "--cwd", project, "--json", "--yolo"],
+    project,
+    familiarHome,
+  );
+  const ptext = p.parsed.filter((e) => e?.type === "text.delta").map((e) => e.text).join("");
+  assert(
+    ptext.includes("PROMPT-PRESENT"),
+    "the system prompt advises batching tool calls (fewer round trips)",
+    ptext.slice(0, 120),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Scenario: per-turn cost estimate (pricing config)
+// ---------------------------------------------------------------------------
+console.log("— scenario: cost estimate —");
+{
+  const priceHome = path.join(tmpBase, "home-price");
+  fs.mkdirSync(priceHome, { recursive: true });
+  fs.writeFileSync(
+    path.join(priceHome, "config.yaml"),
+    `version: 1
+default_provider: mock
+providers:
+  mock:
+    kind: mock
+pricing:
+  mock:
+    input: 1000
+    output: 1000
+server:
+  port: 1
+  bind: 127.0.0.1
+`,
+  );
+  const pr = await run(
+    ["run", "-p", "hello pricing", "--cwd", project, "--json", "--yolo"],
+    project,
+    priceHome,
+  );
+  const end = pr.parsed.find((e) => e?.type === "turn.end");
+  assert(
+    typeof end?.usage?.costUsd === "number" && end.usage.costUsd > 0,
+    "pricing config produces a per-turn cost estimate",
+    JSON.stringify(end?.usage ?? {}).slice(0, 200),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Scenario: Anthropic prompt caching (system + tools get cache_control)
+// ---------------------------------------------------------------------------
+console.log("— scenario: anthropic prompt caching —");
+{
+  const { AnthropicProvider } = await import(
+    path.join(repoRoot, "packages/core/dist/providers/anthropic.js")
+  );
+  const origFetch = globalThis.fetch;
+  let captured = null;
+  globalThis.fetch = async (_url, opts) => {
+    captured = JSON.parse(String(opts.body));
+    return new Response('data: {"type":"message_stop"}\n\n', {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    });
+  };
+  try {
+    const p = new AnthropicProvider(
+      { kind: "anthropic", base_url: "http://anthropic.test", default_model: "m" },
+      "sk-test",
+      "anthropic",
+    );
+    await p.chat(
+      {
+        model: "m",
+        messages: [{ role: "user", content: "hi" }],
+        system: "SYS",
+        tools: [{ name: "t", description: "d", parameters: { type: "object" } }],
+        promptCache: true,
+      },
+      () => {},
+    );
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+  const sysText = Array.isArray(captured?.system)
+    ? captured.system.map((b) => b.text ?? "").join("")
+    : String(captured?.system ?? "");
+  assert(
+    sysText.includes("SYS"),
+    "anthropic actually sends the system prompt (ChatParams.system)",
+    sysText.slice(0, 80),
+  );
+  assert(
+    Array.isArray(captured?.system) && captured.system[0]?.cache_control?.type === "ephemeral",
+    "anthropic caches the system prompt",
+    JSON.stringify(captured?.system ?? null).slice(0, 160),
+  );
+  assert(
+    captured?.tools?.[0]?.cache_control?.type === "ephemeral",
+    "anthropic caches the tool block",
+    JSON.stringify(captured?.tools ?? null).slice(0, 160),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Scenario: privacy mode (privacy.local_only blocks non-local providers)
+// ---------------------------------------------------------------------------
+console.log("— scenario: privacy mode —");
+{
+  const privHome = path.join(tmpBase, "home-priv");
+  fs.mkdirSync(privHome, { recursive: true });
+  fs.writeFileSync(
+    path.join(privHome, "config.yaml"),
+    `version: 1
+default_provider: mock
+providers:
+  mock:
+    kind: mock
+  remote:
+    kind: openai_compatible
+    base_url: https://api.example.com/v1
+    default_model: m
+    auth: { env: NONE }
+privacy:
+  local_only: true
+server:
+  port: 1
+  bind: 127.0.0.1
+`,
+  );
+  const okRun = await run(
+    ["run", "-p", "hello local", "--cwd", project, "--json", "--yolo"],
+    project,
+    privHome,
+  );
+  assert(
+    okRun.code === 0,
+    "privacy.local_only allows a local (mock) provider",
+    `code=${okRun.code} ${okRun.stderr.slice(0, 140)}`,
+  );
+  const blocked = await run(
+    ["run", "-p", "hello remote", "--cwd", project, "--json", "--yolo", "--provider", "remote"],
+    project,
+    privHome,
+  );
+  const blob = `${blocked.stdout}\n${blocked.stderr}`;
+  assert(
+    blocked.code !== 0 && /privacy\.local_only/.test(blob),
+    "privacy.local_only blocks a non-local provider",
+    blob.slice(0, 200),
+  );
 }
 
 console.log(

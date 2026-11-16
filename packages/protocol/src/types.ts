@@ -45,6 +45,8 @@ export interface Usage {
   /** explicit alias for promptTokens (context gauge / compaction signal) */
   contextTokens?: number;
   completionTokens?: number;
+  /** estimated USD cost of the turn, when `pricing` is configured for the model */
+  costUsd?: number;
 }
 
 /**

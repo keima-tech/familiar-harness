@@ -147,6 +147,9 @@ export function buildSystemPrompt(
     `# Guidelines\n` +
       `- cwd: ${opts.cwd}\n` +
       `- available tools: ${opts.toolNames.join(", ")}\n` +
+      // Fewer round trips: independent tool calls in one message are executed
+      // together, which is the cheapest way to cut model calls per task.
+      `- Batch independent tool calls: put several reads/greps/globs (or tasks) in ONE message instead of one per step.\n` +
       `- keep responses concise; markdown allowed.`,
   );
   return parts.join("\n\n---\n\n");

@@ -319,6 +319,9 @@ export function createPrettyPrinter(): (event: AgentEvent) => void {
             bits.push(`${Math.round((u.completionTokens ?? 0) / secs)} tok/s`);
           }
         }
+        if (typeof u.costUsd === "number" && u.costUsd > 0) {
+          bits.push(`$${u.costUsd.toFixed(4)}`);
+        }
         process.stdout.write(`${c.ok("✓")} ${c.faint(bits.join(" · "))}\n`);
         break;
       }

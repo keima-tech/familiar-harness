@@ -30,7 +30,15 @@ export class AnthropicProvider implements Provider {
   }
 
   async chat(params: ChatParams, onChunk: (c: ProviderChunk) => void): Promise<ChatResult> {
-    const { system, messages } = splitSystem(params.messages);
+    const split = splitSystem(params.messages);
+    // The runner passes the system prompt via ChatParams.system; any role:"system"
+    // messages are appended too. (Previously only the latter were sent, so the
+    // built system prompt was silently dropped for Anthropic.)
+    const system = [params.system, split.system]
+      .map((s) => (s ?? "").trim())
+      .filter((s) => s !== "")
+      .join("\n\n");
+    const messages = split.messages;
     const body: Record<string, unknown> = {
       model: params.model,
       // Anthropic requires an explicit ceiling.
@@ -38,7 +46,15 @@ export class AnthropicProvider implements Provider {
       stream: true,
       messages: toAnthropicMessages(messages),
     };
-    if (system) body["system"] = system;
+    // Prompt caching: mark the system prompt and the tool block as cacheable so
+    // repeated turns re-read the same prefix at a fraction of the cost. The
+    // tools breakpoint must sit on the LAST tool (Anthropic caches up to it).
+    const cache = params.promptCache === true;
+    if (system) {
+      body["system"] = cache
+        ? [{ type: "text", text: system, cache_control: { type: "ephemeral" } }]
+        : system;
+    }
     if (params.temperature !== undefined) body["temperature"] = params.temperature;
     // effort → extended thinking budget (budget_tokens must be < max_tokens)
     if (params.effort) {
@@ -48,11 +64,15 @@ export class AnthropicProvider implements Provider {
       body["max_tokens"] = Math.max(body["max_tokens"] as number, budget + 2048);
     }
     if (params.tools && params.tools.length > 0) {
-      body["tools"] = params.tools.map((t) => ({
+      const tools: Record<string, unknown>[] = params.tools.map((t) => ({
         name: t.name,
         description: t.description,
         input_schema: t.parameters,
       }));
+      if (cache && tools.length > 0) {
+        tools[tools.length - 1] = { ...tools[tools.length - 1]!, cache_control: { type: "ephemeral" } };
+      }
+      body["tools"] = tools;
     }
 
     const res = await fetch(`${this.baseUrl()}/messages`, {

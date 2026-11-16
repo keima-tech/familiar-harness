@@ -3587,10 +3587,12 @@ function onEvent(sessionId, e) {
       }
       const tps = secs > 0 && completion > 0 ? Math.round(completion / secs) : 0;
       const approx = hasUsage ? "" : "≈";
+      const costStr =
+        typeof u.costUsd === "number" && u.costUsd > 0 ? ` · $${u.costUsd.toFixed(4)}` : "";
       const toks = hasUsage
-        ? ` · ↑${u.promptTokens} ↓${u.completionTokens ?? 0} tok${tps ? ` (${tps} tok/s)` : ""}`
+        ? ` · ↑${u.promptTokens} ↓${u.completionTokens ?? 0} tok${tps ? ` (${tps} tok/s)` : ""}${costStr}`
         : completion > 0
-          ? ` · ↓${approx}${completion} tok${tps ? ` (${approx}${tps} tok/s)` : ""}`
+          ? ` · ↓${approx}${completion} tok${tps ? ` (${approx}${tps} tok/s)` : ""}${costStr}`
           : "";
       setTurnEndLabel(t("turn.done", `${state.lastElapsed ?? ""}${toks}`));
       // collapse thinking blocks, stop carets; footer on the last bubble

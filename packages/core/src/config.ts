@@ -237,6 +237,13 @@ export interface ResolvedConfig {
   permissions: PermissionsConfig;
   /** token budget guard (all limits 0 = off) */
   budget: BudgetConfig;
+  /**
+   * USD per 1M tokens for a model: keys are "provider/model", "provider", or
+   * "model" (first match wins). Used to show a per-turn cost estimate.
+   */
+  pricing: Record<string, { input: number; output: number }>;
+  /** privacy controls */
+  privacy: { local_only: boolean };
   /** M3: self-improvement */
   memory: MemoryConfig;
   skills: SkillsConfig;
@@ -264,6 +271,11 @@ export interface ResolvedConfig {
      * back with result_read / result_search.
      */
     tool_result: ToolResultConfig;
+    /**
+     * Mark the system + tools prefix cacheable where the provider supports it
+     * (Anthropic cache_control). Cheaper repeated turns; no effect elsewhere.
+     */
+    prompt_cache: boolean;
     /**
      * Hard ceiling for one turn's steps. Past the 25-step window the turn
      * continues on its own (a visible "auto-continue" note) instead of
@@ -400,6 +412,8 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
     websearch: { provider: "duckduckgo", base_url: "" },
   },
   budget: { max_tokens_per_session: 0, max_tokens_per_day: 0, warn_ratio: 0.8, enforce: false },
+  pricing: {},
+  privacy: { local_only: false },
   memory: { write_approval: true, max_prompt_chars: 4000, ranking: "relevance" },
   skills: { write_approval: true, include_global: true, paths: [] },
   self_review: { enabled: true },
@@ -423,6 +437,7 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
     keep_last: 10,
     compaction: { mode: "summarize", ratio: 0.9 },
     tool_result: { threshold_chars: 12_000, head_chars: 3_000, tail_chars: 1_500 },
+    prompt_cache: true,
     max_turn_steps: 100,
   },
   server: { port: 46_210, bind: "127.0.0.1" },
@@ -438,6 +453,9 @@ const KNOWN_TOP_LEVEL = new Set([
   "auxiliary",
   "profiles",
   "permissions",
+  "budget",
+  "pricing",
+  "privacy",
   "memory",
   "skills",
   "self_review",
@@ -1032,6 +1050,16 @@ budget:
   warn_ratio: 0.8             # warn once usage passes this fraction of a limit
   enforce: false              # true: refuse to start a turn past a hard limit
 
+# Model prices (USD per 1,000,000 tokens) for a per-turn cost estimate.
+# Keys may be "provider/model", "provider", or "model" (first match wins).
+pricing:
+  # "openai/gpt-6.1-sol": { input: 1.25, output: 10 }
+
+# Privacy: with local_only, turns refuse non-local providers (only mock,
+# localhost/127.0.0.1/::1, or *.local endpoints are allowed).
+privacy:
+  local_only: false
+
 # M3: 自己改善
 memory:
   write_approval: true      # false で memory_manage / self-review が直接反映
@@ -1098,6 +1126,7 @@ context:
     threshold_chars: 12000       # これより長い結果だけ圧縮(0 = 無効)。復元は result_read/result_search
     head_chars: 3000             # 先頭そのままの文字数
     tail_chars: 1500             # 末尾そのままの文字数
+  prompt_cache: true             # Anthropic で system+tools を cache_control(ephemeral)化
   max_turn_steps: 100            # 1ターンのステップ上限。25 ステップの窓を超えても
                                  # 自動継続し、この値で打ち切る(「続けて」不要)
 

@@ -179,6 +179,12 @@ export class MockProvider implements Provider {
       streamText(m ? m[0] : "SKILLS-ABSENT", onChunk);
       return { stopReason: "end_turn", usage: { promptTokens: 1, completionTokens: 3 } };
     }
+    if (userText.includes("@dump-prompt ")) {
+      const target = userText.match(/@dump-prompt\s+(.+)/)?.[1]?.trim() ?? "";
+      const present = target !== "" && String(params.system ?? "").includes(target);
+      streamText(present ? "PROMPT-PRESENT" : "PROMPT-ABSENT", onChunk);
+      return { stopReason: "end_turn", usage: { promptTokens: 1, completionTokens: 2 } };
+    }
     if (userText.includes("@dump-prompt-skill")) {
       const sys = params.system ?? "";
       const target = userText.match(/@dump-prompt-skill\s+(.+)/)?.[1]?.trim();

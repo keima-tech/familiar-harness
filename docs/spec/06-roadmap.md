@@ -952,6 +952,31 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
 - **結論**: **Electron シェル(`packages/desktop`)を継続**。サイズは別途
   electron-builder 設定(locale 削減等)で圧縮する。
 
+## v0.1.0 の実装メモ 68(2026-11-17、呼び出し削減・コスト・キャッシュ・privacy — OpenHuman 改善 ⑤⑧②⑦)
+
+### ⑤ モデル呼び出し回数の削減
+- System prompt の Guidelines に「独立したツール呼び出しは1メッセージにまとめる」を追加
+  (1メッセージ内の複数呼び出しは並列実行され、往復が減る)。mock に `@dump-prompt <語>` を追加し
+  smoke で文言を検証。
+
+### ⑧ コスト可視化
+- config `pricing: { "<provider>/<model>"|"<provider>"|"<model>": {input, output} }`(USD/100万トークン)。
+- `Usage.costUsd` を追加し、loop がターン合計(prompt+completion)から算出。CLI の turn.end 行と
+  Web UI のターン下部に `$x.xxxx` を表示。smoke で costUsd>0 を検証。
+- (実行ジャーナルは既存の JSON トランスクリプト export + メッセージ meta で代替可能なため省略)
+
+### ② プロンプトキャッシュ(＋ Anthropic のシステムプロンプト欠落バグ修正)
+- `ChatParams.promptCache` を追加し loop が `context.prompt_cache`(既定 true)を渡す。
+- Anthropic 実装で system を `[{type:"text", cache_control:{type:"ephemeral"}}]`、tools の**末尾**に
+  `cache_control` を付与して接頭辞をキャッシュ。
+- **副産物のバグ修正**: `anthropic.ts` は `params.system` を読んでおらず(role:"system" のみ)、
+  Familiar が組み立てたシステムプロンプトが Anthropic へ**送られていなかった** → `params.system` と
+  メッセージ内 system を結合して送信するよう修正。smoke でリクエストbodyを検証。
+
+### ⑦ プライバシーモード
+- config `privacy.local_only`(既定 false)。true のとき非ローカル provider(mock/localhost/127.0.0.1/
+  ::1/*.local 以外)へのターンを拒否。smoke で許可/拒否を検証。
+
 ## v0.1.0 の実装メモ 67(2026-11-17、ツール予算の削減と関連度メモリ — OpenHuman 改善 ③④)
 
 ### ③ 未設定コネクタのツールを広告しない(ツール予算の削減)

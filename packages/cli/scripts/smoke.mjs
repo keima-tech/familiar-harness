@@ -2126,6 +2126,55 @@ console.log("— scenario: doctor —");
   assert(/port \d+ is (free|in use)/.test(d.stdout), "doctor checks the serve port", d.stdout.slice(0, 500));
 }
 
+// ---------------------------------------------------------------------------
+// Scenario: tool-result compression + handles (result_read / result_search)
+// ---------------------------------------------------------------------------
+console.log("— scenario: tool-result compression + handles —");
+{
+  // (a) a large read is compressed to a head/tail digest carrying a handle
+  const big = path.join(project, "big.txt");
+  fs.writeFileSync(
+    big,
+    Array.from({ length: 500 }, (_, i) => `line ${i} ${"x".repeat(40)}`).join("\n"),
+  );
+  const comp = await run(
+    ["run", "-p", "@read big.txt", "--cwd", project, "--json", "--yolo"],
+    project,
+    familiarHome,
+  );
+  const res = comp.parsed.find((e) => e?.type === "tool.result" && e.name === "read");
+  assert(
+    !!res && /tool result compressed/.test(String(res.content)) && /handle: tr_/.test(String(res.content)),
+    "a large tool result is compressed to a digest + handle",
+    String(res?.content ?? "").slice(0, 200),
+  );
+
+  // (b) result_read / result_search fetch the elided slice back
+  const { createResultReadTool, createResultSearchTool } = await import(
+    path.join(repoRoot, "packages/core/dist/tools/tool-results.js")
+  );
+  const { SqliteSessionStore } = await import(
+    path.join(repoRoot, "packages/core/dist/session/store.js")
+  );
+  const store = new SqliteSessionStore(":memory:");
+  const body = `${"A".repeat(200)}\nNEEDLE_IN_MIDDLE\n${"B".repeat(200)}`;
+  const handle = store.putToolResult("s1", "c1", "read", body);
+  const ctx = { resultStore: { get: (id) => store.getToolResult(id) } };
+  const rr = await createResultReadTool().execute({ handle, offset: 190, limit: 40 }, ctx);
+  assert(
+    rr.isError !== true && rr.content.includes("NEEDLE_IN_MIDDLE"),
+    "result_read returns the elided slice",
+    rr.content.slice(0, 120),
+  );
+  const rs = await createResultSearchTool().execute({ handle, pattern: "NEEDLE" }, ctx);
+  assert(
+    rs.isError !== true && /@\d+:/.test(rs.content) && rs.content.includes("NEEDLE"),
+    "result_search finds matches with character offsets",
+    rs.content.slice(0, 120),
+  );
+  store.close();
+}
+
 console.log(
   failures === 0 ? "\nsmoke: all checks passed" : `\nsmoke: ${failures} failure(s)`,
 );

@@ -93,6 +93,13 @@ export interface SessionStore {
   sessionUsage(sessionId: string): number;
   /** Total tokens used on a calendar day (YYYY-MM-DD) across sessions. */
   dayUsage(day: string): number;
+  /**
+   * Persist the full text of a large tool result and return a short handle.
+   * The prompt keeps only a digest; result_read/result_search pull slices back.
+   */
+  putToolResult(sessionId: string, toolCallId: string | undefined, name: string, content: string): string;
+  /** Fetch a stored tool result by handle. */
+  getToolResult(id: string): { name: string; content: string } | null;
   close(): void;
 }
 
@@ -140,6 +147,16 @@ CREATE TABLE IF NOT EXISTS usage (
   tokens INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (session_id, day)
 );
+-- full text of large tool results, kept out of the prompt behind a handle
+CREATE TABLE IF NOT EXISTS tool_results (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  tool_call_id TEXT,
+  name TEXT NOT NULL,
+  content TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tool_results_session ON tool_results(session_id, created_at);
 -- Full-text search over message bodies. trigram tokenizer so Japanese substring
 -- queries work (unicode61 would treat a whole CJK run as one token).
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
@@ -347,6 +364,7 @@ export class SqliteSessionStore implements SessionStore {
     this.db.prepare(`DELETE FROM messages WHERE session_id = ?`).run(id);
     this.db.prepare(`DELETE FROM file_edits WHERE session_id = ?`).run(id);
     this.db.prepare(`DELETE FROM usage WHERE session_id = ?`).run(id);
+    this.db.prepare(`DELETE FROM tool_results WHERE session_id = ?`).run(id);
     return Number(res.changes) > 0;
   }
 
@@ -458,6 +476,29 @@ export class SqliteSessionStore implements SessionStore {
       .prepare(`SELECT COALESCE(SUM(tokens), 0) AS n FROM usage WHERE day = ?`)
       .get(day) as { n: number };
     return row.n ?? 0;
+  }
+
+  putToolResult(
+    sessionId: string,
+    toolCallId: string | undefined,
+    name: string,
+    content: string,
+  ): string {
+    const id = `tr_${crypto.randomUUID().slice(0, 12)}`;
+    this.db
+      .prepare(
+        `INSERT INTO tool_results (id, session_id, tool_call_id, name, content, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(id, sessionId, toolCallId ?? null, name, content, Date.now());
+    return id;
+  }
+
+  getToolResult(id: string): { name: string; content: string } | null {
+    const row = this.db
+      .prepare(`SELECT name, content FROM tool_results WHERE id = ?`)
+      .get(id) as { name: string; content: string } | undefined;
+    return row ? { name: row.name, content: row.content } : null;
   }
 
   appendMessage(sessionId: string, msg: ChatMessage): void {

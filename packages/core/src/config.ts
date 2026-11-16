@@ -199,6 +199,15 @@ export interface AuxiliarySlot {
   model: string;
 }
 
+export interface ToolResultConfig {
+  /** compress tool results larger than this many chars (0 = never) */
+  threshold_chars: number;
+  /** chars kept verbatim at the start of a compressed result */
+  head_chars: number;
+  /** chars kept verbatim at the end of a compressed result */
+  tail_chars: number;
+}
+
 export interface CompactionConfig {
   /** drop: remove old messages / summarize: aux model writes a durable note */
   mode: "drop" | "summarize";
@@ -243,6 +252,12 @@ export interface ResolvedConfig {
     /** how many trailing messages survive a compaction */
     keep_last: number;
     compaction: CompactionConfig;
+    /**
+     * Large tool results are replaced by a head/tail digest + a handle so the
+     * full text is not re-sent on every later step; the model can pull slices
+     * back with result_read / result_search.
+     */
+    tool_result: ToolResultConfig;
     /**
      * Hard ceiling for one turn's steps. Past the 25-step window the turn
      * continues on its own (a visible "auto-continue" note) instead of
@@ -401,6 +416,7 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
     token_soft_limit: 0,
     keep_last: 10,
     compaction: { mode: "summarize", ratio: 0.9 },
+    tool_result: { threshold_chars: 12_000, head_chars: 3_000, tail_chars: 1_500 },
     max_turn_steps: 100,
   },
   server: { port: 46_210, bind: "127.0.0.1" },
@@ -1071,6 +1087,10 @@ context:
   compaction:  # M4: over the limit, ask the aux compactor to write a note (fall back to drop)
     mode: summarize              # summarize | drop
     ratio: 0.9                   # モデルのコンテキストウィンドウの 90% で圧縮
+  tool_result:                   # 大きいツール結果を head/tail に圧縮(全文は handle で保持)
+    threshold_chars: 12000       # これより長い結果だけ圧縮(0 = 無効)。復元は result_read/result_search
+    head_chars: 3000             # 先頭そのままの文字数
+    tail_chars: 1500             # 末尾そのままの文字数
   max_turn_steps: 100            # 1ターンのステップ上限。25 ステップの窓を超えても
                                  # 自動継続し、この値で打ち切る(「続けて」不要)
 

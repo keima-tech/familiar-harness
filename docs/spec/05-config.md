@@ -118,6 +118,12 @@ context:
   compaction:              # M4: 上限超過時の挙動
     mode: summarize        # summarize=aux 補正機(auxiliary.compactor 未設定ならメインモデル・失敗時 drop にフォールバック) / drop=伏字無しで削除
     ratio: 0.9             # モデルのコンテキストウィンドウの 90% で圧縮を発動
+  tool_result:             # 大きいツール結果の圧縮(OpenHuman の RLM 相当)
+    threshold_chars: 12000 # これより長い結果を head/tail ダイジェスト+handle に置換(0=無効)
+    head_chars: 3000       # 先頭を残す文字数
+    tail_chars: 1500       # 末尾を残す文字数
+    # 全文は session DB に保存され、モデルは result_read(handle, offset, limit) /
+    # result_search(handle, pattern) で必要な断片だけ取得する(捨てない)
   max_turn_steps: 100      # 1 ターンのステップ上限。25 ステップの窓を超えても
                            # turn.continuing を出して自動継続し、この値で打ち切る
                            # (打ち切り時は turn.ceiling + 「続けて」で再開)

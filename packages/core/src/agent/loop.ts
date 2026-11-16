@@ -455,6 +455,8 @@ export class AgentRunner {
           ...(opts.permissionMode ? { permissionMode: opts.permissionMode } : {}),
           config: this.cfg,
           approval: this.approval,
+          // slice access to compressed tool results (result_read/result_search)
+          resultStore: { get: (id: string) => this.store.getToolResult(id) },
           todos: this.todos,
           taskRunner: this.taskRunner,
           selfImprove: this.selfImprove,
@@ -477,6 +479,14 @@ export class AgentRunner {
           if (!isError && output.fileChanges && output.fileChanges.length > 0) {
             fileChanges.push(...output.fileChanges);
           }
+          // large results are stored whole and replaced by a digest + handle
+          const resultContent = this.maybeCompressResult(
+            session.id,
+            call.id,
+            call.name,
+            output.content,
+            isError,
+          );
           const diff = output.diff && output.diff !== "" ? output.diff : undefined;
           await this.hooks?.run("post_tool_use", {
             event: "post_tool_use",
@@ -495,7 +505,7 @@ export class AgentRunner {
             role: "tool",
             name: call.name,
             toolCallId: call.id,
-            content: output.content,
+            content: resultContent,
             createdAt: Date.now(),
             meta: { isError, durationMs, ...(diff ? { diff } : {}) },
           };
@@ -504,7 +514,7 @@ export class AgentRunner {
             type: "tool.result",
             toolCallId: call.id,
             name: call.name,
-            content: output.content,
+            content: resultContent,
             isError,
             durationMs,
             ...(diff ? { diff } : {}),
@@ -700,6 +710,31 @@ export class AgentRunner {
    * The threshold is `compaction.ratio` (default 0.9) of the model window
    * when the caller knows it, lowered by `token_soft_limit` when set.
    */
+  /**
+   * Compress a large tool result: store the full text and return a head/tail
+   * digest with a handle (see toolResultDigest). Small results and errors pass
+   * through untouched, as do the reader tools (no nested handles).
+   */
+  private maybeCompressResult(
+    sessionId: string,
+    toolCallId: string,
+    name: string,
+    content: string,
+    isError: boolean,
+  ): string {
+    const cfg = this.cfg.context?.tool_result;
+    const threshold = cfg?.threshold_chars ?? 0;
+    if (isError || threshold <= 0 || content.length <= threshold) return content;
+    if (name === "result_read" || name === "result_search") return content;
+    try {
+      const handle = this.store.putToolResult(sessionId, toolCallId, name, content);
+      return toolResultDigest(handle, name, content, cfg?.head_chars ?? 3000, cfg?.tail_chars ?? 1500);
+    } catch (err) {
+      log.debug(`tool result compression failed: ${err instanceof Error ? err.message : String(err)}`);
+      return content;
+    }
+  }
+
   private async compactIfNeeded(
     history: ChatMessage[],
     session: SessionRecord,
@@ -907,6 +942,35 @@ export function estimateContext(
     toolResults: toolResultTokens,
     total: systemTokens + toolsTokens + historyTokens + toolResultTokens,
   };
+}
+
+/**
+ * Replace a large tool result with a head/tail digest + a handle. The full
+ * text lives in the session store; the model pulls slices back with
+ * result_read / result_search. Nothing is discarded, but the middle is not
+ * re-sent on every later step.
+ */
+export function toolResultDigest(
+  handle: string,
+  name: string,
+  content: string,
+  headChars: number,
+  tailChars: number,
+): string {
+  const head = content.slice(0, Math.max(0, headChars));
+  const tail = content.slice(Math.max(head.length, content.length - Math.max(0, tailChars)));
+  const elided = content.length - head.length - tail.length;
+  const tailStart = content.length - tail.length;
+  const lines: string[] = [
+    `[tool result compressed — ${name}]`,
+    `handle: ${handle} · ${content.length} chars total · ${elided} chars elided from the middle`,
+    `Use result_read(handle, offset, limit) to fetch any slice, or result_search(handle, pattern) to find matches.`,
+    `----- head (0..${head.length}) -----`,
+    head,
+  ];
+  if (elided > 0) lines.push(`… [${elided} chars elided] …`);
+  lines.push(`----- tail (${tailStart}..${content.length}) -----`, tail);
+  return lines.join("\n");
 }
 
 function lastPromptTokens(history: ChatMessage[]): number | undefined {

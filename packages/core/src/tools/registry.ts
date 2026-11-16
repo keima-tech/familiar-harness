@@ -19,6 +19,11 @@ export interface ToolContext {
   permissionMode?: PermissionMode;
   config: ResolvedConfig;
   approval: ApprovalAdapter;
+  /**
+   * Access to compressed tool results by handle (result_read/result_search).
+   * Absent in bare contexts; the tools then explain that no results are stored.
+   */
+  resultStore?: { get(id: string): { name: string; content: string } | null };
   /** M2: session todo store (absent in bare CLI contexts / subagents without one) */
   todos?: import("@familiar/protocol").TodoStore;
   /** M2: run a subagent task and return its final text (server-injected) */

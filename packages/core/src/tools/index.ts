@@ -9,6 +9,7 @@ import { createLspTool } from "./lsp.js";
 import { createOfficeCreateTool } from "./office.js";
 import { createMemoryManageTool } from "../selfimprove/memory/tool.js";
 import { createSkillManageTool, createSkillViewTool } from "../selfimprove/skills/tool.js";
+import { createResultReadTool, createResultSearchTool } from "./tool-results.js";
 import { createToolRegistry, type ToolRegistry } from "./registry.js";
 
 export * from "./registry.js";
@@ -48,5 +49,7 @@ export function defaultToolRegistry(): ToolRegistry {
     createMemoryManageTool(),
     createSkillViewTool(),
     createSkillManageTool(),
+    createResultReadTool(),
+    createResultSearchTool(),
   ]);
 }

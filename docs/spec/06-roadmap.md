@@ -952,6 +952,21 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
 - **結論**: **Electron シェル(`packages/desktop`)を継続**。サイズは別途
   electron-builder 設定(locale 削減等)で圧縮する。
 
+## v0.1.0 の実装メモ 66(2026-11-17、ツール結果の圧縮＋ハンドル — OpenHuman 改善 ①)
+
+OpenHuman の「RLM トークン圧縮」に相当。大きいツール結果は**全文を DB に保存**し、
+プロンプトには **head/tail ダイジェスト＋ハンドル**だけを載せる(捨てない・毎ステップ再送しない)。
+
+- config `context.tool_result: { threshold_chars, head_chars, tail_chars }`(既定
+  12000 / 3000 / 1500、0 で無効)。エラー結果と reader 系(result_read/result_search)は対象外。
+- `session/store.ts` に `tool_results` テーブル + `putToolResult`/`getToolResult`(セッション削除で掃除)。
+- `loop.ts`: `maybeCompressResult` が閾値超の結果を `toolResultDigest(handle, name, …)` に置換。
+  `ToolContext.resultStore` を注入し、新ツール **`result_read`**(offset/limit で部分取得)と
+  **`result_search`**(パターン一致行を文字オフセット付きで返す)で復元。
+- smoke に「大きい read が圧縮され handle を持つ」「result_read が中略部を返す」
+  「result_search がオフセット付きで返す」を追加。①により大きいファイル/ls 出力/grep が
+  以降の全ステップで再送されなくなる(⑥の内訳で効果を確認可能)。
+
 ## v0.1.0 の実装メモ 65(2026-11-17、コンテキスト内訳の可視化 — OpenHuman 改善 ⑥)
 
 OpenHuman(軽量・トークン効率で有名なハーネス)に学ぶ改善の第一弾。まず「どこにトークンが

@@ -6,6 +6,40 @@ function connectorsOf(ctx: { config: ResolvedConfig }): Record<string, Record<st
   return (ctx.config.connectors ?? {}) as Record<string, Record<string, string>>;
 }
 
+/** Which `connectors.<key>` block each connector tool needs. */
+export const CONNECTOR_TOOL_KEYS: Record<string, string> = {
+  redmine_issues: "redmine",
+  confluence_search: "confluence",
+  github_issues: "github",
+  gitlab_issues: "gitlab",
+  backlog_issues: "backlog",
+  jira_issues: "jira",
+  notion_search: "notion",
+  slack_channels: "slack",
+  slack_history: "slack",
+  teams_channels: "teams",
+  discord_channels: "discord",
+  discord_messages: "discord",
+  gmail_list: "google",
+  calendar_events: "google",
+};
+
+/**
+ * Should this tool be advertised? Connector tools are only useful when their
+ * connector is configured — advertising ~14 unconfigured ones costs a large
+ * slice of every prompt's tool budget. Non-connector tools always pass.
+ */
+export function connectorToolAvailable(
+  name: string,
+  connectors: Record<string, Record<string, string>> | undefined,
+): boolean {
+  const key = CONNECTOR_TOOL_KEYS[name];
+  if (!key) return true;
+  const block = connectors?.[key];
+  if (!block) return false;
+  return Object.values(block).some((v) => typeof v === "string" && v.trim() !== "");
+}
+
 const notConfigured = (kind: string): { content: string; isError: true } => ({
   content: `${kind} connector is not configured — set it up in the Web UI (設定 → コネクタ) or ~/.familiar/config.yaml under connectors.${kind}.`,
   isError: true,

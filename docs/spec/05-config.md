@@ -145,6 +145,8 @@ sessions:
 memory:
   write_approval: true          # 既定 ON(v1)
   max_prompt_chars: 4000        # 注入上限(実装上のキー)
+  ranking: relevance            # relevance=現在の指示との関連度→新しい順 / recent=新しい順のみ
+                                # 関連度はキーワード重なり(英数字語 + CJK 2-gram)で採点
 skills:
   write_approval: true
   include_global: true          # ~/.agents/skills 等の共有 skills を読み取り専用で併読

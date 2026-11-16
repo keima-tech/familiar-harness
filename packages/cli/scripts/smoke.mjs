@@ -2175,6 +2175,65 @@ console.log("— scenario: tool-result compression + handles —");
   store.close();
 }
 
+// ---------------------------------------------------------------------------
+// Scenario: memory ranking (relevance vs recent)
+// ---------------------------------------------------------------------------
+console.log("— scenario: memory ranking —");
+{
+  const { memorySection } = await import(
+    path.join(repoRoot, "packages/core/dist/selfimprove/memory/inject.js")
+  );
+  const now = Date.now();
+  const entries = [
+    { id: "mnew", content: "always use pnpm in this repo", tags: [], createdAt: now, updatedAt: now },
+    {
+      id: "mold",
+      content: "the deploy pipeline runs on github actions",
+      tags: ["deploy"],
+      createdAt: now - 9000,
+      updatedAt: now - 9000,
+    },
+  ];
+  const ranked = memorySection(entries, 4000, { query: "how does the deploy pipeline work?", ranking: "relevance" });
+  assert(
+    ranked.text.indexOf("deploy pipeline") < ranked.text.indexOf("pnpm"),
+    "relevance ranking surfaces the entry matching the instruction first",
+    ranked.text.slice(0, 160),
+  );
+  const recent = memorySection(entries, 4000, { ranking: "recent" });
+  assert(
+    recent.text.indexOf("pnpm") < recent.text.indexOf("deploy pipeline"),
+    "recent ranking keeps newest-first order",
+    recent.text.slice(0, 160),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Scenario: unconfigured connector tools are not advertised (tool budget)
+// ---------------------------------------------------------------------------
+console.log("— scenario: tool budget (connectors) —");
+{
+  const t = await run(
+    ["run", "-p", "@dump-prompt-tools", "--cwd", project, "--json", "--yolo"],
+    project,
+    familiarHome,
+  );
+  const names = t.parsed
+    .filter((e) => e?.type === "text.delta")
+    .map((e) => e.text)
+    .join("");
+  assert(
+    names.includes("read") && names.includes("result_read"),
+    "core tools are advertised",
+    names.slice(0, 160),
+  );
+  assert(
+    !names.includes("github_issues") && !names.includes("jira_issues") && !names.includes("gmail_list"),
+    "unconfigured connector tools are hidden from the prompt",
+    names.slice(0, 300),
+  );
+}
+
 console.log(
   failures === 0 ? "\nsmoke: all checks passed" : `\nsmoke: ${failures} failure(s)`,
 );

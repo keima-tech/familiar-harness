@@ -15,6 +15,7 @@ import { ProviderError } from "../providers/base.js";
 import { repairToolArguments } from "../providers/tool-args.js";
 import {
   defaultToolRegistry,
+  connectorToolAvailable,
   validateToolArgs,
   type ToolRegistry,
   type Tool,
@@ -209,6 +210,11 @@ export class AgentRunner {
       const present = new Set(baseTools.map((t) => t.name));
       baseTools = [...baseTools, ...opts.extraTools.filter((t) => !present.has(t.name))];
     }
+    // Connector tools are only advertised when their connector is configured:
+    // ~14 unconfigured ones would otherwise eat a large slice of the prompt.
+    baseTools = baseTools.filter((t) =>
+      connectorToolAvailable(t.name, this.cfg.connectors as Record<string, Record<string, string>> | undefined),
+    );
     // M3: memory/skill tools only when the self-improvement context is wired.
     const effectiveTools: Tool[] = this.selfImprove
       ? baseTools
@@ -257,7 +263,12 @@ export class AgentRunner {
         const extra: string[] = [];
         if (this.selfImprove) {
           const memoryCap = this.cfg.memory?.max_prompt_chars ?? 4000;
-          const mem = memorySection(this.selfImprove.memories.list(), memoryCap);
+          // rank memory against the instruction so the most relevant facts win
+          // the character budget instead of only the newest ones
+          const mem = memorySection(this.selfImprove.memories.list(), memoryCap, {
+            query: opts.userText,
+            ranking: this.cfg.memory?.ranking,
+          });
           if (mem.text !== "") extra.push(mem.text);
           if (mem.dropped > 0) {
             opts.onEvent({ type: "memory.truncation", dropped: mem.dropped });

@@ -952,6 +952,26 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
 - **結論**: **Electron シェル(`packages/desktop`)を継続**。サイズは別途
   electron-builder 設定(locale 削減等)で圧縮する。
 
+## v0.1.0 の実装メモ 67(2026-11-17、ツール予算の削減と関連度メモリ — OpenHuman 改善 ③④)
+
+### ③ 未設定コネクタのツールを広告しない(ツール予算の削減)
+
+⑥の内訳でツール定義が最大級(≈4.0k tok)と判明。内訳を測ると **コネクタ14種
+(github/gitlab/jira/confluence/redmine/backlog/notion/slack/teams/discord/google)が
+未設定でも毎回広告**され ≈1.5k tok を浪費していた(`execute` 時に「未設定」を返すだけ)。
+- `connectors.ts` に `CONNECTOR_TOOL_KEYS` と `connectorToolAvailable(name, connectors)` を追加。
+- `loop.ts` の `effectiveTools` 構築で、コネクタ未設定のツールを除外(サーバは
+  `this.cfg.connectors` を保存時に更新するので、設定直後から反映)。
+- 実測: 31 tools ≈4359 tok → **17 tools ≈2877 tok(約34%削減)**。smoke に
+  「コアは出る/未設定コネクタは出ない」を追加。
+
+### ④ 関連度ランク付きメモリ想起
+
+- `memorySection` に `query`/`ranking` オプション。`relevance`(既定)は現在の指示との
+  キーワード重なり(英数字語 + CJK 2-gram)で採点し、同点は新しい順。`recent` は従来どおり。
+- config `memory.ranking: relevance | recent`(既定 relevance)。loop は `opts.userText` を渡す。
+- smoke に「関連エントリが先頭に来る(関連度)/新しい順(最近)」を追加。
+
 ## v0.1.0 の実装メモ 66(2026-11-17、ツール結果の圧縮＋ハンドル — OpenHuman 改善 ①)
 
 OpenHuman の「RLM トークン圧縮」に相当。大きいツール結果は**全文を DB に保存**し、

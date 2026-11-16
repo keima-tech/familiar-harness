@@ -66,6 +66,12 @@ export interface WebSearchConfig {
 export interface MemoryConfig {
   write_approval: boolean;
   max_prompt_chars: number;
+  /**
+   * How the injected memory section is ordered: "relevance" ranks entries
+   * against the current instruction (keyword overlap), "recent" is newest
+   * first (the legacy behaviour).
+   */
+  ranking: "relevance" | "recent";
 }
 
 export interface SkillsConfig {
@@ -394,7 +400,7 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
     websearch: { provider: "duckduckgo", base_url: "" },
   },
   budget: { max_tokens_per_session: 0, max_tokens_per_day: 0, warn_ratio: 0.8, enforce: false },
-  memory: { write_approval: true, max_prompt_chars: 4000 },
+  memory: { write_approval: true, max_prompt_chars: 4000, ranking: "relevance" },
   skills: { write_approval: true, include_global: true, paths: [] },
   self_review: { enabled: true },
   curator: {
@@ -1029,7 +1035,8 @@ budget:
 # M3: 自己改善
 memory:
   write_approval: true      # false で memory_manage / self-review が直接反映
-  max_prompt_chars: 4000    # 注入合計上限(超過分は新しめ順カット)
+  max_prompt_chars: 4000    # 注入合計上限(超過分はランキング下位からカット)
+  ranking: relevance        # relevance=指示との関連度→新しい順 / recent=新しい順のみ
 skills:
   write_approval: true     # false で skill_manage が直接反映(非推奨)
   include_global: true     # ~/.agents/skills 等の共有 skills も読む(読み取り専用)

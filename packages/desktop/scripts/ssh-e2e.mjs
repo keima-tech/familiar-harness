@@ -2057,14 +2057,21 @@ try {
     try {
       const app = document.querySelector("#app");
       const toggle = document.querySelector("#sidebar-toggle");
+      const rectOf = (el) => { const r = el.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y) }; };
       out.toggleVisible = getComputedStyle(toggle).display !== "none";
+      out.toggleRectExpanded = rectOf(toggle);
       toggle.click(); await sleep(60);
       out.collapsed = app.classList.contains("side-collapsed") && getComputedStyle(document.querySelector("#sidebar")).display === "none";
+      out.toggleRectCollapsed = rectOf(toggle);
+      out.toggleFixed =
+        out.toggleRectExpanded.x === out.toggleRectCollapsed.x &&
+        out.toggleRectExpanded.y === out.toggleRectCollapsed.y;
       toggle.click(); await sleep(60);
       out.expanded = !app.classList.contains("side-collapsed");
 
       const sb = document.querySelector("#open-settings");
-      out.settingsLabel = sb?.querySelector(".sb-label")?.textContent ?? "";
+      out.settingsHasIcon = !!sb?.querySelector("svg");
+      out.settingsLabelText = (sb?.textContent ?? "").trim();
       out.settingsVisible = !!sb && getComputedStyle(sb).display !== "none";
 
       const cwd = state.currentSession?.cwd || "/tmp";
@@ -2080,9 +2087,15 @@ try {
       other?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await sleep(200);
       out.tabSwitch = !!other && state.sessionId === other.dataset.id;
+      const beforeMid = tabsOf().length;
+      tabsOf()[0]?.dispatchEvent(new MouseEvent("auxclick", { bubbles: true, button: 1 }));
+      await sleep(200);
+      out.tabMiddleClose = tabsOf().length === beforeMid - 1;
+      const beforeX = tabsOf().length;
       bar.querySelector(".tab.active .tab-close")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await sleep(200);
       out.tabCloseCount = tabsOf().length;
+      out.tabCloseOk = out.tabCloseCount === beforeX - 1;
       await rpc("session.delete", { id: a.id }).catch(() => {});
       await rpc("session.delete", { id: b.id }).catch(() => {});
     } catch (err) {
@@ -2091,18 +2104,21 @@ try {
     return out;
   })()`);
   check(
-    chrome?.toggleVisible === true && chrome?.collapsed === true && chrome?.expanded === true,
-    "the session rail collapses and expands",
+    chrome?.toggleVisible === true &&
+      chrome?.collapsed === true &&
+      chrome?.expanded === true &&
+      chrome?.toggleFixed === true,
+    "the session rail collapses and expands without moving the toggle",
     JSON.stringify(chrome),
   );
   check(
-    typeof chrome?.settingsLabel === "string" && chrome.settingsLabel.length > 0 && chrome?.settingsVisible === true,
-    "the settings button is a visible labeled control",
+    chrome?.settingsVisible === true && chrome?.settingsHasIcon === true && chrome?.settingsLabelText === "",
+    "the settings button is an icon-only control with a clear glyph",
     JSON.stringify(chrome),
   );
   check(
-    chrome?.tabCount >= 2 && chrome?.tabSwitch === true && chrome?.tabCloseCount === chrome.tabCount - 1,
-    "sessions of one folder open as switchable tabs",
+    chrome?.tabCount >= 2 && chrome?.tabSwitch === true && chrome?.tabMiddleClose === true && chrome?.tabCloseOk === true,
+    "sessions of one folder open as switchable tabs (middle-click closes)",
     JSON.stringify(chrome),
   );
 

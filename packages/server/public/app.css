@@ -62,7 +62,8 @@ body {
 }
 .side-head {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 14px;
+  /* clear the fixed #sidebar-toggle pinned at the window's top-left */
+  padding: 12px 14px 12px 50px;
 }
 .title-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .title-row .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1271,9 +1272,18 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
     max-height: calc(100vh - 72px); overflow-y: auto;
   }
 }
-/* the sidebar toggle works on every width: on desktop it collapses the rail,
-   on narrow screens it opens the drawer. */
-#sidebar-toggle { display: inline-flex; }
+/* the sidebar toggle is pinned to the window's top-left so it never moves when
+   the rail collapses/expands; on desktop it collapses the rail, on narrow
+   screens it opens the drawer. */
+#sidebar-toggle {
+  display: inline-flex; position: fixed; top: 9px; left: 12px; z-index: 80;
+}
+/* reserve room for the pinned toggle when the rail is hidden or on mobile
+   (when the rail is visible the toggle sits over the sidebar header instead) */
+#app.side-collapsed #topbar .title-wrap { padding-left: 40px; }
+@media (max-width: 900px) {
+  #topbar .title-wrap { padding-left: 40px; }
+}
 @media (max-width: 900px) {
   #app { grid-template-columns: 1fr; grid-template-areas: "main"; }
   #sidebar {
@@ -1662,22 +1672,12 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
   padding: 0 3px; font-size: 13px; line-height: 1; border-radius: 5px; flex: none;
 }
 .tab .tab-close:hover { color: var(--err); background: var(--hover); }
-.tab-add {
-  flex: none; align-self: center; margin-left: 4px; padding: 3px 9px;
-  border: 1px solid var(--border); border-radius: 8px; background: transparent;
-  color: var(--dim); cursor: pointer; font-size: 13px; line-height: 1;
-}
-.tab-add:hover { color: var(--text); border-color: var(--accent); }
 
-/* ---- settings button: labeled so it is easy to find ----------------------- */
+/* ---- settings button: icon-only, but bordered/filled so it stands out ----- */
 .top-actions .iconbtn.settings-btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 4px 11px; font-size: 13px; font-weight: 600;
-  border: 1px solid var(--border); background: var(--panel2);
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 5px 6px; color: var(--text);
+  border: 1px solid var(--border); background: var(--panel2); border-radius: 9px;
 }
 .top-actions .iconbtn.settings-btn:hover { border-color: var(--accent); background: var(--hover); }
-.settings-btn .sb-ic { font-size: 15px; line-height: 1; }
-@media (max-width: 900px) {
-  .top-actions .iconbtn.settings-btn { padding: 5px 9px; }
-  .settings-btn .sb-label { display: none; }
-}
+.settings-btn svg { display: block; }

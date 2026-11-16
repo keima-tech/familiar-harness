@@ -2372,6 +2372,16 @@ function renderTabs() {
     tab.addEventListener("click", () => {
       if (s.id !== state.sessionId) void openSession(s.id);
     });
+    // middle-click closes the tab (suppress the autoscroll cursor first)
+    tab.addEventListener("mousedown", (ev) => {
+      if (ev.button === 1) ev.preventDefault();
+    });
+    tab.addEventListener("auxclick", (ev) => {
+      if (ev.button === 1) {
+        ev.preventDefault();
+        closeTab(s.id);
+      }
+    });
     bar.appendChild(tab);
   }
 }

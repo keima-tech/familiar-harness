@@ -272,17 +272,23 @@ export function startHttpTransport(
           let body: string | Buffer = fs.readFileSync(file);
           let etag = `W/"${stat.size}-${Math.floor(stat.mtimeMs)}"`;
           if (asset.type.startsWith("text/html")) {
-            const appMtime = ((): number => {
+            const mtimeOf = (name: string): number => {
               try {
-                return Math.floor(fs.statSync(path.join(publicDir(), "app.js")).mtimeMs);
+                return Math.floor(fs.statSync(path.join(publicDir(), name)).mtimeMs);
               } catch {
                 return 0;
               }
-            })();
+            };
+            const appMtime = mtimeOf("app.js");
+            const cssMtime = mtimeOf("app.css");
+            const htmlMtime = mtimeOf("index.html");
             body = String(body)
               .replace('src="/app.js"', `src="/app.js?v=${appMtime}"`)
-              .replace('href="/app.css"', `href="/app.css?v=${appMtime}"`);
-            etag = `W/"html-${appMtime}"`;
+              .replace('href="/app.css"', `href="/app.css?v=${cssMtime}"`);
+            // The document pulls in all three files, so any of them changing
+            // must invalidate the cached HTML: keying the ETag on app.js alone
+            // served stale markup/CSS after an index.html- or CSS-only update.
+            etag = `W/"html-${appMtime}-${cssMtime}-${htmlMtime}"`;
           }
           if (req.headers["if-none-match"] === etag) {
             res.writeHead(304, { ETag: etag, "Cache-Control": "no-cache", ...setCookie });

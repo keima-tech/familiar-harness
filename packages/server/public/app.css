@@ -61,16 +61,15 @@ body {
   display: flex; flex-direction: column; min-height: 0;
 }
 .side-head {
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; justify-content: flex-end;
   /* clear the fixed #sidebar-toggle pinned at the window's top-left */
   padding: 12px 14px 12px 50px;
+  min-height: 44px;
 }
 .title-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .title-row .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .title-row .menu-wrap { flex: none; }
 .title-row .iconbtn { flex: none; }
-.logo { font-weight: 600; letter-spacing: 0.3px; display: inline-flex; align-items: center; gap: 6px; }
-.logo-ic { width: 17px; height: 17px; border-radius: 4px; display: block; }
 .settings-brand { display: inline-flex; align-items: center; gap: 10px; }
 .brand-ic { width: 30px; height: 30px; border-radius: 8px; display: block; }
 #new-session {
@@ -131,10 +130,6 @@ body {
   padding: 10px 16px; gap: 12px;
 }
 .title-wrap { min-width: 0; display: flex; align-items: center; gap: 9px; }
-/* The rail already carries the Familiar mark, so the top bar only repeats it when
-   the rail is out of sight (collapsed, or a drawer on narrow screens). */
-.ticon { display: none; width: 20px; height: 20px; border-radius: 5px; flex: none; }
-#app.side-collapsed .ticon { display: block; }
 .title-col { min-width: 0; }
 .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .title input {
@@ -1289,9 +1284,6 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
 }
 @media (max-width: 900px) {
   #app { grid-template-columns: 1fr; grid-template-areas: "main"; }
-  /* the rail is an off-canvas drawer here: keep the mark in the top bar
-     (the drawer covers it while open, so it never shows twice) */
-  .ticon { display: block; }
   #sidebar {
     position: fixed; left: 0; top: 0; bottom: 0; width: min(300px, 85vw); z-index: 70;
     transform: translateX(-105%); transition: transform 0.2s ease;
@@ -1556,7 +1548,6 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
 
 /* ---- phone portrait: keep the top bar + composer on one row ---- */
 @media (max-width: 560px) {
-  .ticon { display: none; }                 /* free room for the session title */
   #effort-chip, #ctx-btn { display: none; } /* redundant with the top-bar gauge */
   #mode-chip, #model-chip { max-width: 92px; }
   .composer-foot { gap: 3px; }
@@ -1653,9 +1644,13 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
 .perm-save:disabled { opacity: 0.6; }
 
 /* ---- collapsible left rail (desktop) -------------------------------------- */
-/* the hamburger toggles this; the choice persists in localStorage. */
-#app.side-collapsed { grid-template-columns: 0 minmax(520px, 1fr) auto; }
-#app.side-collapsed #sidebar { display: none; }
+/* the hamburger toggles this; the choice persists in localStorage.
+   Scoped to desktop: on narrow screens the rail is a drawer, and a persisted
+   collapse state must not hide it or overwrite the single-column grid. */
+@media (min-width: 901px) {
+  #app.side-collapsed { grid-template-columns: 0 minmax(520px, 1fr) auto; }
+  #app.side-collapsed #sidebar { display: none; }
+}
 
 /* ---- session tabs (same folder) ------------------------------------------- */
 .tabs {

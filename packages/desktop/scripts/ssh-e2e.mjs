@@ -317,6 +317,34 @@ async function evalOnce(expression) {
   }
 }
 
+/** Evaluate once with an emulated viewport (narrow-screen media queries). */
+async function evalAtViewport(width, height, expression) {
+  const targets = await pageTargets();
+  const target = targets[0];
+  if (!target) throw new Error("no page target");
+  const cdp = await openCdp(target.webSocketDebuggerUrl);
+  try {
+    await cdp.send("Emulation.setDeviceMetricsOverride", {
+      width,
+      height,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    const res = await cdp.send("Runtime.evaluate", {
+      expression,
+      awaitPromise: true,
+      returnByValue: true,
+    });
+    if (res.exceptionDetails) {
+      throw new Error(res.exceptionDetails.exception?.description ?? res.exceptionDetails.text ?? "eval failed");
+    }
+    return res.result?.value;
+  } finally {
+    await cdp.send("Emulation.clearDeviceMetricsOverride").catch(() => {});
+    cdp.close();
+  }
+}
+
 /** Evaluate, tolerating page-load races (returns undefined on failure). */
 async function probe(expression) {
   try {
@@ -2069,16 +2097,10 @@ try {
       toggle.click(); await sleep(60);
       out.expanded = !app.classList.contains("side-collapsed");
 
-      // the Familiar mark should appear once: the rail carries it, and the top bar
-      // only shows its copy while the rail is hidden
-      const markVisible = (el) => !!el && (el.checkVisibility ? el.checkVisibility() : el.offsetParent !== null);
-      const marks = () => [...document.querySelectorAll("#sidebar .logo-ic, #topbar .ticon")].filter(markVisible).length;
-      out.markCountExpanded = marks();
-      out.topbarMarkExpanded = markVisible(document.querySelector("#topbar .ticon"));
-      toggle.click(); await sleep(60);
-      out.markCountCollapsed = marks();
-      out.topbarMarkCollapsed = markVisible(document.querySelector("#topbar .ticon"));
-      toggle.click(); await sleep(60);
+      // branding lives in settings/about: the app shell itself has no logo
+      out.shellLogos = document.querySelectorAll(
+        "#sidebar .logo, #sidebar .logo-ic, #topbar .ticon, #topbar img",
+      ).length;
 
       const sb = document.querySelector("#open-settings");
       out.settingsHasIcon = !!sb?.querySelector("svg");
@@ -2128,17 +2150,54 @@ try {
     JSON.stringify(chrome),
   );
   check(
-    chrome?.markCountExpanded === 1 &&
-      chrome?.topbarMarkExpanded === false &&
-      chrome?.markCountCollapsed === 1 &&
-      chrome?.topbarMarkCollapsed === true,
-    "the Familiar mark is shown once (rail, or top bar only while the rail is hidden)",
+    chrome?.shellLogos === 0,
+    "the app shell shows no Familiar logo (branding stays in settings/about)",
     JSON.stringify(chrome),
   );
   check(
     chrome?.tabCount >= 2 && chrome?.tabSwitch === true && chrome?.tabMiddleClose === true && chrome?.tabCloseOk === true,
     "sessions of one folder open as switchable tabs (middle-click closes)",
     JSON.stringify(chrome),
+  );
+
+  // ---- a persisted desktop collapse must not break the narrow-screen drawer --
+  const narrow = await evalAtViewport(
+    820,
+    900,
+    `(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const out = {};
+      try {
+        const app = document.querySelector("#app");
+        const sidebar = document.querySelector("#sidebar");
+        const toggle = document.querySelector("#sidebar-toggle");
+        // simulate: rail collapsed on desktop, then the window narrowed
+        app.classList.add("side-collapsed");
+        await sleep(80);
+        out.display = getComputedStyle(sidebar).display;
+        out.oneColumn = getComputedStyle(app).gridTemplateColumns.split(" ").length === 1;
+        toggle.click();
+        await sleep(300);
+        out.drawerOpen = sidebar.classList.contains("open");
+        out.onScreen = Math.round(sidebar.getBoundingClientRect().x) === 0;
+        toggle.click();
+        await sleep(300);
+        out.drawerClosed = !sidebar.classList.contains("open");
+        app.classList.remove("side-collapsed");
+      } catch (err) {
+        out.error = String(err && err.stack ? err.stack : err);
+      }
+      return out;
+    })()`,
+  );
+  check(
+    narrow?.display === "flex" &&
+      narrow?.oneColumn === true &&
+      narrow?.drawerOpen === true &&
+      narrow?.onScreen === true &&
+      narrow?.drawerClosed === true,
+    "a persisted rail collapse does not break the narrow-screen drawer",
+    JSON.stringify(narrow),
   );
 
   // ---- context composition report (system / tools / history / tool results) --

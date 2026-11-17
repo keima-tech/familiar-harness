@@ -484,6 +484,34 @@ console.log("— scenario I: web ui transport —");
   assert(page.includes("app.js"), "web UI index served", page.slice(0, 120));
   const appJs = await fetch(`http://127.0.0.1:${PORT}/app.js`).then((r) => r.text());
   assert(appJs.includes("session.send"), "web UI app.js served");
+
+  // A cached document must revalidate when ANY asset changes. The ETag used to
+  // track only app.js, so an index.html- or CSS-only update kept serving stale
+  // markup (which is exactly how a stale logo survived a reload).
+  const docPath = path.join(repoRoot, "packages/server/public/index.html");
+  const docStat = fs.statSync(docPath);
+  const docEtag = (await fetch(`http://127.0.0.1:${PORT}/`)).headers.get("etag");
+  const revalidated = await fetch(`http://127.0.0.1:${PORT}/`, {
+    headers: { "if-none-match": docEtag ?? "" },
+  });
+  let afterStatus = 0;
+  let afterEtag = "";
+  try {
+    const bumped = new Date(Date.now() + 5000);
+    fs.utimesSync(docPath, bumped, bumped);
+    const after = await fetch(`http://127.0.0.1:${PORT}/`, {
+      headers: { "if-none-match": docEtag ?? "" },
+    });
+    afterStatus = after.status;
+    afterEtag = after.headers.get("etag") ?? "";
+  } finally {
+    fs.utimesSync(docPath, docStat.atime, docStat.mtime);
+  }
+  assert(
+    revalidated.status === 304 && afterStatus === 200 && afterEtag !== docEtag,
+    "HTML revalidates when index.html changes (not just app.js)",
+    `304=${revalidated.status} after=${afterStatus} etag=${docEtag}`,
+  );
   assert(
     page.includes('id="file-menu"') && page.includes('id="file-submenu"') &&
       page.includes('data-act="rename"') && page.includes('data-act="delete"'),

@@ -2069,6 +2069,17 @@ try {
       toggle.click(); await sleep(60);
       out.expanded = !app.classList.contains("side-collapsed");
 
+      // the Familiar mark should appear once: the rail carries it, and the top bar
+      // only shows its copy while the rail is hidden
+      const markVisible = (el) => !!el && (el.checkVisibility ? el.checkVisibility() : el.offsetParent !== null);
+      const marks = () => [...document.querySelectorAll("#sidebar .logo-ic, #topbar .ticon")].filter(markVisible).length;
+      out.markCountExpanded = marks();
+      out.topbarMarkExpanded = markVisible(document.querySelector("#topbar .ticon"));
+      toggle.click(); await sleep(60);
+      out.markCountCollapsed = marks();
+      out.topbarMarkCollapsed = markVisible(document.querySelector("#topbar .ticon"));
+      toggle.click(); await sleep(60);
+
       const sb = document.querySelector("#open-settings");
       out.settingsHasIcon = !!sb?.querySelector("svg");
       out.settingsLabelText = (sb?.textContent ?? "").trim();
@@ -2114,6 +2125,14 @@ try {
   check(
     chrome?.settingsVisible === true && chrome?.settingsHasIcon === true && chrome?.settingsLabelText === "",
     "the settings button is an icon-only control with a clear glyph",
+    JSON.stringify(chrome),
+  );
+  check(
+    chrome?.markCountExpanded === 1 &&
+      chrome?.topbarMarkExpanded === false &&
+      chrome?.markCountCollapsed === 1 &&
+      chrome?.topbarMarkCollapsed === true,
+    "the Familiar mark is shown once (rail, or top bar only while the rail is hidden)",
     JSON.stringify(chrome),
   );
   check(

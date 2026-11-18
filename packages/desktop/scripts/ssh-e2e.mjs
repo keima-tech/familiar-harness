@@ -2101,6 +2101,7 @@ try {
       out.shellLogos = document.querySelectorAll(
         "#sidebar .logo, #sidebar .logo-ic, #topbar .ticon, #topbar img",
       ).length;
+      out.sideTitle = (document.querySelector(".side-head .side-title")?.textContent ?? "").trim();
 
       const sb = document.querySelector("#open-settings");
       out.settingsHasIcon = !!sb?.querySelector("svg");
@@ -2152,6 +2153,11 @@ try {
   check(
     chrome?.shellLogos === 0,
     "the app shell shows no Familiar logo (branding stays in settings/about)",
+    JSON.stringify(chrome),
+  );
+  check(
+    chrome?.sideTitle === "Familiar Harness",
+    "the session rail header keeps the app name as text",
     JSON.stringify(chrome),
   );
   check(

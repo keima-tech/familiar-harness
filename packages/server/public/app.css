@@ -61,11 +61,13 @@ body {
   display: flex; flex-direction: column; min-height: 0;
 }
 .side-head {
-  display: flex; align-items: center; justify-content: flex-end;
+  display: flex; align-items: center; justify-content: space-between;
   /* clear the fixed #sidebar-toggle pinned at the window's top-left */
   padding: 12px 14px 12px 50px;
   min-height: 44px;
 }
+/* the app name only (no mark): the shell carries no Familiar logo */
+.side-title { font-weight: 600; letter-spacing: 0.3px; }
 .title-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .title-row .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .title-row .menu-wrap { flex: none; }

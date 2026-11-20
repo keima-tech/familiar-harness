@@ -17,6 +17,39 @@ A client/server agent harness with a full-screen terminal UI, a Web UI and a des
 
 `familiar serve` runs the agent core as a daemon (JSON-RPC over HTTP + WebSocket). The CLI with its full-screen TUI, the Web UI, and the Electron desktop app are all thin clients of that same core — start a CLI while `serve` is alive and it attaches to it automatically.
 
+### Why Familiar?
+
+Most harnesses are a chat box wrapped around a model. Familiar is built around three
+things that are hard to copy — and all three are demonstrable in one command:
+
+```bash
+familiar demo        # offline, no API key, ~60 seconds
+```
+
+| | What it means in practice |
+|---|---|
+| **The agent improves itself, with a human in the loop** | After every turn a *separate reviewer agent* reads that turn and proposes durable lessons: **memory** (always-on facts) or **skills** (on-demand procedures). Nothing is written silently — proposals are staged and a human approves them (`familiar memory pending` / `familiar skills pending`). A **curator** keeps the skill store honest (unused → stale → archived, optional LLM consolidation) with a ledger and snapshots, so nothing is ever silently deleted. |
+| **One core engine, three frontends** | `familiar serve` runs the agent as a daemon. The TUI, the browser UI and the desktop app are thin clients of the *same* engine and the *same* SQLite history — open the same session from any of them. |
+| **The machine may be somewhere else** | **SSH proxy mode** runs bash/read/write/edit/glob/grep on a remote host over SSH **without installing anything there** — MCP servers and language servers are spawned over SSH as well. **familiar-server mode** starts the daemon on the other machine and switches the window to it. |
+
+`familiar demo` walks the whole loop — turn → staged proposal → approval → inherited
+lesson → skill proposal — against a throw-away home and the mock provider, then
+shows the very same sessions being served over JSON-RPC by the daemon.
+
+Smaller differences worth knowing:
+
+- **Context and cost are visible.** Per-turn token composition (system / tools /
+  history), an estimated USD price, a token budget guard, large tool results
+  compressed behind handles, and unconfigured connector tools hidden from the
+  prompt (measured: 31 → 17 tools, ≈34 % less tool schema per turn).
+- **Office documents are first-class.** Generate Word / Excel / PowerPoint with
+  no extra dependencies (optionally following a registered template's design)
+  and preview images, audio, video, PDF, Markdown, CSV, JSON and office files.
+- **Small, auditable dependency surface.** `yaml` + `ws`, storage on Node's
+  built-in `node:sqlite` — no native modules, MIT licensed, self-hosted
+  releases, no account required.
+- **Windows and Linux are first-class**, not an afterthought.
+
 ### Highlights
 
 - **Client/server separation** — one core engine, three frontends; sessions persist server-side in SQLite.
@@ -99,6 +132,9 @@ npm unlink                     # removes the global `familiar` symlink
 ### Quick start
 
 ```bash
+# see the differentiators in 60 seconds (offline, no API key needed)
+familiar demo
+
 # full-screen TUI — same as `familiar chat`
 familiar
 

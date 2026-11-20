@@ -952,6 +952,23 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
 - **結論**: **Electron シェル(`packages/desktop`)を継続**。サイズは別途
   electron-builder 設定(locale 削減等)で圧縮する。
 
+## v0.1.0 の実装メモ 72(2026-11-21、公開前の差別化整理 — README「Why Familiar」と `familiar demo`)
+
+GitHub 公開を前提に、Competing harness との差分を「文言」ではなく「体験」で示す準備。
+
+- **README.md / README.ja.md に「Why Familiar(なぜ Familiar なのか)」節を追加**。3 本の柱 —
+  ①承認付き自己改善ループ(memory/skills の staging + curator)、②1 コア・3 フロントの
+  常駐デーモン、③SSH プロキシ/familiar サーバ(相手側にインストール不要)を表で提示。
+  Speak-ing points として文脈内訳・コスト可視化・オフィス生成・最小依存・Windows/Linux
+  対応を併記。EN/JA の内容は同期。
+- **`familiar demo` を新設**(packages/cli/src/demo.ts)。使い捨ての FAMILIAR_HOME + mock プロバイダで
+  オフライン実行(API キー不要・ネットワーク不要・実 `~/.familiar` を触らない)。6 ステップ:
+  1) ターン後に別レビュアーエージェントが教訓を提案 2) staging される(未適用)
+  3) 人が承認 4) 次のターンで教訓が注入される(MEMORY-PRESENT) 5) skill も同じ承認ゲート
+  6) `familiar serve` を起動し同一セッションが JSON-RPC で配信されることを实证。
+  `--keep` で使い捨てホームを残せる。
+- smoke に `familiar demo` の回帰(自己レビュー staging / 承認後の継承 / 同一ストアの共有)を追加。
+
 ## v0.1.0 の実装メモ 71(2026-11-17、レール見出しのアプリ名を復活)
 
 - メモ 70 でシェルからロゴを撤去した際に消えたレール上部の文字を復活。

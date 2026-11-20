@@ -2416,6 +2416,31 @@ server:
   );
 }
 
+// ---------------------------------------------------------------------------
+// Scenario: familiar demo (offline walkthrough of the differentiators)
+// ---------------------------------------------------------------------------
+console.log("— scenario: demo —");
+{
+  const demo = await run(["demo"], project, familiarHome);
+  const blob = `${demo.stdout}\n${demo.stderr}`;
+  assert(demo.code === 0, "familiar demo exits 0", blob.slice(-300));
+  assert(
+    demo.stdout.includes("self-review staged"),
+    "demo shows the reviewer staging a lesson instead of applying it",
+    blob.slice(0, 300),
+  );
+  assert(
+    demo.stdout.includes("MEMORY-PRESENT"),
+    "demo shows the approved lesson being inherited by the next turn",
+    blob.slice(0, 300),
+  );
+  assert(
+    demo.stdout.includes("session(s) in the same store"),
+    "demo shows one core engine serving the frontends",
+    blob.slice(0, 300),
+  );
+}
+
 console.log(
   failures === 0 ? "\nsmoke: all checks passed" : `\nsmoke: ${failures} failure(s)`,
 );

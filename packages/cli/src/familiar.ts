@@ -39,6 +39,7 @@ import { FullScreenTui, type TuiModelGroup } from "./ui/tui.js";
 import { CliApprovalAdapter, TuiApprovalAdapter, setApprovalRepl } from "./ui/approvals.js";
 import { RemoteFamiliarClient } from "./client/remote.js";
 import { cmdWorktree } from "./worktree.js";
+import { cmdDemo } from "./demo.js";
 
 const USAGE = `familiar — OpenCode/Claude Code-style agent harness (CLI)
 
@@ -69,6 +70,8 @@ Usage:
   familiar worktree list | add <name> | remove <name> | prune   (git worktree wrapper)
   familiar init
   familiar doctor
+  familiar demo [--keep] [--cwd DIR]
+                        # offline walkthrough: self-improvement loop + one core, 3 frontends
   familiar help | --version
 
 Options:
@@ -2388,6 +2391,9 @@ async function main(): Promise<void> {
         break;
       case "doctor":
         await cmdDoctor();
+        break;
+      case "demo":
+        await cmdDemo(flags);
         break;
       default:
         fail(`unknown command: ${command}\n${USAGE}`);

@@ -26,3 +26,6 @@ state.db-*
 
 # release artifacts
 familiar-v*.tar.gz
+
+# local scratch (drops from the editor/harness)
+.orca/

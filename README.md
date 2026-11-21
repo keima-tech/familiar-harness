@@ -189,6 +189,10 @@ npm run mdtest      # markdown renderer fixtures
 `familiar serve` keeps running the built `packages/*/dist`; restart it after code
 changes (the static web assets reload on their own).
 
+Maintainers: `scripts/release.sh --publish` builds the tarball and desktop
+installers and publishes them to Forgejo; with `GITHUB_TOKEN` (or `--github`)
+the same assets are mirrored to GitHub Releases.
+
 ## License
 
 [MIT](LICENSE)

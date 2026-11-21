@@ -952,6 +952,23 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
 - **結論**: **Electron シェル(`packages/desktop`)を継続**。サイズは別途
   electron-builder 設定(locale 削減等)で圧縮する。
 
+## v0.1.0 の実装メモ 76(2026-11-22、リリース資産を GitHub Releases にもミラー)
+
+Forgejo で公開したリリース資産を GitHub Releases にも置き、公開後は
+`install.sh` / `familiar update` が GitHub だけで完結するようにした。
+
+- **scripts/release.sh**: `--publish` の後、GitHub のリリースを作成(既存なら再利用)し、
+  tarball / deb / AppImage / exe を同じ名前でアップロードする。同名アセットは削除して
+  置き換えるため、同じバージョンの再公開でも壊れない。
+- **トークン**: `GITHUB_TOKEN` または `GITHUB_TOKEN_FILE` を使用。`--github` を付けた
+  場合は未設定なら `gh auth token` を使う。`--no-github` で Forgejo のみ。
+  トークンが無い場合は「skipped」と表示し、Forgejo の公開自体は成功させる。
+- **タグの存在確認**: GitHub に `v<version>` タグが無い場合はエラーにする。GitHub は
+  リリース作成時にタグを既定ブランチから自動生成するため、ミラー前の誤った位置に
+  タグが付くのを避ける。
+- **README**: メンテナ向けの公開手順を 1 段落だけ追加(EN/JA)。
+- アップロード先は `https://uploads.github.com`(`FAMILIAR_GITHUB_UPLOAD` で上書き可)。
+
 ## v0.1.0 の実装メモ 75(2026-11-22、公開導線を GitHub に切り替え)
 
 リポジトリは Forgejo で開発し GitHub へミラーする運用を継続する。利用者向けの

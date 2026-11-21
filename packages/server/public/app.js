@@ -2171,6 +2171,7 @@ function renderTopbarGauge() {
   const pctEl = $("#gauge-pct");
   if (used === undefined) {
     pctEl.textContent = "—";
+    btn.classList.remove("over", "warn");
     btn.title = t("top.gaugeNoTurn");
     return;
   }
@@ -2179,13 +2180,15 @@ function renderTopbarGauge() {
   if (win) {
     const pct = Math.round((used / win) * 100);
     pctEl.textContent = `${pct}%`;
+    // one number, three states: the ring + label turn amber at 75%, red at 100%
     btn.classList.toggle("over", used >= win);
+    btn.classList.toggle("warn", used < win && used / win >= 0.75);
     btn.title =
       `${t("chip.ctx")}: ${approx}${formatTokens(used)} / ${formatTokens(win)} tok${winNote} (${pct}%)` +
       (used >= win ? ` — ${t("usage.overNote")}` : "");
   } else {
     pctEl.textContent = formatTokens(used);
-    btn.classList.remove("over");
+    btn.classList.remove("over", "warn");
     btn.title = `${t("chip.ctx")}: ${approx}${formatTokens(used)} tok`;
   }
 }
@@ -2260,8 +2263,14 @@ function renderCtxPane() {
     note.textContent = t("ctx.noteHint", formatTokens(used), formatTokens(win));
   }
   note.classList.toggle("over", used !== undefined && !!win && used >= win);
-  $("#ctx-btn").classList.toggle("over", used !== undefined && !!win && used >= win);
-  $("#ctx-head-pct").classList.toggle("over", used !== undefined && !!win && used >= win);
+  const over = used !== undefined && !!win && used >= win;
+  const warn = used !== undefined && !!win && !over && used / win >= 0.75;
+  $("#ctx-btn").classList.toggle("over", over);
+  $("#ctx-btn").classList.toggle("warn", warn);
+  $("#ctx-head-pct").classList.toggle("over", over);
+  $("#ctx-head-pct").classList.toggle("warn", warn);
+  $("#ctx-pop").classList.toggle("over", over);
+  $("#ctx-pop").classList.toggle("warn", warn);
   const bd = $("#ctx-breakdown");
   if (bd) {
     bd.innerHTML = "";
@@ -2292,6 +2301,10 @@ function renderCtxPaneBody() {
     ? `0 ${C}`
     : `${C * Math.min(1, used / win)} ${C}`;
   const ringLabel = used === undefined ? "—" : win ? `${pct}%` : formatTokens(used);
+  if (pct !== null) {
+    ring.classList.toggle("over", pct >= 100);
+    ring.classList.toggle("warn", pct < 100 && pct >= 75);
+  }
   ring.innerHTML =
     `<svg viewBox="0 0 72 72" width="72" height="72">` +
     `<circle class="gauge-track" cx="36" cy="36" r="${R}"></circle>` +
@@ -2301,13 +2314,13 @@ function renderCtxPaneBody() {
     `<div class="ctx-big-text"><b>${esc(s ? `${s.provider}/${s.model}` : "—")}</b>` +
     `<span>${used === undefined ? t("ctx.noteNoTurn") : `${approx}${formatTokens(used)} / ${win ? formatTokens(win) : "?"} tok`}</span></div>`;
   body.appendChild(ring);
+  // the ring above already carries the percentage — the card must not repeat it
   body.appendChild(sectionCard(t("chip.ctx"), [
     [t("ctx.used"), used === undefined ? t("info.unknown") : `${approx}${formatTokens(used)} tok`],
     [t("ctx.window"), win ? `${formatTokens(win)} tok${assumed ? ` ${t("ctx.assumed")}` : ""}` : t("info.unknown")],
     [t("ctx.free"), used === undefined || !win ? "—" : `${approx}${formatTokens(Math.max(0, win - used))} tok`],
-    ["%", pct === null ? "—" : `${pct}%`],
     ["model", s ? `${s.provider}/${s.model}` : "—"],
-  ], pct === null ? undefined : `${pct}%`));
+  ]));
   const note = document.createElement("div");
   note.className = "ctx-note";
   if (used === undefined) note.textContent = t("ctx.noteNoTurn");

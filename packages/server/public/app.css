@@ -163,7 +163,7 @@ body {
   transform: rotate(-90deg); transform-origin: 11px 11px;
   transition: stroke-dashoffset 0.3s ease;
 }
-#ctx-gauge .gauge-pct { font-size: 11px; font-weight: 700; color: var(--text); line-height: 1; }
+#ctx-gauge .gauge-pct { font-size: 11px; font-weight: 700; color: var(--text); line-height: 1; font-variant-numeric: tabular-nums; }
 #ctx-gauge:hover .gauge-pct { color: var(--accent); }
 
 /* ---- popovers that open upward (composer, bottom edge of the window) ---- */
@@ -946,7 +946,6 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
   fill: none; stroke: var(--ok); stroke-width: 2.5;
   stroke-linecap: round; transform: rotate(-90deg); transform-origin: 50% 50%;
 }
-#ctx-btn svg text { fill: currentColor; font-size: 7.5px; font-weight: 700; }
 #ctx-pop { min-width: 296px; padding: 12px; gap: 10px; }
 .ctx-pop .ctx-head { display: flex; align-items: center; gap: 12px; }
 .ctx-pop .ctx-head svg circle.gauge-track { fill: none; stroke: var(--border); stroke-width: 2.5; }
@@ -955,7 +954,6 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
   stroke-linecap: round; transform: rotate(-90deg); transform-origin: 50% 50%;
   transition: stroke-dashoffset 0.3s ease;
 }
-.ctx-pop .ctx-head svg text { fill: var(--text); font-size: 7.5px; font-weight: 700; }
 .ctx-pop .ctx-head-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .ctx-pop .ctx-head-text b { font-size: 16px; }
 .ctx-pop .ctx-head-text span {
@@ -1157,6 +1155,10 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
 #ctx-pane-body .ctx-big svg text {
   fill: var(--text); font-size: 15px; font-weight: 700; font-family: var(--mono);
 }
+#ctx-pane-body .ctx-big.over svg circle.gauge-bar { stroke: var(--err); }
+#ctx-pane-body .ctx-big.warn svg circle.gauge-bar { stroke: var(--warn); }
+#ctx-pane-body .ctx-big.over svg text { fill: var(--err); }
+#ctx-pane-body .ctx-big.warn svg text { fill: var(--warn); }
 #ctx-pane-body .ctx-big-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 #ctx-pane-body .ctx-big-text b { font-size: 14px; }
 #ctx-pane-body .ctx-big-text span { color: var(--dim); font-size: 11.5px; word-break: break-all; }
@@ -1379,8 +1381,11 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
 /* ---- composer attachments (multimodal images) ---- */
 .code-copy.copied { color: var(--ok); }
 .code-copy.copy-fail { color: var(--err); }
-#ctx-gauge.over #gauge-pct, #ctx-btn.over .gauge-pct, #ctx-pop .ctx-head-text b.over { color: var(--err); }
-#ctx-gauge.over svg .gauge-bar, #ctx-btn.over svg .gauge-bar, #ctx-pop svg .gauge-bar { stroke: var(--err); }
+/* usage levels: normal = accent/ok, ≥75% = amber, ≥100% = red */
+#ctx-gauge.over #gauge-pct, #ctx-pop .ctx-head-text b.over { color: var(--err); }
+#ctx-gauge.warn #gauge-pct, #ctx-pop .ctx-head-text b.warn { color: var(--warn); }
+#ctx-gauge.over svg .gauge-bar, #ctx-btn.over svg .gauge-bar, #ctx-pop.over svg .gauge-bar { stroke: var(--err); }
+#ctx-gauge.warn svg .gauge-bar, #ctx-btn.warn svg .gauge-bar, #ctx-pop.warn svg .gauge-bar { stroke: var(--warn); }
 .ctx-pop .ctx-note.over { color: var(--err); }
 .queue-strip { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 12px 0; }
 .queue-chip {

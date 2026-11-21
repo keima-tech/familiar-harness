@@ -23,7 +23,7 @@
 
 ### なぜ Familiar なのか?
 
-ほとんどのハーネスは「モデルに包んだチャット画面」です。Familiar は、複製が難しい 3 点を中心に設計されています — しかも **コマンド 1 つで実際に体験できます**。
+デーモンと複数のフロントを持つのは、いまやどのハーネスも同じです。Familiar が変えているのは、**自分自身の指示を書き換えるエージェント**に対する**既定値**です — しかも **コマンド 1 つで実際に体験できます**。
 
 ```bash
 familiar demo        # オフライン・API キー不要・約 60 秒
@@ -31,18 +31,46 @@ familiar demo        # オフライン・API キー不要・約 60 秒
 
 | | 実際に何が変わるか |
 |---|---|
-| **エージェントが自らを改善する(ただし人が承認する)** | 各ターン後に**別のレビュアーエージェント**がそのターンを読み、恒久的に効く教訓を提案します — **memory**(常時ロードする事実)か **skills**(必要な時にだけ読む手続き)。**何もしないまま書き込むことは決してありません**。提案は staging され、人が承認します(`familiar memory pending` / `familiar skills pending`)。**curator** が skill ストアの衛生を管理し(未使用 → stale → archive、任意の LLM 統合)、ledger と snapshot を残すので、**暗黙に消えるものはありません**。 |
-| **1 つのコア・3 つのフロント** | `familiar serve` がエージェントをデーモンとして動かし、TUI・ブラウザ UI・デスクトップアプリは**同じエンジン・同じ SQLite 履歴**の薄いクライアントです。どのフロントから同じセッションを開いても同じ状態を見られます。 |
-| **実行のマシンが別にあり得る** | **SSH プロキシモード**は bash/read/write/edit/glob/grep を SSH 越しに**相手側に何もインストールせずに**実行します(MCP サーバや言語サーバーも SSH 越しに起動)。**familiar-server モード**は相手先でデーモンを起動し、ウィンドウをそちらへ切り替えます。 |
+| **自己改善は既定で staging される** | 各ターン後に**別のレビュアーエージェント**がそのターンを読み、恒久的に効く教訓を提案します — **memory**(常時ロードする事実)か **skills**(必要な時にだけ読む手続き)。提案は staging され、人が承認します(`familiar memory pending` / `familiar skills pending`)。これは**設定ではなく既定**です。Claude Code の auto memory は確認なしで書き込み、Hermes は同じ自己改善ループを持ちますが承認ゲートは opt-in です。 |
+| **すべての変更を取り消せて、監査できる** | **curator** が未使用の skill を active → stale → archived と遷移させ、すべての変更(実行者・変更前後のハッシュ)を ledger に追記し、統合パスの前に skill ツリーの snapshot を取ります。`familiar curator rollback <id>` で 1 回分を復元できるので、**暗黙に消えるものはありません**。 |
+| **小さく監査可能なコア** | `yaml` + `ws` + Node 内蔵の `node:sqlite`、MIT、セルフホスト配布、アカウント不要。読み切れて fork できる大きさです — 代替はベンダーのバイナリを信頼することです。 |
 
 `familiar demo` はこの一連の流れ(ターン → staging された提案 → 承認 → 次のターンへの継承 → skill の提案)を、使い捨てのホームと mock プロバイダで実行し、最後に同じセッションをデーモンが JSON-RPC で配信しているところまで見せます。
 
-その他、控えめだが効く違い:
+同梱されているが、唯一ではないもの:
 
+- **1 つのコア・3 つのフロント。** `familiar serve` がエージェントをデーモンとして動かし、TUI・ブラウザ UI・デスクトップアプリは**同じエンジン・同じ SQLite 履歴**の薄い RPC クライアントです。opencode・Claude Code・Codex も同種の構成を持っています — ここの違いは「各フロントが第 2 のエンジンではなくクライアントである」ことです。
+- **SSH プロキシモード。** bash/read/write/edit/glob/grep を SSH 越しに**相手側に何もインストールせずに**実行し、MCP サーバや言語サーバーも同じ接続で起動します。**familiar-server モード**は相手先でデーモンを起動します。インストール不要の SSH ブリッジは MCP サーバや単体 CLI としても存在しますが、Familiar は本体に同梱し、設定 UI から選べます。
 - **コンテキストとコストが見えます。** ターン毎のトークン内訳(system / tools / history)、USD 概算、トークン予算ガード、大きいツール結果の圧縮(全文はハンドルで保持)、未設定コネクタのツール非表示(実測で 31 → 17 ツール、1 ターンあたりツール定義が約 34% 減)。
 - **オフィス文書が主役です。** 追加依存なしで Word / Excel / PowerPoint を生成(登録済みテンプレートのデザインも継承できます)、画像・音声・動画・PDF・Markdown・CSV・JSON・office をプレビュー。
-- **依存が小さく、監査できます。** `yaml` + `ws` のみ、保存は Node 内蔵の `node:sqlite`(ネイティブ依存なし)、MIT ライセンス、セルフホスト配布、アカウント不要。
 - **Windows / Linux は afterthought ではなく前提です。**
+
+### 他のハーネスとの比較
+
+2026-11 時点、各社の公式ドキュメントで確認:
+
+| | Familiar | Claude Code | Codex CLI | opencode | Hermes Agent |
+|---|:--:|:--:|:--:|:--:|:--:|
+| エージェントによる memory/skills 書き込みが**既定で承認制** | **はい** | いいえ(auto memory は無確認で保存) | 手書きのみ(`AGENTS.md`) | — | opt-in(`write_approval`) |
+| ledger + snapshot 付きの skill キュレーション | **はい** | — | — | — | はい |
+| 共有デーモンと複数フロント | はい | はい | はい | はい | はい |
+| 相手側に何も入れない遠隔実行 | **同梱** | 相手先で CLI を実行 | クラウドのみ | サードパーティ製プラグイン | — |
+| コアの規模 | `yaml`, `ws`, `node:sqlite` | クローズドソース | Rust モノレポ | 大きな Bun アプリ | 大きな Python アプリ |
+
+正直に、Familiar が劣っている点:
+
+- **OS 強制サンドボックスがありません。** Codex CLI は既定で備えていますが、Familiar は承認フローと `plan` モードに依存します。
+- **マネージドなクラウド実行がありません。** Claude Code・Codex・Cursor は自社サンドボックスでセッションを動かせます。Familiar の SSH は「自分のマシンから自分のマシン」です。
+- **拡張の面が狭い。** MCP・`SKILL.md`・hooks までで、プラグインマーケットや skills ハブはありません。
+
+出典: [Claude Code memory](https://code.claude.com/docs/en/memory)、
+[permissions](https://code.claude.com/docs/en/permissions/)(auto memory の承認ステップを求める issue:
+[#38118](https://github.com/anthropics/claude-code/issues/38118)、
+[#78398](https://github.com/anthropics/claude-code/issues/78398))、
+[Codex sandboxing](https://learn.chatgpt.com/docs/sandboxing)、
+[opencode CLI/server](https://opencode.ai/docs/cli/)、
+[opencode web UI](https://opencode.ai/docs/cli/web/)、
+[Hermes curator](https://hermes-agent.nousresearch.com/docs/user-guide/features/curator)。
 
 ### 特徴
 

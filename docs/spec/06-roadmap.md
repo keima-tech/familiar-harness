@@ -952,6 +952,40 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
 - **結論**: **Electron シェル(`packages/desktop`)を継続**。サイズは別途
   electron-builder 設定(locale 削減等)で圧縮する。
 
+## v0.1.0 の実装メモ 73(2026-11-21、競合調査と README の差別化文言の修正)
+
+公開後に陳腐化する主張を残さないため、主要ハーネスの公式ドキュメントを確認し、
+README の「Why Familiar(なぜ Familiar なのか)」を事実に合わせて書き換えた。
+
+- **調査方法**: Web 検索ツールが HTTP 402 で使えなかったため、ローカル OpenCode
+  サーバの `POST /api/websearch` を `providerID=exa` で直接呼び、一次情報
+  (各社ドキュメント)を取得。ブログ記事は補助のみ。
+- **判明した現状(2026-11)**:
+  - デーモン + 複数フロントは **opencode**(共有バックグラウンドサーバ + Web UI +
+    VSCode + デスクトップ、OpenAPI SDK)、**Claude Code**(terminal / IDE / desktop /
+    cloud、hooks は全サーフェス共通)、**Codex**(CLI / IDE / desktop / cloud)も
+    実装済み。「1 コア・3 フロント」は差別化ではない。
+  - **Claude Code の auto memory は承認なしで書き込む**(`~/.claude/projects/*/memory/`)。
+    承認/裁定ステップは issue #38118, #65064, #78398 で要望中。
+  - **Hermes Agent** は Familiar と同型の自己改善ループ + curator(active → stale →
+    archived、ledger、snapshot、pin/lock、LLM 統合は opt-in)を持つ。ただし
+    `skills.write_approval` は **opt-in** で、既定は自動反映。
+  - **Codex CLI** は OS 強制サンドボックスが既定。Familiar は承認フローのみ。
+  - ゼロインストール SSH 実行は `clawssh` / `tunnelagent` / `ssh-bridge-mcp` /
+    `opencode-remote-code` / pydantic-ai harness の SSH Workspace など複数存在。
+- **README の変更(EN/JA 同期)**:
+  - 「複製が難しい 3 点」→「**既定値**の 3 点」に変更。
+    ①自己改善は**既定で staging + 人の承認**(Claude Code は無確認、Hermes は opt-in)、
+    ②curator の ledger/snapshot と `familiar curator rollback <id>` による取り消し可能性、
+    ③`yaml` + `ws` + `node:sqlite` の小さく監査可能なコア。
+  - 「1 コア・3 フロント」「SSH プロキシ」は柱から外し、「同梱されているが唯一ではない
+    もの」へ移動(SSH は MCP/LSP も SSH 越し・設定 UI から選べる点だけを差分として残す)。
+  - 「How it compares / 他のハーネスとの比較」表(2026-11 時点、出典リンク付き)を追加。
+  - **Familiar が劣る点**(OS サンドボックスなし、マネージドクラウド実行なし、拡張面が狭い)
+    も明記。誇張を残さない方針。
+- 出典: Claude Code memory / permissions、anthropics/claude-code#38118 / #78398、
+  Codex sandboxing、opencode CLI・web docs、Hermes curator docs。
+
 ## v0.1.0 の実装メモ 72(2026-11-21、公開前の差別化整理 — README「Why Familiar」と `familiar demo`)
 
 GitHub 公開を前提に、Competing harness との差分を「文言」ではなく「体験」で示す準備。

@@ -19,8 +19,9 @@ A client/server agent harness with a full-screen terminal UI, a Web UI and a des
 
 ### Why Familiar?
 
-Most harnesses are a chat box wrapped around a model. Familiar is built around three
-things that are hard to copy — and all three are demonstrable in one command:
+Every harness has a daemon and several frontends now, so "one core, three views"
+is table stakes. What Familiar changes is the **defaults** around an agent that edits
+its own instructions — and all of it is demonstrable in one command:
 
 ```bash
 familiar demo        # offline, no API key, ~60 seconds
@@ -28,16 +29,26 @@ familiar demo        # offline, no API key, ~60 seconds
 
 | | What it means in practice |
 |---|---|
-| **The agent improves itself, with a human in the loop** | After every turn a *separate reviewer agent* reads that turn and proposes durable lessons: **memory** (always-on facts) or **skills** (on-demand procedures). Nothing is written silently — proposals are staged and a human approves them (`familiar memory pending` / `familiar skills pending`). A **curator** keeps the skill store honest (unused → stale → archived, optional LLM consolidation) with a ledger and snapshots, so nothing is ever silently deleted. |
-| **One core engine, three frontends** | `familiar serve` runs the agent as a daemon. The TUI, the browser UI and the desktop app are thin clients of the *same* engine and the *same* SQLite history — open the same session from any of them. |
-| **The machine may be somewhere else** | **SSH proxy mode** runs bash/read/write/edit/glob/grep on a remote host over SSH **without installing anything there** — MCP servers and language servers are spawned over SSH as well. **familiar-server mode** starts the daemon on the other machine and switches the window to it. |
+| **Self-improvement is staged by default** | After every turn a *separate reviewer agent* reads that turn and proposes durable lessons: **memory** (always-on facts) or **skills** (on-demand procedures). Proposals are staged and a human approves them (`familiar memory pending` / `familiar skills pending`) — that is the default, not a switch. Claude Code's auto-memory writes without asking; Hermes has the same self-improvement loop but gates writes only when you opt in. |
+| **Every change can be undone and audited** | A **curator** walks unused skills through active → stale → archived, appends every mutation (actor, before/after hashes) to a ledger, and snapshots the skill tree before a consolidation pass. `familiar curator rollback <id>` restores a run, so nothing disappears silently. |
+| **A small, auditable core** | `yaml` + `ws` + Node's built-in `node:sqlite`, MIT, self-hosted releases, no account. Small enough to read, fork and reason about — the alternative is trusting a vendor's binary. |
 
 `familiar demo` walks the whole loop — turn → staged proposal → approval → inherited
 lesson → skill proposal — against a throw-away home and the mock provider, then
 shows the very same sessions being served over JSON-RPC by the daemon.
 
-Smaller differences worth knowing:
+Also in the box (useful, but not unique):
 
+- **One core, three frontends.** `familiar serve` runs the agent as a daemon; the
+  TUI, the browser UI and the desktop app are thin RPC clients of the same engine
+  and the same SQLite history. opencode, Claude Code and Codex offer versions of
+  this too — here each frontend is a client, not a second engine.
+- **SSH proxy mode.** bash/read/write/edit/glob/grep run on a remote host over
+  SSH **without installing anything there**, and MCP servers and language
+  servers are spawned over the same connection; **familiar-server mode** starts the
+  daemon on the other machine. Zero-install SSH bridges also exist as MCP servers
+  and standalone CLIs; Familiar ships one in the harness and wires it into the
+  settings UI.
 - **Context and cost are visible.** Per-turn token composition (system / tools /
   history), an estimated USD price, a token budget guard, large tool results
   compressed behind handles, and unconfigured connector tools hidden from the
@@ -45,10 +56,38 @@ Smaller differences worth knowing:
 - **Office documents are first-class.** Generate Word / Excel / PowerPoint with
   no extra dependencies (optionally following a registered template's design)
   and preview images, audio, video, PDF, Markdown, CSV, JSON and office files.
-- **Small, auditable dependency surface.** `yaml` + `ws`, storage on Node's
-  built-in `node:sqlite` — no native modules, MIT licensed, self-hosted
-  releases, no account required.
 - **Windows and Linux are first-class**, not an afterthought.
+
+### How it compares
+
+As of 2026-11, checked against the vendors' own docs:
+
+| | Familiar | Claude Code | Codex CLI | opencode | Hermes Agent |
+|---|:--:|:--:|:--:|:--:|:--:|
+| Memory/skills written by the agent, **approval by default** | **yes** | no (auto-memory saves silently) | manual only (`AGENTS.md`) | — | opt-in (`write_approval`) |
+| Skill curation with ledger + snapshots | **yes** | — | — | — | yes |
+| Shared daemon, several frontends | yes | yes | yes | yes | yes |
+| Remote run with nothing installed remotely | **built in** | run the CLI there | cloud only | third-party plugin | — |
+| Core size | `yaml`, `ws`, `node:sqlite` | closed source | Rust monorepo | large Bun app | large Python app |
+
+Where Familiar is behind, honestly:
+
+- **No OS-enforced sandbox.** Codex CLI ships one by default; Familiar relies on the
+  approval flow and `plan` mode.
+- **No managed cloud execution.** Claude Code, Codex and Cursor can run a session
+  in their own sandbox; Familiar's SSH mode is your machine talking to your machine.
+- **Smaller extension surface.** MCP, `SKILL.md` and hooks — no plugin
+  marketplace or skills hub.
+
+Sources: [Claude Code memory](https://code.claude.com/docs/en/memory),
+[permissions](https://code.claude.com/docs/en/permissions/) (and the open
+requests for an auto-memory adjudication step,
+[#38118](https://github.com/anthropics/claude-code/issues/38118),
+[#78398](https://github.com/anthropics/claude-code/issues/78398)),
+[Codex sandboxing](https://learn.chatgpt.com/docs/sandboxing),
+[opencode CLI/server](https://opencode.ai/docs/cli/),
+[opencode web UI](https://opencode.ai/docs/cli/web/),
+[Hermes curator](https://hermes-agent.nousresearch.com/docs/user-guide/features/curator).
 
 ### Highlights
 

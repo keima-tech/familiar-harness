@@ -17,7 +17,8 @@
     "dev:cli": "node packages/cli/dist/familiar.js",
     "smoke": "npm run -w packages/cli smoke",
     "mdtest": "node packages/server/scripts/md-test.mjs",
-    "serve": "npm run -w packages/cli serve"
+    "serve": "npm run -w packages/cli serve",
+    "version:set": "node scripts/set-version.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

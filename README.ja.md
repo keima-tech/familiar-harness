@@ -91,7 +91,7 @@ npm run -w packages/desktop pack:win     # NSIS(Linux でクロスビルドす�
 
 ### 更新とアンインストール
 
-`familiar update` は最新のリリース tarball を取得して入れ替えます(`--check` を付けると確認のみ)。GitHub Releases を参照し、GitHub でまだ公開していない間はプロジェクトの Forgejo をフォールバックとして使います。ソースから使っている場合は `git pull && npm run build` です。
+`familiar update` は最新のリリース tarball を取得して入れ替えます(`--check` を付けると確認のみ)。GitHub Releases を参照し、GitHub にリリースが無い間だけプロジェクトの Forgejo をフォールバックに使います(`--github-only` または `FAMILIAR_UPDATE_FALLBACK=off` で無効化)。更新したツリーが `familiar-serve` の systemd user unit の実行元なら、その unit も再起動します(`--no-restart` で抑制)。ソースから使っている場合は `git pull && npm run build` です。
 
 ```bash
 # インストーラで入れた場合のアンインストール
@@ -156,7 +156,7 @@ npm run mdtest      # markdown レンダラのフィクスチャ
 
 `familiar serve` はビルド済みの `packages/*/dist` を読み続けるため、コードを変更したら再起動してください(Web UI の静的アセットは自動で再読み込みされます)。
 
-メンテナ向け: `scripts/release.sh --publish` で tarball とデスクトップ版をビルドして Forgejo に公開します。`GITHUB_TOKEN`(または `--github`)を指定すると、同じアセットを GitHub Releases にもミラーします。
+メンテナ向け: `npm run version:set -- 0.2.0` で全パッケージのバージョンを揃え、`v0.2.0` タグを打ってから `scripts/release.sh --publish` を実行します。tarball とデスクトップ版をビルドして Forgejo に公開し、`GITHUB_TOKEN`(または `--github`)があれば同じアセットを GitHub Releases にもミラーします。
 
 ## ライセンス
 

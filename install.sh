@@ -40,7 +40,11 @@ VERSION="${1:-}"
 SOURCE_API=""
 ASSET_URL=""
 resolve_release() {
-  for base in "$GITHUB_API/repos/$GITHUB_REPO/releases" "$FALLBACK_HOST/api/v1/repos/$FALLBACK_REPO/releases"; do
+  bases="$GITHUB_API/repos/$GITHUB_REPO/releases"
+  if [ "${FAMILIAR_UPDATE_FALLBACK:-auto}" != "off" ]; then
+    bases="$bases $FALLBACK_HOST/api/v1/repos/$FALLBACK_REPO/releases"
+  fi
+  for base in $bases; do
     if [ -n "$VERSION" ]; then url="$base/tags/v$VERSION"; else url="$base"; fi
     json="$(fetch "$url" 2>/dev/null)" || continue
     asset="$(

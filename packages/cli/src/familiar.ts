@@ -52,9 +52,10 @@ Usage:
              # TTY opens the full-screen TUI; --line keeps the classic REPL
   familiar serve [--port N] [--bind ADDR] [--config PATH]
               [--token-file PATH] [--print-ready]
-  familiar update [--check] [--github OWNER/REPO] [--forgejo URL] [--repo SLUG]
+  familiar update [--check] [--github OWNER/REPO] [--github-only] [--forgejo URL] [--repo SLUG]
+               [--restart | --no-restart]
                         # self-update from GitHub Releases (install.sh installs);
-                        # the Forgejo host is a fallback while GitHub is unpublished
+                        # --github-only skips the Forgejo fallback
   familiar token [--write] [--clear]   # M2 bearer token for familiar serve
   familiar sessions list | show <id> [--messages] | delete <id>
   familiar search <query>            # full-text search across all sessions
@@ -114,6 +115,9 @@ const STRING_FLAGS = new Set([
   "--reason",
 ]);
 const BOOL_FLAGS = new Set([
+  "--github-only",
+  "--restart",
+  "--no-restart",
   "-y",
   "--yolo",
   "--json",
@@ -1691,17 +1695,77 @@ interface ReleaseSource {
   api: string;
 }
 
-/** GitHub first, then the in-house Forgejo instance. */
+/** GitHub first, then the in-house Forgejo instance (unless --github-only or
+ * FAMILIAR_UPDATE_FALLBACK=off). */
 function releaseSources(flags: Record<string, string | boolean>): ReleaseSource[] {
   const githubRepo =
     (flag(flags, "github") as string) || process.env.FAMILIAR_GITHUB_REPO || "keima-tech/familiar-harness";
   const githubApi = process.env.FAMILIAR_GITHUB_API || "https://api.github.com";
   const host = (flag(flags, "forgejo") as string) || process.env.FAMILIAR_FORGEJO || "https://example.invalid:3000";
   const repo = (flag(flags, "repo") as string) || process.env.FAMILIAR_REPO || "owner/familiar-harness";
-  return [
-    { api: `${githubApi}/repos/${githubRepo}/releases` },
-    { api: `${host}/api/v1/repos/${repo}/releases` },
-  ];
+  const sources: ReleaseSource[] = [{ api: `${githubApi}/repos/${githubRepo}/releases` }];
+  const fallback = !flagBool(flags, "github-only") && process.env.FAMILIAR_UPDATE_FALLBACK !== "off";
+  if (fallback) sources.push({ api: `${host}/api/v1/repos/${repo}/releases` });
+  return sources;
+}
+
+/**
+ * Restart the `familiar serve` systemd user unit after an update, but only when
+ * it runs from the tree we just replaced. `--restart` forces it and
+ * `--no-restart` skips the attempt.
+ */
+function restartServe(lib: string, flags: Record<string, string | boolean>): void {
+  if (process.platform !== "linux") return;
+  if (flagBool(flags, "no-restart")) {
+    process.stdout.write("familiar-serve: restart skipped (--no-restart)\n");
+    return;
+  }
+  const force = flagBool(flags, "restart");
+  let active = false;
+  try {
+    active =
+      execFileSync("systemctl", ["--user", "is-active", "familiar-serve"], { encoding: "utf8" }).trim() ===
+      "active";
+  } catch {
+    active = false;
+  }
+  if (!active) {
+    if (force) process.stdout.write("familiar-serve: not running (nothing to restart)\n");
+    return;
+  }
+  let execStart = "";
+  try {
+    execStart = execFileSync(
+      "systemctl",
+      ["--user", "show", "familiar-serve", "--property", "ExecStart", "--value"],
+      { encoding: "utf8" },
+    ).trim();
+  } catch {
+    /* unknown unit shape — rely on --restart below */
+  }
+  const execPath = /path=([^\s;}]+)/.exec(execStart)?.[1];
+  let resolved = execPath;
+  if (resolved) {
+    try {
+      resolved = fs.realpathSync(resolved);
+    } catch {
+      /* keep the raw path */
+    }
+  }
+  const target = path.join(lib, "packages", "cli", "dist", "familiar.js");
+  if (resolved !== target && !force) {
+    process.stdout.write(
+      "familiar-serve: running from a different install — restart it manually " +
+        "(systemctl --user restart familiar-serve)\n",
+    );
+    return;
+  }
+  try {
+    execFileSync("systemctl", ["--user", "restart", "familiar-serve"], { stdio: "ignore" });
+    process.stdout.write("familiar-serve: restarted\n");
+  } catch {
+    process.stdout.write("familiar-serve: restart failed — run `systemctl --user restart familiar-serve`\n");
+  }
 }
 
 async function cmdUpdate(flags: Record<string, string | boolean>): Promise<void> {
@@ -1725,9 +1789,15 @@ async function cmdUpdate(flags: Record<string, string | boolean>): Promise<void>
     process.stdout.write(`checking ${source.api} …\n`);
     try {
       const res = await httpGet(source.api);
-      if (!res.ok) {
-        errors.push(`${source.api}: HTTP ${res.status}`);
+      if (res.status === 404) {
+        // the mirror/release is not there yet — only this case falls through
+        errors.push(`${source.api}: no release (HTTP 404)`);
         continue;
+      }
+      if (!res.ok) {
+        // 403 (rate limit) / 401 / 5xx: report instead of hiding it behind a fallback
+        errors.push(`${source.api}: HTTP ${res.status}`);
+        break;
       }
       const releases = JSON.parse(res.buffer.toString("utf8")) as UpdateRelease[];
       const pick = releases
@@ -1743,6 +1813,7 @@ async function cmdUpdate(flags: Record<string, string | boolean>): Promise<void>
       break;
     } catch (err) {
       errors.push(`${source.api}: ${err instanceof Error ? err.message : String(err)}`);
+      break;
     }
   }
   if (!withAsset?.tag_name) {
@@ -1807,7 +1878,8 @@ async function cmdUpdate(flags: Record<string, string | boolean>): Promise<void>
     }
     fs.rmSync(backup, { recursive: true, force: true });
     process.stdout.write(`updated: familiar ${current} -> ${latest}\n`);
-    process.stdout.write("restart any running `familiar serve` / desktop app to pick it up\n");
+    restartServe(lib, flags);
+    process.stdout.write("restart any other running `familiar` clients (TUI / desktop app) to pick it up\n");
   } catch (err) {
     fail(`update failed (install unchanged): ${err instanceof Error ? err.message : String(err)}`);
   } finally {

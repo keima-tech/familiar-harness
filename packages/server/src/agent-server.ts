@@ -1302,21 +1302,29 @@ export class AgentServer {
 
   /** GET a URL as a buffer, tolerating self-signed CAs on the second try
    * (self-hosted Forgejo instances). FAMILIAR_TLS_STRICT=1 disables the fallback. */
-  private httpsGetBuffer(url: string): Promise<{ ok: boolean; buffer: Buffer }> {
+  private httpsGetBuffer(url: string): Promise<{ ok: boolean; status: number; buffer: Buffer }> {
     const viaNodeHttps = () =>
-      new Promise<{ ok: boolean; buffer: Buffer }>((resolve, reject) => {
+      new Promise<{ ok: boolean; status: number; buffer: Buffer }>((resolve, reject) => {
         const req = https.get(url, { rejectUnauthorized: false }, (res: import("node:http").IncomingMessage) => {
           const chunks: Buffer[] = [];
           res.on("data", (c: Buffer) => chunks.push(c));
           res.on("end", () =>
-            resolve({ ok: (res.statusCode ?? 500) < 400, buffer: Buffer.concat(chunks) }),
+            resolve({
+              ok: (res.statusCode ?? 500) < 400,
+              status: res.statusCode ?? 0,
+              buffer: Buffer.concat(chunks),
+            }),
           );
         });
         req.on("error", reject);
         req.setTimeout(20_000, () => req.destroy(new Error("timeout")));
       });
     return fetch(url, { signal: AbortSignal.timeout(15_000) })
-      .then(async (res) => ({ ok: res.ok, buffer: Buffer.from(await res.arrayBuffer()) }))
+      .then(async (res) => ({
+        ok: res.ok,
+        status: res.status,
+        buffer: Buffer.from(await res.arrayBuffer()),
+      }))
       .catch((err) => {
         const code = String((err as { cause?: { code?: string } }).cause?.code ?? "");
         if (!/CERT|SSL|TLS/i.test(code) || process.env.FAMILIAR_TLS_STRICT === "1") throw err;
@@ -1329,17 +1337,25 @@ export class AgentServer {
     const githubApi = process.env.FAMILIAR_GITHUB_API || 'https://api.github.com';
     const forgejoHost = process.env.FAMILIAR_FORGEJO || 'https://example.invalid:3000';
     const forgejoRepo = process.env.FAMILIAR_REPO || 'owner/familiar-harness';
-    const sources = [
-      githubApi + '/repos/' + githubRepo + '/releases',
-      forgejoHost + '/api/v1/repos/' + forgejoRepo + '/releases',
-    ];
+    const sources = [githubApi + '/repos/' + githubRepo + '/releases'];
+    if (process.env.FAMILIAR_UPDATE_FALLBACK !== 'off') {
+      sources.push(forgejoHost + '/api/v1/repos/' + forgejoRepo + '/releases');
+    }
     let latest = '';
     let releaseUrl = 'https://github.com/' + githubRepo + '/releases';
     let reachable = false;
+    let lastError = '';
     for (const api of sources) {
       try {
         const res = await this.httpsGetBuffer(api);
-        if (!res.ok) continue;
+        if (res.status === 404) {
+          lastError = 'no release (HTTP 404)';
+          continue; // the mirror is not there yet — this is the only fallback case
+        }
+        if (!res.ok) {
+          lastError = 'HTTP ' + res.status;
+          break; // 403 (rate limit) / 401 / 5xx: report it instead of hiding it
+        }
         const releases = JSON.parse(res.buffer.toString('utf8')) as Array<{ tag_name?: string; html_url?: string }>;
         reachable = true;
         if (api.startsWith(forgejoHost)) {
@@ -1354,12 +1370,18 @@ export class AgentServer {
           }
         }
         if (latest) break;
-      } catch {
-        // try the next source
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err);
+        break;
       }
     }
     if (!reachable) {
-      return { current: this.serverVersion, latest: '', available: false, error: 'cannot reach the release host' };
+      return {
+        current: this.serverVersion,
+        latest: '',
+        available: false,
+        error: 'cannot reach the release host' + (lastError ? ' (' + lastError + ')' : ''),
+      };
     }
     const available = latest !== '' && this.semverCmp(latest, this.serverVersion) > 0;
     return { current: this.serverVersion, latest, available, releaseUrl };

@@ -952,6 +952,28 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
 - **結論**: **Electron シェル(`packages/desktop`)を継続**。サイズは別途
   electron-builder 設定(locale 削減等)で圧縮する。
 
+## v0.1.0 の実装メモ 77(2026-11-22、更新の自動化とバージョン管理)
+
+公開後の更新運用を詰めた。アプリ内更新の残っていた穴を 3 つ塞いでいる。
+
+- **`familiar update` が `familiar-serve` を再起動**: 更新後のツリーが systemd user unit
+  `familiar-serve` の実行元(`ExecStart` の実体が更新先の `packages/cli/dist/familiar.js`)で
+  ある場合だけ `systemctl --user restart familiar-serve` を実行する。`--restart` で強制、
+  `--no-restart` で抑制。別のインストールを指している場合は再起動せず、手動コマンドを表示。
+- **AppImage 直接実行時の自己更新**: `APPIMAGE` が設定されている場合は、展開済み
+  ディレクトリではなく AppImage ファイル自体を同一ディレクトリ内で置き換える
+  (`.new-<pid>` → rename、失敗時は `.bak-<pid>` から復元)。再起動は
+  `app.relaunch({ execPath })` で新しい AppImage を起動する。展開済みレイアウトと
+  Windows NSIS の挙動は従来どおり。
+- **`npm run version:set -- X.Y.Z`**: ルート + `packages/*` の 6 つの package.json と
+  `package-lock.json` を一括更新する。ルートだけ上がって CLI 側が古いままだと
+  `familiar update` の staged バージョン検査で失敗するため、同期を 1 コマンドにした。
+- **GitHub のみのモード**: `--github-only` / `FAMILIAR_UPDATE_FALLBACK=off` で Forgejo を
+  参照しない。Fallback は GitHub が **404**(リポジトリ/リリース未作成)のときだけで、
+  403(レート制限)・401・5xx・ネットワークエラーでは Forgejo に逃げず、そのエラーを
+  表示する。Web UI / デスクトップの更新チェックも同じ規則に揃えた。
+- `install.sh` も `FAMILIAR_UPDATE_FALLBACK=off` を尊重する。
+
 ## v0.1.0 の実装メモ 76(2026-11-22、リリース資産を GitHub Releases にもミラー)
 
 Forgejo で公開したリリース資産を GitHub Releases にも置き、公開後は

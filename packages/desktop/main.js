@@ -101,9 +101,13 @@ const UPDATE_CFG = {
     `${process.env.FAMILIAR_GITHUB_API || "https://api.github.com"}/repos/${
       process.env.FAMILIAR_GITHUB_REPO || "keima-tech/familiar-harness"
     }/releases`,
-    `${process.env.FAMILIAR_FORGEJO || "https://example.invalid:3000"}/api/v1/repos/${
-      process.env.FAMILIAR_REPO || "owner/familiar-harness"
-    }/releases`,
+    ...(process.env.FAMILIAR_UPDATE_FALLBACK === "off"
+      ? []
+      : [
+          `${process.env.FAMILIAR_FORGEJO || "https://example.invalid:3000"}/api/v1/repos/${
+            process.env.FAMILIAR_REPO || "owner/familiar-harness"
+          }/releases`,
+        ]),
   ],
   pollMs: 6 * 60 * 60 * 1000, // auto re-check every 6h
 };
@@ -176,9 +180,13 @@ async function checkForUpdate() {
     for (const api of UPDATE_CFG.sources) {
       try {
         const res = await httpGetBuffer(api);
+        if (res.status === 404) {
+          lastError = "no release (HTTP 404)";
+          continue; // the mirror is not there yet — the only fallback case
+        }
         if (!res.ok) {
           lastError = `HTTP ${res.status}`;
-          continue;
+          break; // 403 (rate limit) / 401 / 5xx: surface it
         }
         reachable = true;
         const releases = JSON.parse(res.buffer.toString("utf8"));
@@ -193,11 +201,12 @@ async function checkForUpdate() {
         if (pick) break;
       } catch (err) {
         lastError = String(err?.message ?? err);
+        break;
       }
     }
-    if (pick) pushUpdateStatus({ status: "available", version: pick.version, url: pick.url, error: "" });
-    else if (reachable) pushUpdateStatus({ status: "upToDate", version: current, error: "" });
-    else pushUpdateStatus({ status: "error", error: lastError || "cannot reach the release host" });
+    if (pick) pushUpdateStatus({ status: "available", version: pick.version, url: pick.url, relaunch: "", error: "" });
+    else if (reachable) pushUpdateStatus({ status: "upToDate", version: current, relaunch: "", error: "" });
+    else pushUpdateStatus({ status: "error", relaunch: "", error: lastError || "cannot reach the release host" });
   } catch (err) {
     pushUpdateStatus({ status: "error", error: String(err?.message ?? err) });
   }
@@ -230,6 +239,35 @@ async function applyUpdate() {
       if (!dl.ok) throw new Error(`download failed (HTTP ${dl.status})`);
       fs.writeFileSync(tmp, dl.buffer);
       pushUpdateStatus({ status: "applied", version, installer: tmp });
+      return updateStatus;
+    }
+    // AppImage launched as a file: replace that file and relaunch it later.
+    if (process.platform === "linux" && process.env.APPIMAGE) {
+      let target = process.env.APPIMAGE;
+      try {
+        target = fs.realpathSync(target); // follow a versioned symlink
+      } catch {
+        /* replace the path we were given */
+      }
+      const dl = await httpGetBuffer(url);
+      if (!dl.ok) throw new Error(`download failed (HTTP ${dl.status})`);
+      const tmp = `${target}.new-${process.pid}`;
+      const backup = `${target}.bak-${process.pid}`;
+      try {
+        fs.writeFileSync(tmp, dl.buffer, { mode: 0o755 });
+        fs.chmodSync(tmp, 0o755);
+        fs.renameSync(target, backup);
+        try {
+          fs.renameSync(tmp, target);
+        } catch (err) {
+          fs.renameSync(backup, target); // restore the old AppImage
+          throw err;
+        }
+        fs.rmSync(backup, { force: true });
+      } finally {
+        if (fs.existsSync(tmp)) fs.rmSync(tmp, { force: true });
+      }
+      pushUpdateStatus({ status: "applied", version, relaunch: target, error: "" });
       return updateStatus;
     }
     const root = installRoot();
@@ -279,7 +317,9 @@ ipcMain.handle("update:apply", (ev) => {
 });
 ipcMain.handle("update:restart", (ev) => {
   requireLocal(ev, "updates");
-  app.relaunch();
+  // An AppImage-file update replaced the file on disk; relaunch that path
+  // instead of the (old) mounted binary.
+  app.relaunch(updateStatus.relaunch ? { execPath: updateStatus.relaunch } : undefined);
   app.exit(0);
 });
 

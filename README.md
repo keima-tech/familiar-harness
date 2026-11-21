@@ -118,9 +118,11 @@ npm run -w packages/desktop pack:win     # NSIS (needs wine when cross-built on 
 ### Updating and uninstalling
 
 `familiar update` fetches the newest release tarball and swaps it in place
-(`--check` for a dry run; it reads GitHub Releases, falling back to the project's
-Forgejo instance while GitHub is unpublished). From a checkout:
-`git pull && npm run build`.
+(`--check` for a dry run). It reads GitHub Releases, falling back to the
+project's Forgejo instance only while GitHub has no release (`--github-only` or
+`FAMILIAR_UPDATE_FALLBACK=off` disables that). When the updated tree is the one the
+`familiar-serve` systemd user unit runs, it restarts the unit (`--no-restart` to
+skip). From a checkout: `git pull && npm run build`.
 
 ```bash
 # uninstall an installer-based install
@@ -189,9 +191,10 @@ npm run mdtest      # markdown renderer fixtures
 `familiar serve` keeps running the built `packages/*/dist`; restart it after code
 changes (the static web assets reload on their own).
 
-Maintainers: `scripts/release.sh --publish` builds the tarball and desktop
-installers and publishes them to Forgejo; with `GITHUB_TOKEN` (or `--github`)
-the same assets are mirrored to GitHub Releases.
+Maintainers: bump every package with `npm run version:set -- 0.2.0`, tag
+`v0.2.0`, then run `scripts/release.sh --publish` to build the tarball and
+desktop installers, publish them to Forgejo, and (with `GITHUB_TOKEN` or
+`--github`) mirror the same assets to GitHub Releases.
 
 ## License
 

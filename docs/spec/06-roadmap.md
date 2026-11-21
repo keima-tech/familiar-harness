@@ -952,6 +952,27 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
 - **結論**: **Electron シェル(`packages/desktop`)を継続**。サイズは別途
   electron-builder 設定(locale 削減等)で圧縮する。
 
+## v0.1.0 の実装メモ 78(2026-11-22、コンテキスト表示の整理と README スクリーンショット)
+
+- **% の重複表示を解消**: 同じパーセントが近接して 2〜3 か所出ていた箇所を整理した。
+  - ポップオーバー: 44px リング内の 7.5px 数字を廃止し、見出しの 16px の % 1 つに一本化。
+  - 右ペイン Context タブ: リング内の数字を残し、`sectionCard` の「%」行と見出しバッジを削除。
+  - コーサーのリングボタン: 16px リング内の 7.5px 文字(判読困難)を除去。詳細はポップオーバーで見せる。
+  - トップバーは元々 1 か所。`#gauge-pct` に `tabular-nums` を当てて数字のブレを防ぐ。
+- **使用率の色分け**: 75% 以上で `--warn`(アンバー)、100% 以上で `--err`(赤)。トップバー・
+  ポップオーバー・右ペイン・コーサーのリングで共通。`warn` クラスは `renderTopbarGauge` /
+  `renderCtxPane` / `renderCtxPaneBody` でトグルする。
+- **CSS バグ修正**: `#ctx-pop svg .gauge-bar`(無条件)がポップオーバーのリングを常時赤にしていた。
+  `#ctx-pop.over svg .gauge-bar` に修正し、`warn` バリアントを追加。
+- **README にスクリーンショット追加**: `docs/screenshots/{chat,self-improve,approval}.png`
+  (EN/JA とも「Familiar とは」直後に配置、alt 付き)。撮影手順は一時ホーム
+  (`/tmp/opencode/shots`)に完結する使い捨てスクリプトで行った —
+  mock プロバイダの設定 + `state.db` への合成セッション投入(実 `~/.familiar` は不使用)→
+  リポジトリの `familiar serve` を起動 → xvfb 上の Electron を CDP で操作し、
+  スキル提案カード(`skills.pending` → `maybeSuggestSkills`)と承認ドック(`showApproval`)は
+  UI 自身のレンダラ関数を通して実物と同じ markup で描画 → `Page.captureScreenshot`。
+  ヒーローは 1440×900@2x のフルウィンドウ、カード系は要素 rect でクロップ。
+
 ## v0.1.0 の実装メモ 77(2026-11-22、更新の自動化とバージョン管理)
 
 公開後の更新運用を詰めた。アプリ内更新の残っていた穴を 3 つ塞いでいる。

@@ -21,6 +21,14 @@ app are clients of it, so a session opened in one is visible in the others.
 After each turn a second agent reviews what happened and proposes durable lessons.
 Proposals are staged and only take effect when you approve them.
 
+<p align="center">
+  <img src="docs/screenshots/chat.png" width="820" alt="Familiar web UI — an agent turn with read/edit/bash tool cards, a diff and a context gauge">
+</p>
+<p align="center">
+  <img src="docs/screenshots/self-improve.png" width="48%" alt="A staged skill proposal waiting for approval">
+  <img src="docs/screenshots/approval.png" width="48%" alt="An approval card before a file write">
+</p>
+
 ## Quick start
 
 Requires Node.js 24+.

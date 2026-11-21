@@ -92,12 +92,19 @@ ipcMain.handle("dialog:pickDirectory", async (ev) => {
 });
 
 // ---------------------------------------------------------------------------
-// self-update: check the Forgejo releases, surface a ⬇ in the topbar, and
-// replace the installation on request (same swap scheme as `familiar update`)
+// self-update: check GitHub Releases (Forgejo is a fallback until the public
+// repository is published), surface a ⬇ in the topbar, and replace the
+// installation on request (same swap scheme as `familiar update`)
 // ---------------------------------------------------------------------------
 const UPDATE_CFG = {
-  host: process.env.FAMILIAR_FORGEJO || "https://example.invalid:3000",
-  repo: process.env.FAMILIAR_REPO || "owner/familiar-harness",
+  sources: [
+    `${process.env.FAMILIAR_GITHUB_API || "https://api.github.com"}/repos/${
+      process.env.FAMILIAR_GITHUB_REPO || "keima-tech/familiar-harness"
+    }/releases`,
+    `${process.env.FAMILIAR_FORGEJO || "https://example.invalid:3000"}/api/v1/repos/${
+      process.env.FAMILIAR_REPO || "owner/familiar-harness"
+    }/releases`,
+  ],
   pollMs: 6 * 60 * 60 * 1000, // auto re-check every 6h
 };
 
@@ -162,21 +169,35 @@ function pickUpdateAsset(assets) {
 async function checkForUpdate() {
   if (updateStatus.status === "downloading") return updateStatus;
   try {
-    const res = await httpGetBuffer(`${UPDATE_CFG.host}/api/v1/repos/${UPDATE_CFG.repo}/releases`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const releases = JSON.parse(res.buffer.toString("utf8"));
     const current = app.getVersion();
     let pick = null;
-    for (const r of releases) {
-      const asset = pickUpdateAsset(r.assets);
-      if (!asset) continue;
-      const v = (r.tag_name ?? "").replace(/^v/, "");
-      if (semverCmp(v, current) > 0 && (!pick || semverCmp(v, pick.version) > 0)) {
-        pick = { version: v, url: asset.browser_download_url };
+    let lastError = "";
+    let reachable = false;
+    for (const api of UPDATE_CFG.sources) {
+      try {
+        const res = await httpGetBuffer(api);
+        if (!res.ok) {
+          lastError = `HTTP ${res.status}`;
+          continue;
+        }
+        reachable = true;
+        const releases = JSON.parse(res.buffer.toString("utf8"));
+        for (const r of releases) {
+          const asset = pickUpdateAsset(r.assets);
+          if (!asset) continue;
+          const v = (r.tag_name ?? "").replace(/^v/, "");
+          if (semverCmp(v, current) > 0 && (!pick || semverCmp(v, pick.version) > 0)) {
+            pick = { version: v, url: asset.browser_download_url };
+          }
+        }
+        if (pick) break;
+      } catch (err) {
+        lastError = String(err?.message ?? err);
       }
     }
     if (pick) pushUpdateStatus({ status: "available", version: pick.version, url: pick.url, error: "" });
-    else pushUpdateStatus({ status: "upToDate", version: current, error: "" });
+    else if (reachable) pushUpdateStatus({ status: "upToDate", version: current, error: "" });
+    else pushUpdateStatus({ status: "error", error: lastError || "cannot reach the release host" });
   } catch (err) {
     pushUpdateStatus({ status: "error", error: String(err?.message ?? err) });
   }

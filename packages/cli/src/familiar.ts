@@ -52,8 +52,9 @@ Usage:
              # TTY opens the full-screen TUI; --line keeps the classic REPL
   familiar serve [--port N] [--bind ADDR] [--config PATH]
               [--token-file PATH] [--print-ready]
-  familiar update [--check] [--forgejo URL] [--repo SLUG]
-                        # self-update from release assets (install.sh installs)
+  familiar update [--check] [--github OWNER/REPO] [--forgejo URL] [--repo SLUG]
+                        # self-update from GitHub Releases (install.sh installs);
+                        # the Forgejo host is a fallback while GitHub is unpublished
   familiar token [--write] [--clear]   # M2 bearer token for familiar serve
   familiar sessions list | show <id> [--messages] | delete <id>
   familiar search <query>            # full-text search across all sessions
@@ -106,6 +107,7 @@ const STRING_FLAGS = new Set([
   "--root",
   "--forgejo",
   "--repo",
+  "--github",
   "-p",
   "--prompt",
   "--days",
@@ -1679,14 +1681,30 @@ async function httpGet(url: string): Promise<{ ok: boolean; status: number; buff
 
 /**
  * `familiar update` — self-update for installs created by install.sh.
- * Resolves the latest Forgejo release with a familiar-*.tar.gz asset, compares
+ * Resolves the latest GitHub release with a familiar-*.tar.gz asset, compares
  * versions, then download → verify → swap the install directory (same
- * filesystem, old tree restored if the swap fails midway).
- * Source checkouts must update via `git pull && npm run build`.
+ * filesystem, old tree restored if the swap fails midway). While the public
+ * repository has no release yet, the in-house Forgejo host is tried as a
+ * fallback. Source checkouts must update via `git pull && npm run build`.
  */
-async function cmdUpdate(flags: Record<string, string | boolean>): Promise<void> {
+interface ReleaseSource {
+  api: string;
+}
+
+/** GitHub first, then the in-house Forgejo instance. */
+function releaseSources(flags: Record<string, string | boolean>): ReleaseSource[] {
+  const githubRepo =
+    (flag(flags, "github") as string) || process.env.FAMILIAR_GITHUB_REPO || "keima-tech/familiar-harness";
+  const githubApi = process.env.FAMILIAR_GITHUB_API || "https://api.github.com";
   const host = (flag(flags, "forgejo") as string) || process.env.FAMILIAR_FORGEJO || "https://example.invalid:3000";
   const repo = (flag(flags, "repo") as string) || process.env.FAMILIAR_REPO || "owner/familiar-harness";
+  return [
+    { api: `${githubApi}/repos/${githubRepo}/releases` },
+    { api: `${host}/api/v1/repos/${repo}/releases` },
+  ];
+}
+
+async function cmdUpdate(flags: Record<string, string | boolean>): Promise<void> {
   const checkOnly = flagBool(flags, "check");
   const current = readVersion();
 
@@ -1701,20 +1719,35 @@ async function cmdUpdate(flags: Record<string, string | boolean>): Promise<void>
   }
   const lib = m[1] as string;
 
-  const api = `${host}/api/v1/repos/${repo}/releases`;
-  process.stdout.write(`checking ${api} …\n`);
-  let releases: UpdateRelease[];
-  try {
-    const res = await httpGet(api);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    releases = JSON.parse(res.buffer.toString("utf8")) as UpdateRelease[];
-  } catch (err) {
-    fail(`cannot list releases at ${api}: ${err instanceof Error ? err.message : String(err)}`);
+  let withAsset: UpdateRelease | null = null;
+  const errors: string[] = [];
+  for (const source of releaseSources(flags)) {
+    process.stdout.write(`checking ${source.api} …\n`);
+    try {
+      const res = await httpGet(source.api);
+      if (!res.ok) {
+        errors.push(`${source.api}: HTTP ${res.status}`);
+        continue;
+      }
+      const releases = JSON.parse(res.buffer.toString("utf8")) as UpdateRelease[];
+      const pick = releases
+        .filter((r) => (r.assets ?? []).some((a) => /^familiar-.*\.tar\.gz$/.test(a.name ?? "")))
+        .sort((a, b) =>
+          compareSemver((b.tag_name ?? "").replace(/^v/, ""), (a.tag_name ?? "").replace(/^v/, "")),
+        )[0];
+      if (!pick?.tag_name) {
+        errors.push(`${source.api}: no release with a familiar-*.tar.gz asset`);
+        continue;
+      }
+      withAsset = pick;
+      break;
+    } catch (err) {
+      errors.push(`${source.api}: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
-  const withAsset = (releases ?? [])
-    .filter((r) => (r.assets ?? []).some((a) => /^familiar-.*\.tar\.gz$/.test(a.name ?? "")))
-    .sort((a, b) => compareSemver((b.tag_name ?? "").replace(/^v/, ""), (a.tag_name ?? "").replace(/^v/, "")))[0];
-  if (!withAsset?.tag_name) fail(`no release with a familiar-*.tar.gz asset at ${api}`);
+  if (!withAsset?.tag_name) {
+    fail(`no release with a familiar-*.tar.gz asset (${errors.join("; ") || "no release source reachable"})`);
+  }
   const latest = (withAsset.tag_name as string).replace(/^v/, "");
   const asset =
     (withAsset.assets ?? []).find((a) => a.browser_download_url && a.name?.endsWith(`v${latest}.tar.gz`)) ??

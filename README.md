@@ -27,7 +27,7 @@ Requires Node.js 24+.
 
 ```bash
 # Linux / macOS
-curl -fsSL https://example.invalid:3000/owner/familiar-harness/raw/branch/main/install.sh | sh
+curl -fsSL https://github.com/keima-tech/familiar-harness/raw/main/install.sh | sh
 ```
 
 ```bash
@@ -84,7 +84,7 @@ a throw-away home directory.
 ### Installer (Linux / macOS)
 
 ```bash
-curl -fsSL https://example.invalid:3000/owner/familiar-harness/raw/branch/main/install.sh | sh
+curl -fsSL https://github.com/keima-tech/familiar-harness/raw/main/install.sh | sh
 ```
 
 Installs to `~/.local/lib/familiar` with a symlink at `~/.local/bin/familiar`
@@ -94,7 +94,7 @@ Installs to `~/.local/lib/familiar` with a symlink at `~/.local/bin/familiar`
 ### From source (any platform)
 
 ```bash
-git clone https://example.invalid:3000/owner/familiar-harness.git
+git clone https://github.com/keima-tech/familiar-harness.git
 cd familiar-harness
 npm install
 npm run build
@@ -106,7 +106,7 @@ On Windows, use the source install or the desktop installer below.
 ### Desktop app
 
 Ready-made binaries are attached to each
-[release](https://example.invalid:3000/owner/familiar-harness/releases):
+[release](https://github.com/keima-tech/familiar-harness/releases):
 `familiar-<version>-linux-amd64.deb`, `familiar-<version>-linux-x86_64.AppImage`,
 `familiar-<version>-win-x64.exe` (NSIS) and `familiar-<version>-win-x64-portable.exe`.
 
@@ -117,8 +117,10 @@ npm run -w packages/desktop pack:win     # NSIS (needs wine when cross-built on 
 
 ### Updating and uninstalling
 
-`familiar update` downloads the newest release tarball and swaps it in place
-(`--check` for a dry run). From a checkout: `git pull && npm run build`.
+`familiar update` fetches the newest release tarball and swaps it in place
+(`--check` for a dry run; it reads GitHub Releases, falling back to the project's
+Forgejo instance while GitHub is unpublished). From a checkout:
+`git pull && npm run build`.
 
 ```bash
 # uninstall an installer-based install

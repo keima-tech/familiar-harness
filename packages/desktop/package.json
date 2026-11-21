@@ -6,7 +6,7 @@
   "main": "main.js",
   "desktopName": "familiar-harness.desktop",
   "author": "Familiar contributors",
-  "homepage": "https://example.invalid/familiar",
+  "homepage": "https://github.com/keima-tech/familiar-harness",
   "license": "MIT",
   "scripts": {
     "start": "electron .",

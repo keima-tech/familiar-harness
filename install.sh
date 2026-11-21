@@ -1,15 +1,19 @@
 #!/bin/sh
-# Familiar installer — https://github.com/... (Forgejo instance)
+# Familiar installer — https://github.com/keima-tech/familiar-harness
 #
-#   curl -fsSL <repo-raw-url>/install.sh | sh
+#   curl -fsSL https://github.com/keima-tech/familiar-harness/raw/main/install.sh | sh
 #
-# Downloads the latest release tarball from the Forgejo release assets and
-# installs the `familiar` CLI into ~/.local (no npm required; Node.js >= 24
-# must be on the PATH).
+# Downloads the latest release tarball from GitHub Releases and installs the
+# `familiar` CLI into ~/.local (no npm required; Node.js >= 24 must be on the
+# PATH). The project develops on Forgejo and mirrors to GitHub; while GitHub
+# Releases does not yet carry the tarball, the Forgejo instance is used as a
+# fallback.
 set -eu
 
-REPO_HOST="${FAMILIAR_FORGEJO:-https://example.invalid:3000}"
-REPO_SLUG="${FAMILIAR_REPO:-owner/familiar-harness}"
+GITHUB_API="${FAMILIAR_GITHUB_API:-https://api.github.com}"
+GITHUB_REPO="${FAMILIAR_GITHUB_REPO:-keima-tech/familiar-harness}"
+FALLBACK_HOST="${FAMILIAR_FORGEJO:-https://example.invalid:3000}"
+FALLBACK_REPO="${FAMILIAR_REPO:-owner/familiar-harness}"
 INSTALL_LIB="${FAMILIAR_INSTALL_DIR:-$HOME/.local/lib/familiar}"
 INSTALL_BIN="${FAMILIAR_BIN_DIR:-$HOME/.local/bin}"
 
@@ -30,32 +34,38 @@ fetch() { $DOWNLOAD "$1"; }
 
 # --- resolve the latest release asset ---------------------------------------
 VERSION="${1:-}"
-# Forgejo and GitHub both expose releases with the same asset fields
-# (browser_download_url); only the API base differs
-case "$REPO_HOST" in
-  *github.com*)
-    API="${FAMILIAR_GITHUB_API:-https://api.github.com}/repos/$REPO_SLUG/releases"
-    ;;
-  *)
-    API="$REPO_HOST/api/v1/repos/$REPO_SLUG/releases"
-    ;;
-esac
+# GitHub and Forgejo both expose releases with the same asset fields
+# (browser_download_url); only the API base differs. Try GitHub first, then
+# the in-house instance (used while the public repository is unpublished).
+SOURCE_API=""
+ASSET_URL=""
+resolve_release() {
+  for base in "$GITHUB_API/repos/$GITHUB_REPO/releases" "$FALLBACK_HOST/api/v1/repos/$FALLBACK_REPO/releases"; do
+    if [ -n "$VERSION" ]; then url="$base/tags/v$VERSION"; else url="$base"; fi
+    json="$(fetch "$url" 2>/dev/null)" || continue
+    asset="$(
+      printf '%s' "$json" |
+        tr -d ' \n\r\t' |
+        grep -o '"browser_download_url":"[^"]*familiar-[^"]*\.tar\.gz"' |
+        head -1 |
+        cut -d'"' -f4
+    )" || asset=""
+    if [ -n "$asset" ]; then
+      SOURCE_API="$url"
+      ASSET_URL="$asset"
+      return 0
+    fi
+  done
+  return 1
+}
+
 if [ -n "$VERSION" ]; then
-  API="$API/tags/v$VERSION"
   log "installing familiar v$VERSION"
 else
-  log "resolving the latest familiar release..."
+  log "resolving the latest familiar release (github.com/$GITHUB_REPO)…"
 fi
-RELEASE_JSON="$(fetch "$API" 2>/dev/null)" || fail "cannot reach $API — is the repository public?"
-# first asset named familiar-*.tar.gz (jq is not a hard dependency)
-ASSET_URL="$(
-  printf '%s' "$RELEASE_JSON" |
-    tr -d ' \n\r\t' |
-    grep -o '"browser_download_url":"[^"]*familiar-[^"]*\.tar\.gz"' |
-    head -1 |
-    cut -d'"' -f4
-)"
-[ -n "$ASSET_URL" ] || fail "no familiar-*.tar.gz asset found in the latest release."
+resolve_release || fail "cannot reach GitHub or find a familiar-*.tar.gz asset (also tried the fallback host)"
+log "source: $SOURCE_API"
 log "asset: $ASSET_URL"
 
 # --- download + install ------------------------------------------------------
@@ -91,11 +101,14 @@ UNIT
   log "web UI: systemd user service enabled (auto-starts on login)"
 else
   # no systemd user session: start the server in the background if not running
-  if ! fetch "http://127.0.0.1:46210/healthz" >/dev/null 2>&1; then
+  if fetch "http://127.0.0.1:46210/healthz" >/dev/null 2>&1; then
+    log "web UI already running: http://localhost:46210/"
+  else
+    mkdir -p "$HOME/.familiar"
     ( setsid "$INSTALL_LIB/packages/cli/dist/familiar.js" serve > "$HOME/.familiar/serve.log" 2>&1 < /dev/null & )
     sleep 2
+    log "web UI started in the background: http://localhost:46210/ (log: ~/.familiar/serve.log)"
   fi
-  log "web UI started in the background: http://localhost:46210/ (log: ~/.familiar/serve.log)"
 fi
 
 # --- verify ------------------------------------------------------------------

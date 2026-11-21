@@ -952,6 +952,29 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
 - **結論**: **Electron シェル(`packages/desktop`)を継続**。サイズは別途
   electron-builder 設定(locale 削減等)で圧縮する。
 
+## v0.1.0 の実装メモ 75(2026-11-22、公開導線を GitHub に切り替え)
+
+リポジトリは Forgejo で開発し GitHub へミラーする運用を継続する。利用者向けの
+インストール・更新の導線だけを GitHub に合わせた。
+
+- **README.md / README.ja.md の URL を GitHub に変更**:
+  `install.sh` の取得元、clone 先、リリースページを
+  `https://github.com/keima-tech/familiar-harness` に統一。
+- **日本語版の言い回しを修正**: 「これは何か」→「Familiar とは」、「機能」→「主な機能」、
+  「小さい構成」→「依存の少なさ」など。英語直訳調の表現("staging され" など)を
+  自然な日本語に置き換えた。
+- **install.sh**: GitHub Releases を第一候補にし、取得できない場合だけ
+  社内 Forgejo のリリースへフォールバックする。`FAMILIAR_GITHUB_API` /
+  `FAMILIAR_GITHUB_REPO` で GitHub 側を、`FAMILIAR_FORGEJO` / `FAMILIAR_REPO` で
+  フォールバック側を上書きできる。
+- **`familiar update`**: `--github OWNER/REPO` を追加し、既定で GitHub → Forgejo の順に
+  リリース一覧を引く。インストール済みツリーの判定・swap 手順は変更なし。
+- **Web UI / デスクトップの更新チェック**: 同じ順序で GitHub と Forgejo を参照。
+  どちらにも繋がらない場合だけエラー表示にする。
+- **release.sh**: 公開先は従来どおり Forgejo。標準出力に GitHub のミラー先と
+  インストール URL を表示する。GitHub Releases への asset 添付は、リポジトリ公開時に
+  別途対応する(現状は tarball が GitHub に無い間だけ Forgejo にフォールバックする)。
+
 ## v0.1.0 の実装メモ 74(2026-11-22、README を「売り込み」から「使い方」中心へ再構成)
 
 第三者に試してもらう前提で README を書き直した。goose / opencode / Codex CLI の

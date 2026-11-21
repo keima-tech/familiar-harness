@@ -1325,23 +1325,40 @@ export class AgentServer {
   }
 
   private async updateCheck(): Promise<Record<string, unknown>> {
-    const host = process.env.FAMILIAR_FORGEJO || 'https://example.invalid:3000';
-    const repo = process.env.FAMILIAR_REPO || 'owner/familiar-harness';
+    const githubRepo = process.env.FAMILIAR_GITHUB_REPO || 'keima-tech/familiar-harness';
+    const githubApi = process.env.FAMILIAR_GITHUB_API || 'https://api.github.com';
+    const forgejoHost = process.env.FAMILIAR_FORGEJO || 'https://example.invalid:3000';
+    const forgejoRepo = process.env.FAMILIAR_REPO || 'owner/familiar-harness';
+    const sources = [
+      githubApi + '/repos/' + githubRepo + '/releases',
+      forgejoHost + '/api/v1/repos/' + forgejoRepo + '/releases',
+    ];
     let latest = '';
-    let releaseUrl = host + '/' + repo + '/releases';
-    try {
-      const res = await this.httpsGetBuffer(host + '/api/v1/repos/' + repo + '/releases');
-      if (!res.ok) throw new Error('HTTP error');
-      const releases = JSON.parse(res.buffer.toString('utf8')) as Array<{ tag_name?: string; html_url?: string }>;
-      for (const r of releases) {
-        const v = (r.tag_name ?? '').replace(/^v/, '');
-        if (!v) continue;
-        if (!latest || this.semverCmp(v, latest) > 0) {
-          latest = v;
-          releaseUrl = r.html_url ?? releaseUrl;
+    let releaseUrl = 'https://github.com/' + githubRepo + '/releases';
+    let reachable = false;
+    for (const api of sources) {
+      try {
+        const res = await this.httpsGetBuffer(api);
+        if (!res.ok) continue;
+        const releases = JSON.parse(res.buffer.toString('utf8')) as Array<{ tag_name?: string; html_url?: string }>;
+        reachable = true;
+        if (api.startsWith(forgejoHost)) {
+          releaseUrl = forgejoHost + '/' + forgejoRepo + '/releases';
         }
+        for (const r of releases) {
+          const v = (r.tag_name ?? '').replace(/^v/, '');
+          if (!v) continue;
+          if (!latest || this.semverCmp(v, latest) > 0) {
+            latest = v;
+            releaseUrl = r.html_url ?? releaseUrl;
+          }
+        }
+        if (latest) break;
+      } catch {
+        // try the next source
       }
-    } catch {
+    }
+    if (!reachable) {
       return { current: this.serverVersion, latest: '', available: false, error: 'cannot reach the release host' };
     }
     const available = latest !== '' && this.semverCmp(latest, this.serverVersion) > 0;

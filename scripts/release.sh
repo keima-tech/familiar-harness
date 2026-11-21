@@ -1,5 +1,8 @@
 #!/bin/sh
 # Build the release artifacts and (optionally) publish a Forgejo release.
+# The git repository is mirrored to https://github.com/keima-tech/familiar-harness;
+# release assets are published to Forgejo, and `install.sh` / `familiar update`
+# fall back to it while GitHub Releases does not carry the same assets.
 #
 #   scripts/release.sh                        # CLI tarball only (dry run)
 #   scripts/release.sh --desktop              # also build deb + AppImage
@@ -129,4 +132,5 @@ for f in $ARTIFACTS $ATTACH_FILES; do
   echo "  + $name"
 done
 echo "published: $REPO_HOST/$REPO_SLUG/releases/tag/v${VERSION}"
-echo "install:   curl -fsSL $REPO_HOST/$REPO_SLUG/raw/branch/main/install.sh | sh"
+echo "mirror:    https://github.com/keima-tech/familiar-harness (git mirror)"
+echo "install:   curl -fsSL https://github.com/keima-tech/familiar-harness/raw/main/install.sh | sh"

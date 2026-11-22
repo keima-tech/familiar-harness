@@ -11,8 +11,8 @@
     "node": ">=24.0.0"
   },
   "scripts": {
-    "build": "tsc -b .",
-    "clean": "tsc -b . --clean",
+    "build": "node scripts/clean-dist.mjs && tsc -b .",
+    "clean": "node scripts/clean-dist.mjs",
     "typecheck": "tsc -b . --force",
     "dev:cli": "node packages/cli/dist/familiar.js",
     "smoke": "npm run -w packages/cli smoke",

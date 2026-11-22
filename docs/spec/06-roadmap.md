@@ -969,11 +969,16 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   - テスト fixture のホームパスとフェイク ssh エラーのユーザー名を Neutral 化
     (`/home/user/...`、`user@`)して同様に履歴から置換。
   - 廃止した fallback コードに含まれていた社内ホスト名とリポジトリ slug も
-    この変更でリポジトリから消えた。
+    この変更でリポジトリから消えた。ただし旧コミットの **diff 内**には残っていたため、
+    全履歴の tree/msg を sed で書き換え(`example.invalid` → `example.invalid`、slug → `owner/familiar-harness`、
+    ユーザー名 → `user`)して履歴からも完全に除去した(HEAD のツリー内容は不変)。
+    Windows アセット(NSIS / portable exe)は fallback 削除前のビルドだったため、削除後のツリーから
+    再ビルド(wine 同梱環境で `pack:win` + `electron-builder --win portable`)して 5 アセットとも再公開した。
   - トークン・秘密鍵・.env・state.db・実セッションデータの追跡は無し(.gitignore で補強)。
     公開アセット(tarball / deb / AppImage / NSIS / portable)はステージング対象が packages/* のみで、
     上記の汚染は含まれていないことを `tar -tzf` で確認済み。
   - README のスクリーンショットは使い捨てホーム + mock プロバイダの合成セッション(実データ不使用)。
+- 作者情報は えいけんタウン と同じ `ai-agent` 名義へ全履歴 env-filter で統一(コミット日時は保持)。
 
 ## v0.1.0 の実装メモ 78(2026-11-22、コンテキスト表示の整理と README スクリーンショット)
 

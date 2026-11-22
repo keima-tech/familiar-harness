@@ -966,9 +966,9 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   - `.orca/drops/` に誤って追跡されていた無関係のスクリーンショット(Cline 設定画面、タイトルバーに
     ローカル PC 名)を `git filter-branch` で全履歴から削除。Forgejo / GitHub 両方へ force push、
     ミラー後の fresh clone で `-- .orca` の履歴が 0 件であることを確認。
-  - テスト fixture の `/home/user/...` パスとフェイク ssh エラーのユーザー名を Neutral 化
+  - テスト fixture のホームパスとフェイク ssh エラーのユーザー名を Neutral 化
     (`/home/user/...`、`user@`)して同様に履歴から置換。
-  - 廃止した fallback コードに含まれていた社内ホスト名(`example.invalid:3000`、slug `owner/familiar-harness`)も
+  - 廃止した fallback コードに含まれていた社内ホスト名とリポジトリ slug も
     この変更でリポジトリから消えた。
   - トークン・秘密鍵・.env・state.db・実セッションデータの追跡は無し(.gitignore で補強)。
     公開アセット(tarball / deb / AppImage / NSIS / portable)はステージング対象が packages/* のみで、

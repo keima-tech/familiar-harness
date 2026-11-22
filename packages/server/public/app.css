@@ -158,7 +158,7 @@ body {
   fill: none; stroke: var(--border); stroke-width: 3;
 }
 #ctx-gauge svg circle.gauge-bar {
-  fill: none; stroke: var(--accent); stroke-width: 3;
+  fill: none; stroke: var(--ok); stroke-width: 3;
   stroke-linecap: round;
   transform: rotate(-90deg); transform-origin: 11px 11px;
   transition: stroke-dashoffset 0.3s ease;

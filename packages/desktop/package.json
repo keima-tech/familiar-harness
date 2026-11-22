@@ -73,6 +73,9 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     },
+    "portable": {
+      "artifactName": "familiar-${version}-${os}-${arch}-portable.${ext}"
+    },
     "linux": {
       "target": [
         "deb",

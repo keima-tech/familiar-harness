@@ -1335,53 +1335,30 @@ export class AgentServer {
   private async updateCheck(): Promise<Record<string, unknown>> {
     const githubRepo = process.env.FAMILIAR_GITHUB_REPO || 'keima-tech/familiar-harness';
     const githubApi = process.env.FAMILIAR_GITHUB_API || 'https://api.github.com';
-    const forgejoHost = process.env.FAMILIAR_FORGEJO || 'https://example.invalid:3000';
-    const forgejoRepo = process.env.FAMILIAR_REPO || 'owner/familiar-harness';
-    const sources = [githubApi + '/repos/' + githubRepo + '/releases'];
-    if (process.env.FAMILIAR_UPDATE_FALLBACK !== 'off') {
-      sources.push(forgejoHost + '/api/v1/repos/' + forgejoRepo + '/releases');
-    }
+    const api = githubApi + '/repos/' + githubRepo + '/releases';
     let latest = '';
     let releaseUrl = 'https://github.com/' + githubRepo + '/releases';
-    let reachable = false;
-    let lastError = '';
-    for (const api of sources) {
-      try {
-        const res = await this.httpsGetBuffer(api);
-        if (res.status === 404) {
-          lastError = 'no release (HTTP 404)';
-          continue; // the mirror is not there yet — this is the only fallback case
-        }
-        if (!res.ok) {
-          lastError = 'HTTP ' + res.status;
-          break; // 403 (rate limit) / 401 / 5xx: report it instead of hiding it
-        }
-        const releases = JSON.parse(res.buffer.toString('utf8')) as Array<{ tag_name?: string; html_url?: string }>;
-        reachable = true;
-        if (api.startsWith(forgejoHost)) {
-          releaseUrl = forgejoHost + '/' + forgejoRepo + '/releases';
-        }
-        for (const r of releases) {
-          const v = (r.tag_name ?? '').replace(/^v/, '');
-          if (!v) continue;
-          if (!latest || this.semverCmp(v, latest) > 0) {
-            latest = v;
-            releaseUrl = r.html_url ?? releaseUrl;
-          }
-        }
-        if (latest) break;
-      } catch (err) {
-        lastError = err instanceof Error ? err.message : String(err);
-        break;
+    try {
+      const res = await this.httpsGetBuffer(api);
+      if (res.status === 404) {
+        return { current: this.serverVersion, latest: '', available: false, error: 'no release (HTTP 404)' };
       }
-    }
-    if (!reachable) {
-      return {
-        current: this.serverVersion,
-        latest: '',
-        available: false,
-        error: 'cannot reach the release host' + (lastError ? ' (' + lastError + ')' : ''),
-      };
+      if (!res.ok) {
+        // 403 (rate limit) / 401 / 5xx: report instead of hiding it
+        return { current: this.serverVersion, latest: '', available: false, error: 'HTTP ' + res.status };
+      }
+      const releases = JSON.parse(res.buffer.toString('utf8')) as Array<{ tag_name?: string; html_url?: string }>;
+      for (const r of releases) {
+        const v = (r.tag_name ?? '').replace(/^v/, '');
+        if (!v) continue;
+        if (!latest || this.semverCmp(v, latest) > 0) {
+          latest = v;
+          releaseUrl = r.html_url ?? releaseUrl;
+        }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { current: this.serverVersion, latest: '', available: false, error: 'cannot reach GitHub (' + msg + ')' };
     }
     const available = latest !== '' && this.semverCmp(latest, this.serverVersion) > 0;
     return { current: this.serverVersion, latest, available, releaseUrl };

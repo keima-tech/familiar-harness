@@ -97,18 +97,9 @@ ipcMain.handle("dialog:pickDirectory", async (ev) => {
 // installation on request (same swap scheme as `familiar update`)
 // ---------------------------------------------------------------------------
 const UPDATE_CFG = {
-  sources: [
-    `${process.env.FAMILIAR_GITHUB_API || "https://api.github.com"}/repos/${
-      process.env.FAMILIAR_GITHUB_REPO || "keima-tech/familiar-harness"
-    }/releases`,
-    ...(process.env.FAMILIAR_UPDATE_FALLBACK === "off"
-      ? []
-      : [
-          `${process.env.FAMILIAR_FORGEJO || "https://example.invalid:3000"}/api/v1/repos/${
-            process.env.FAMILIAR_REPO || "owner/familiar-harness"
-          }/releases`,
-        ]),
-  ],
+  source: `${process.env.FAMILIAR_GITHUB_API || "https://api.github.com"}/repos/${
+    process.env.FAMILIAR_GITHUB_REPO || "keima-tech/familiar-harness"
+  }/releases`,
   pollMs: 6 * 60 * 60 * 1000, // auto re-check every 6h
 };
 
@@ -172,44 +163,34 @@ function pickUpdateAsset(assets) {
 
 async function checkForUpdate() {
   if (updateStatus.status === "downloading") return updateStatus;
+  const current = app.getVersion();
+  let pick = null;
   try {
-    const current = app.getVersion();
-    let pick = null;
-    let lastError = "";
-    let reachable = false;
-    for (const api of UPDATE_CFG.sources) {
-      try {
-        const res = await httpGetBuffer(api);
-        if (res.status === 404) {
-          lastError = "no release (HTTP 404)";
-          continue; // the mirror is not there yet — the only fallback case
-        }
-        if (!res.ok) {
-          lastError = `HTTP ${res.status}`;
-          break; // 403 (rate limit) / 401 / 5xx: surface it
-        }
-        reachable = true;
-        const releases = JSON.parse(res.buffer.toString("utf8"));
-        for (const r of releases) {
-          const asset = pickUpdateAsset(r.assets);
-          if (!asset) continue;
-          const v = (r.tag_name ?? "").replace(/^v/, "");
-          if (semverCmp(v, current) > 0 && (!pick || semverCmp(v, pick.version) > 0)) {
-            pick = { version: v, url: asset.browser_download_url };
-          }
-        }
-        if (pick) break;
-      } catch (err) {
-        lastError = String(err?.message ?? err);
-        break;
+    const res = await httpGetBuffer(UPDATE_CFG.source);
+    if (res.status === 404) {
+      pushUpdateStatus({ status: "error", relaunch: "", error: "no release (HTTP 404)" });
+      return updateStatus;
+    }
+    if (!res.ok) {
+      // 403 (rate limit) / 401 / 5xx: surface it instead of hiding it
+      pushUpdateStatus({ status: "error", relaunch: "", error: `HTTP ${res.status}` });
+      return updateStatus;
+    }
+    const releases = JSON.parse(res.buffer.toString("utf8"));
+    for (const r of releases) {
+      const asset = pickUpdateAsset(r.assets);
+      if (!asset) continue;
+      const v = (r.tag_name ?? "").replace(/^v/, "");
+      if (semverCmp(v, current) > 0 && (!pick || semverCmp(v, pick.version) > 0)) {
+        pick = { version: v, url: asset.browser_download_url };
       }
     }
-    if (pick) pushUpdateStatus({ status: "available", version: pick.version, url: pick.url, relaunch: "", error: "" });
-    else if (reachable) pushUpdateStatus({ status: "upToDate", version: current, relaunch: "", error: "" });
-    else pushUpdateStatus({ status: "error", relaunch: "", error: lastError || "cannot reach the release host" });
   } catch (err) {
-    pushUpdateStatus({ status: "error", error: String(err?.message ?? err) });
+    pushUpdateStatus({ status: "error", relaunch: "", error: String(err?.message ?? err) });
+    return updateStatus;
   }
+  if (pick) pushUpdateStatus({ status: "available", version: pick.version, url: pick.url, relaunch: "", error: "" });
+  else pushUpdateStatus({ status: "upToDate", version: current, relaunch: "", error: "" });
   return updateStatus;
 }
 

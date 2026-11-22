@@ -12,8 +12,6 @@ set -eu
 
 GITHUB_API="${FAMILIAR_GITHUB_API:-https://api.github.com}"
 GITHUB_REPO="${FAMILIAR_GITHUB_REPO:-keima-tech/familiar-harness}"
-FALLBACK_HOST="${FAMILIAR_FORGEJO:-https://example.invalid:3000}"
-FALLBACK_REPO="${FAMILIAR_REPO:-owner/familiar-harness}"
 INSTALL_LIB="${FAMILIAR_INSTALL_DIR:-$HOME/.local/lib/familiar}"
 INSTALL_BIN="${FAMILIAR_BIN_DIR:-$HOME/.local/bin}"
 
@@ -40,26 +38,20 @@ VERSION="${1:-}"
 SOURCE_API=""
 ASSET_URL=""
 resolve_release() {
-  bases="$GITHUB_API/repos/$GITHUB_REPO/releases"
-  if [ "${FAMILIAR_UPDATE_FALLBACK:-auto}" != "off" ]; then
-    bases="$bases $FALLBACK_HOST/api/v1/repos/$FALLBACK_REPO/releases"
+  if [ -n "$VERSION" ]; then url="$GITHUB_API/repos/$GITHUB_REPO/releases/tags/v$VERSION"; else url="$GITHUB_API/repos/$GITHUB_REPO/releases"; fi
+  json="$(fetch "$url" 2>/dev/null)" || return 1
+  asset="$(
+    printf '%s' "$json" |
+      tr -d ' \n\r\t' |
+      grep -o '"browser_download_url":"[^"]*familiar-[^"]*\.tar\.gz"' |
+      head -1 |
+      cut -d'"' -f4
+  )" || asset=""
+  if [ -n "$asset" ]; then
+    SOURCE_API="$url"
+    ASSET_URL="$asset"
+    return 0
   fi
-  for base in $bases; do
-    if [ -n "$VERSION" ]; then url="$base/tags/v$VERSION"; else url="$base"; fi
-    json="$(fetch "$url" 2>/dev/null)" || continue
-    asset="$(
-      printf '%s' "$json" |
-        tr -d ' \n\r\t' |
-        grep -o '"browser_download_url":"[^"]*familiar-[^"]*\.tar\.gz"' |
-        head -1 |
-        cut -d'"' -f4
-    )" || asset=""
-    if [ -n "$asset" ]; then
-      SOURCE_API="$url"
-      ASSET_URL="$asset"
-      return 0
-    fi
-  done
   return 1
 }
 
@@ -68,7 +60,7 @@ if [ -n "$VERSION" ]; then
 else
   log "resolving the latest familiar release (github.com/$GITHUB_REPO)…"
 fi
-resolve_release || fail "cannot reach GitHub or find a familiar-*.tar.gz asset (also tried the fallback host)"
+resolve_release || fail "cannot reach GitHub or find a familiar-*.tar.gz asset"
 log "source: $SOURCE_API"
 log "asset: $ASSET_URL"
 

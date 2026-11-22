@@ -52,10 +52,8 @@ Usage:
              # TTY opens the full-screen TUI; --line keeps the classic REPL
   familiar serve [--port N] [--bind ADDR] [--config PATH]
               [--token-file PATH] [--print-ready]
-  familiar update [--check] [--github OWNER/REPO] [--github-only] [--forgejo URL] [--repo SLUG]
-               [--restart | --no-restart]
-                        # self-update from GitHub Releases (install.sh installs);
-                        # --github-only skips the Forgejo fallback
+  familiar update [--check] [--github OWNER/REPO] [--restart | --no-restart]
+                        # self-update from GitHub Releases (install.sh installs)
   familiar token [--write] [--clear]   # M2 bearer token for familiar serve
   familiar sessions list | show <id> [--messages] | delete <id>
   familiar search <query>            # full-text search across all sessions
@@ -106,8 +104,6 @@ const STRING_FLAGS = new Set([
   "--title",
   "--server",
   "--root",
-  "--forgejo",
-  "--repo",
   "--github",
   "-p",
   "--prompt",
@@ -115,7 +111,6 @@ const STRING_FLAGS = new Set([
   "--reason",
 ]);
 const BOOL_FLAGS = new Set([
-  "--github-only",
   "--restart",
   "--no-restart",
   "-y",
@@ -1695,18 +1690,13 @@ interface ReleaseSource {
   api: string;
 }
 
-/** GitHub first, then the in-house Forgejo instance (unless --github-only or
- * FAMILIAR_UPDATE_FALLBACK=off). */
-function releaseSources(flags: Record<string, string | boolean>): ReleaseSource[] {
+/** Releases live on GitHub Releases; an in-house mirror can be substituted
+ * with --github OWNER/REPO (FAMILIAR_GITHUB_API changes the API base). */
+function releaseSource(flags: Record<string, string | boolean>): ReleaseSource {
   const githubRepo =
     (flag(flags, "github") as string) || process.env.FAMILIAR_GITHUB_REPO || "keima-tech/familiar-harness";
   const githubApi = process.env.FAMILIAR_GITHUB_API || "https://api.github.com";
-  const host = (flag(flags, "forgejo") as string) || process.env.FAMILIAR_FORGEJO || "https://example.invalid:3000";
-  const repo = (flag(flags, "repo") as string) || process.env.FAMILIAR_REPO || "owner/familiar-harness";
-  const sources: ReleaseSource[] = [{ api: `${githubApi}/repos/${githubRepo}/releases` }];
-  const fallback = !flagBool(flags, "github-only") && process.env.FAMILIAR_UPDATE_FALLBACK !== "off";
-  if (fallback) sources.push({ api: `${host}/api/v1/repos/${repo}/releases` });
-  return sources;
+  return { api: `${githubApi}/repos/${githubRepo}/releases` };
 }
 
 /**
@@ -1784,40 +1774,32 @@ async function cmdUpdate(flags: Record<string, string | boolean>): Promise<void>
   const lib = m[1] as string;
 
   let withAsset: UpdateRelease | null = null;
-  const errors: string[] = [];
-  for (const source of releaseSources(flags)) {
-    process.stdout.write(`checking ${source.api} …\n`);
-    try {
-      const res = await httpGet(source.api);
-      if (res.status === 404) {
-        // the mirror/release is not there yet — only this case falls through
-        errors.push(`${source.api}: no release (HTTP 404)`);
-        continue;
-      }
-      if (!res.ok) {
-        // 403 (rate limit) / 401 / 5xx: report instead of hiding it behind a fallback
-        errors.push(`${source.api}: HTTP ${res.status}`);
-        break;
-      }
-      const releases = JSON.parse(res.buffer.toString("utf8")) as UpdateRelease[];
-      const pick = releases
-        .filter((r) => (r.assets ?? []).some((a) => /^familiar-.*\.tar\.gz$/.test(a.name ?? "")))
-        .sort((a, b) =>
-          compareSemver((b.tag_name ?? "").replace(/^v/, ""), (a.tag_name ?? "").replace(/^v/, "")),
-        )[0];
-      if (!pick?.tag_name) {
-        errors.push(`${source.api}: no release with a familiar-*.tar.gz asset`);
-        continue;
-      }
-      withAsset = pick;
-      break;
-    } catch (err) {
-      errors.push(`${source.api}: ${err instanceof Error ? err.message : String(err)}`);
-      break;
-    }
+  const source = releaseSource(flags);
+  process.stdout.write(`checking ${source.api} …\n`);
+  let res: { ok: boolean; status: number; buffer: Buffer };
+  try {
+    res = await httpGet(source.api);
+  } catch (err) {
+    fail(`${source.api}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (res.status === 404) {
+    fail(`${source.api}: no release (HTTP 404)`);
+  }
+  if (!res.ok) {
+    // 403 (rate limit) / 401 / 5xx: report instead of hiding it
+    fail(`${source.api}: HTTP ${res.status}`);
+  }
+  {
+    const releases = JSON.parse(res.buffer.toString("utf8")) as UpdateRelease[];
+    const pick = releases
+      .filter((r) => (r.assets ?? []).some((a) => /^familiar-.*\.tar\.gz$/.test(a.name ?? "")))
+      .sort((a, b) =>
+        compareSemver((b.tag_name ?? "").replace(/^v/, ""), (a.tag_name ?? "").replace(/^v/, "")),
+      )[0];
+    if (pick?.tag_name) withAsset = pick;
   }
   if (!withAsset?.tag_name) {
-    fail(`no release with a familiar-*.tar.gz asset (${errors.join("; ") || "no release source reachable"})`);
+    fail(`${source.api}: no release with a familiar-*.tar.gz asset`);
   }
   const latest = (withAsset.tag_name as string).replace(/^v/, "");
   const asset =

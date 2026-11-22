@@ -952,6 +952,29 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
 - **結論**: **Electron シェル(`packages/desktop`)を継続**。サイズは別途
   electron-builder 設定(locale 削減等)で圧縮する。
 
+## v0.1.0 の実装メモ 79(2026-11-22、GitHub 専用の公開導線と個人情報の掃除)
+
+- **Forgejo フォールバックを全削除**: GitHub Releases に 5 アセット揃ったため、install.sh /
+  `familiar update` / Web UI の更新チェック / デスクトップの更新チェックから Forgejo を参照する経路を
+  すべて除去した。`--github-only` / `--forgejo` / `--repo` フラグと `FAMILIAR_UPDATE_FALLBACK` /
+  `FAMILIAR_FORGEJO` / `FAMILIAR_REPO` の既定値は廃止(`FAMILIAR_GITHUB_REPO` / `FAMILIAR_GITHUB_API` のみ残る)。
+  404 はそのまま失敗として扱い、403(レート制限)・401・5xx・通信失敗も素通しで報告する。
+- **`scripts/release.sh` のホスト名を環境変数化**: 社内 Forgejo のホスト名と slug をコードから消し、
+  `FAMILIAR_FORGEJO` / `FAMILIAR_REPO`(未設定なら明確にエラー)で渡す方式にした。GitHub 側は
+  `keima-tech/familiar-harness` の既定値のままで公開導線として完結する。
+- **公開前の個人情報監査と掃除**(fresh clone + 全履歴で実施):
+  - `.orca/drops/` に誤って追跡されていた無関係のスクリーンショット(Cline 設定画面、タイトルバーに
+    ローカル PC 名)を `git filter-branch` で全履歴から削除。Forgejo / GitHub 両方へ force push、
+    ミラー後の fresh clone で `-- .orca` の履歴が 0 件であることを確認。
+  - テスト fixture の `/home/user/...` パスとフェイク ssh エラーのユーザー名を Neutral 化
+    (`/home/user/...`、`user@`)して同様に履歴から置換。
+  - 廃止した fallback コードに含まれていた社内ホスト名(`example.invalid:3000`、slug `owner/familiar-harness`)も
+    この変更でリポジトリから消えた。
+  - トークン・秘密鍵・.env・state.db・実セッションデータの追跡は無し(.gitignore で補強)。
+    公開アセット(tarball / deb / AppImage / NSIS / portable)はステージング対象が packages/* のみで、
+    上記の汚染は含まれていないことを `tar -tzf` で確認済み。
+  - README のスクリーンショットは使い捨てホーム + mock プロバイダの合成セッション(実データ不使用)。
+
 ## v0.1.0 の実装メモ 78(2026-11-22、コンテキスト表示の整理と README スクリーンショット)
 
 - **% の重複表示を解消**: 同じパーセントが近接して 2〜3 か所出ていた箇所を整理した。

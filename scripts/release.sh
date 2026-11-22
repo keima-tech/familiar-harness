@@ -12,6 +12,9 @@
 #   scripts/release.sh --publish --github     # require the GitHub mirror
 #   scripts/release.sh --publish --no-github  # Forgejo only
 #
+# The internal Forgejo host and slug are read from the environment
+# (FAMILIAR_FORGEJO / FAMILIAR_REPO) — no host name is baked into the published
+# script. GitHub Releases is the public install source and needs no env setup.
 # Publishing needs a token with repo write access:
 #   FORGEJO_TOKEN=... scripts/release.sh --publish
 #   (or FORGEJO_TOKEN_FILE=~/.config/forgejo.token)
@@ -23,8 +26,8 @@
 set -eu
 cd "$(dirname "$0")/.."
 
-REPO_HOST="${FAMILIAR_FORGEJO:-https://example.invalid:3000}"
-REPO_SLUG="${FAMILIAR_REPO:-owner/familiar-harness}"
+REPO_HOST="${FAMILIAR_FORGEJO:?set FAMILIAR_FORGEJO (e.g. https://host:3000) to publish to the in-house Forgejo}"
+REPO_SLUG="${FAMILIAR_REPO:?set FAMILIAR_REPO (e.g. owner/familiar-harness) for the Forgejo repository slug}"
 GITHUB_SLUG="${FAMILIAR_GITHUB_REPO:-keima-tech/familiar-harness}"
 GITHUB_API_HOST="${FAMILIAR_GITHUB_API:-https://api.github.com}"
 GITHUB_UPLOAD_HOST="${FAMILIAR_GITHUB_UPLOAD:-https://uploads.github.com}"

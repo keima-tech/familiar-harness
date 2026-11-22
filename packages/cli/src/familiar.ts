@@ -1682,9 +1682,9 @@ async function httpGet(url: string): Promise<{ ok: boolean; status: number; buff
  * `familiar update` — self-update for installs created by install.sh.
  * Resolves the latest GitHub release with a familiar-*.tar.gz asset, compares
  * versions, then download → verify → swap the install directory (same
- * filesystem, old tree restored if the swap fails midway). While the public
- * repository has no release yet, the in-house Forgejo host is tried as a
- * fallback. Source checkouts must update via `git pull && npm run build`.
+ * filesystem, old tree restored if the swap fails midway). GitHub Releases is
+ * the only source; `--github OWNER/REPO` points it elsewhere (for example at a
+ * mirror). Source checkouts must update via `git pull && npm run build`.
  */
 interface ReleaseSource {
   api: string;

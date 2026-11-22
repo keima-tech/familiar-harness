@@ -5,11 +5,20 @@ import fs from "node:fs";
 /**
  * Filesystem layout of the Familiar home directory (~/.familiar).
  * Tests can point this elsewhere via FAMILIAR_HOME.
+ *
+ * The product uses the "Familiar" name; an existing ~/.familiar
+ * directory is still honoured (read and written) when ~/.familiar does not
+ * exist yet, so upgrading installations keep their sessions, secrets and
+ * settings without a manual migration.
  */
 export function familiarHome(): string {
   const env = process.env["FAMILIAR_HOME"];
   if (env !== undefined && env !== "") return env;
-  return path.join(os.homedir(), ".familiar");
+  const home = path.join(os.homedir(), ".familiar");
+  if (fs.existsSync(home)) return home;
+  const legacy = path.join(os.homedir(), ".familiar");
+  if (fs.existsSync(legacy)) return legacy;
+  return home;
 }
 
 export const familiarPaths = {

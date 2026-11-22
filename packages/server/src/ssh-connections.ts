@@ -734,7 +734,8 @@ export class SshConnectionManager {
     if (paused) throw new Error(paused);
     const script =
       "printf '%s\\n' \"$HOME\"; hostname; uname -s; " +
-      "if command -v familiar >/dev/null 2>&1; then familiar --version 2>/dev/null; else printf '%s\\n' -; fi";
+      "if command -v familiar >/dev/null 2>&1; then familiar --version 2>/dev/null; " +
+      "elif command -v familiar >/dev/null 2>&1; then familiar --version 2>/dev/null; else printf '%s\\n' -; fi";
     const out = await this.runSsh(profile, script, 20_000);
     const lines = out.split("\n");
     const [home = "", hostname = "", platformRaw = "", familiarRaw = "-"] = lines;

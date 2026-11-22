@@ -5,9 +5,8 @@
 #
 # Downloads the latest release tarball from GitHub Releases and installs the
 # `familiar` CLI into ~/.local (no npm required; Node.js >= 24 must be on the
-# PATH). The project develops on Forgejo and mirrors to GitHub; while GitHub
-# Releases does not yet carry the tarball, the Forgejo instance is used as a
-# fallback.
+# PATH). GitHub Releases is the only public install source; the in-house
+# Forgejo instance is a development mirror and is never contacted here.
 set -eu
 
 GITHUB_API="${FAMILIAR_GITHUB_API:-https://api.github.com}"
@@ -32,9 +31,8 @@ fetch() { $DOWNLOAD "$1"; }
 
 # --- resolve the latest release asset ---------------------------------------
 VERSION="${1:-}"
-# GitHub and Forgejo both expose releases with the same asset fields
-# (browser_download_url); only the API base differs. Try GitHub first, then
-# the in-house instance (used while the public repository is unpublished).
+# GitHub Releases is the public source of the tarball; there is no fallback
+# host, so a failure here means the release is not published (yet).
 SOURCE_API=""
 ASSET_URL=""
 resolve_release() {
@@ -100,10 +98,22 @@ else
   if fetch "http://127.0.0.1:46210/healthz" >/dev/null 2>&1; then
     log "web UI already running: http://localhost:46210/"
   else
-    mkdir -p "$HOME/.familiar"
-    ( setsid "$INSTALL_LIB/packages/cli/dist/familiar.js" serve > "$HOME/.familiar/serve.log" 2>&1 < /dev/null & )
+    # mirror the CLI's home resolution: ~/.familiar wins, an existing
+    # The legacy home is used when ~/.familiar does not exist.
+    FAMILIAR_HOME_DIR="${FAMILIAR_HOME:-}"
+    if [ -z "$FAMILIAR_HOME_DIR" ]; then
+      if [ -d "$HOME/.familiar" ]; then
+        FAMILIAR_HOME_DIR="$HOME/.familiar"
+      elif [ -d "$HOME/.familiar" ]; then
+        FAMILIAR_HOME_DIR="$HOME/.familiar"
+      else
+        FAMILIAR_HOME_DIR="$HOME/.familiar"
+      fi
+    fi
+    mkdir -p "$FAMILIAR_HOME_DIR"
+    ( setsid "$INSTALL_LIB/packages/cli/dist/familiar.js" serve > "$FAMILIAR_HOME_DIR/serve.log" 2>&1 < /dev/null & )
     sleep 2
-    log "web UI started in the background: http://localhost:46210/ (log: ~/.familiar/serve.log)"
+    log "web UI started in the background: http://localhost:46210/ (log: $FAMILIAR_HOME_DIR/serve.log)"
   fi
 fi
 

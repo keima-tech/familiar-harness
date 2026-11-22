@@ -6,7 +6,7 @@ import { ensureDir } from "../../paths.js";
 
 /**
  * JSON-file memory store. Layout per spec 04:
- *   <familiars>/memories/<namespace>.json
+ *   <familiar-home>/memories/<namespace>.json
  * Entries are small durable facts always visible to the model.
  */
 export class MemoryStore {

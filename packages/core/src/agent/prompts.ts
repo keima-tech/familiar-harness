@@ -80,8 +80,13 @@ export function globalSoulPrompt(cfg: ResolvedConfig): string | null {
 /**
  * M6: project persona layer — `<cwd>/.familiar/SOUL.md`, applied when running in
  * that project. Higher precedence than the global layer.
+ *
+ * A project with a `.familiar/SOUL.md` keeps working:
+ * the legacy file is read when the new one is absent.
  */
 export function projectSoulPrompt(cwd: string): string | null {
+  const current = readPersonaFile(path.join(cwd, ".familiar", "SOUL.md"));
+  if (current) return current;
   return readPersonaFile(path.join(cwd, ".familiar", "SOUL.md"));
 }
 

@@ -952,6 +952,38 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
 - **結論**: **Electron シェル(`packages/desktop`)を継続**。サイズは別途
   electron-builder 設定(locale 削減等)で圧縮する。
 
+## v0.1.0 の実装メモ 83(2026-11-22、Familiar Harness への改称)
+
+- 製品名・リポジトリ名を **Familiar Harness** に改称。GitHub の同名リポジトリが
+  多数存在し検索で埋もれるため、`keima-tech/familiar-harness`(グローバル同名 0 件)を採用した。
+- 変更対象(追跡ファイル内の旧名称 1,213 箇所 / 環境変数 15 種):
+  - npm スコープを **`@familiar/*`** に統一(旧スコープは他者が使用済みで公開できないため)
+  - バイナリを **`familiar`**(`packages/cli/src/familiar.ts`、
+    `bin.familiar` → `dist/familiar.js`)に変更
+  - ルート package `familiar-harness`、desktop の `productName` / `appId` /
+    `artifactName` / `.desktop` ファイル名、`executableName`(`familiar`)
+  - 環境変数 `FAMILIAR_*` → `FAMILIAR_*`(HOME / REPO / FORGEJO / GITHUB_API / GITHUB_REPO /
+    INSTALL_DIR / BIN_DIR / PORTS / SPAWN_PORT / ASKPASS_FILE / TLS_STRICT / READY など)
+  - 識別子 `familiarHome` → `familiarHome`、`familiarPaths` → `familiarPaths`、`FamiliarTransport` →
+    `FamiliarTransport`、`RemoteFamiliarClient` → `RemoteFamiliarClient` など
+  - 認証 cookie と systemd ユニットを現行製品名へ変更
+  - 内部 id(`rIdFamiliarSlide` 等の OOXML リレーション id)も `rIdFamiliar*` に変更
+- 既存データの無傷移行:
+  - `familiarHome()` は `FAMILIAR_HOME` → `~/.familiar` の順で解決する。
+    改名前に作られたインストールは `~/.familiar` が存在しない限り旧ホームをそのまま使い、
+    セッション・設定・secret・トークンは読み書きされる(コピーも破壊もしない)。
+  - プロジェクト persona は `<cwd>/.familiar/SOUL.md` を読む。
+  - install.sh のバックグラウンド起動も CLI と同じ解決順でログ先を決める(空の `~/.familiar` を
+    作って旧データを覆い隠す事故を防ぐ)。
+  - SSH プローブは `familiar` コマンドを探索する。
+- アイコン: アプリアイコンを新デザイン(紺地に金の軌道线条の黒猫)に差し替え。
+  `packages/server/public/{icon-512,icon-192,icon-32,brand}.png` と
+  `packages/desktop/build/icon.{png,ico}` および `build/icons/*.png` を 1024px 原図から生成し、
+  PNG メタデータ(テキスト等)は含めていない。
+- 配布: GitHub(`keima-tech/familiar-harness`)を唯一の公開インストール元とし、release アセット名も
+  `familiar-v0.1.0.tar.gz` / `familiar-0.1.0-*` に変更。Forgejo 側は内部ミラーとして同名リポジトリ
+  にリネームし、GitHub へのミラーはリポジトリ名に追随する。
+
 ## v0.1.0 の実装メモ 82(2026-11-22、セッション一覧ペインのドラッグ可変幅)
 
 - 左のセッション一覧(レール)を右端のハンドルでドラッグして幅を変えられるようにした。

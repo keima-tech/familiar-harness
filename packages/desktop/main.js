@@ -92,9 +92,9 @@ ipcMain.handle("dialog:pickDirectory", async (ev) => {
 });
 
 // ---------------------------------------------------------------------------
-// self-update: check GitHub Releases (Forgejo is a fallback until the public
-// repository is published), surface a ⬇ in the topbar, and replace the
-// installation on request (same swap scheme as `familiar update`)
+// self-update: check GitHub Releases (the public install source), surface a ⬇
+// in the topbar, and replace the installation on request (same swap scheme as
+// `familiar update`)
 // ---------------------------------------------------------------------------
 const UPDATE_CFG = {
   source: `${process.env.FAMILIAR_GITHUB_API || "https://api.github.com"}/repos/${

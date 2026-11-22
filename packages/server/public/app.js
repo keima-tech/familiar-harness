@@ -8140,6 +8140,47 @@ function boot() {
   });
   $("#close-sidebar").addEventListener("click", closeSidebar);
   $("#drawer-backdrop").addEventListener("click", closeSidebar);
+  // The session rail is draggable: its width persists like the right pane's.
+  // The CSS clamps it to clamp(180px, --side-w, 40vw), so the handle stays
+  // usable on small windows as well.
+  const SIDE_W_MIN = 180;
+  const SIDE_W_MAX = 480;
+  const SIDE_W_DEFAULT = 248;
+  const sideResizer = $("#side-resizer");
+  const applySideWidth = (w) => {
+    $("#app").style.setProperty("--side-w", `${Math.round(w)}px`);
+  };
+  try {
+    const saved = Number(localStorage.getItem("familiar.sideW"));
+    if (Number.isFinite(saved) && saved >= SIDE_W_MIN && saved <= SIDE_W_MAX) applySideWidth(saved);
+  } catch {
+    /* storage unavailable */
+  }
+  sideResizer.addEventListener("mousedown", (ev) => {
+    ev.preventDefault();
+    const startX = ev.clientX;
+    const startW = $("#sidebar").getBoundingClientRect().width;
+    let width = startW;
+    sideResizer.classList.add("dragging");
+    document.body.style.userSelect = "none";
+    const move = (e) => {
+      width = Math.min(SIDE_W_MAX, Math.max(SIDE_W_MIN, startW + (e.clientX - startX)));
+      applySideWidth(width);
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      sideResizer.classList.remove("dragging");
+      document.body.style.userSelect = "";
+      try { localStorage.setItem("familiar.sideW", String(Math.round(width))); } catch { /* ignore */ }
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  });
+  sideResizer.addEventListener("dblclick", () => {
+    applySideWidth(SIDE_W_DEFAULT);
+    try { localStorage.setItem("familiar.sideW", String(SIDE_W_DEFAULT)); } catch { /* ignore */ }
+  });
   $("#sessions").addEventListener("click", (ev) => {
     if (window.matchMedia("(max-width: 900px)").matches && ev.target.closest("li[data-id]")) closeSidebar();
   });

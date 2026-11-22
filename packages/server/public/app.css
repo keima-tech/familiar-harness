@@ -34,8 +34,9 @@ body {
 #app {
   display: grid;
   /* the main column never shrinks below a readable width; the page scrolls
-     horizontally instead of collapsing the transcript into a vertical slit */
-  grid-template-columns: 248px minmax(520px, 1fr) auto;
+     horizontally instead of collapsing the transcript into a vertical slit.
+     the session rail is draggable: --side-w holds the user's width */
+  grid-template-columns: clamp(180px, var(--side-w, 248px), 40vw) minmax(520px, 1fr) auto;
   grid-template-areas: "side main drawer";
   height: 100vh;
 }
@@ -59,7 +60,14 @@ body {
   background: var(--panel);
   border-right: 1px solid var(--border);
   display: flex; flex-direction: column; min-height: 0;
+  position: relative; /* anchor for #side-resizer */
 }
+/* drag handle on the rail's right edge — resizes the session list */
+#side-resizer {
+  position: absolute; right: -4px; top: 0; bottom: 0; width: 8px;
+  cursor: col-resize; z-index: 6;
+}
+#side-resizer:hover, #side-resizer.dragging { background: var(--accent); opacity: 0.35; }
 .side-head {
   display: flex; align-items: center; justify-content: space-between;
   /* clear the fixed #sidebar-toggle pinned at the window's top-left */
@@ -1300,6 +1308,7 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
     z-index: 65; box-shadow: -14px 0 40px rgba(0, 0, 0, 0.55);
   }
   #pane-resizer { display: none; }
+  #side-resizer { display: none; } /* the rail is an overlay drawer here */
   #composer textarea { font-size: 16px; } /* prevents the iOS focus zoom */
   .title-wrap { max-width: calc(100% - 8px); }
   #session-meta { display: none; }

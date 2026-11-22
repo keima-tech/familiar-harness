@@ -952,6 +952,17 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
 - **結論**: **Electron シェル(`packages/desktop`)を継続**。サイズは別途
   electron-builder 設定(locale 削減等)で圧縮する。
 
+## v0.1.0 の実装メモ 80(2026-11-22、README.ja.md のスクリーンショット日本語化)
+
+- Web UI は ja が既定ロケール(設定で en に切替可、辞書 599 キーは ja/en とも完全一致)のため、
+  日本語版 README には日本語のスクリーンショットを専用のアセットとして用意した。
+  - `docs/screenshots/chat.ja.png` / `self-improve.ja.png` / `approval.ja.png` を追加し、
+    `README.ja.md` のみ差し替え(英語版 `README.md` は既存の英語画像を参照)。
+  - 撮影は使い捨ての FAMILIAR_HOME + mock プロバイダの合成セッション(実データ不使用)。UI 文字列は
+    ロケール `ja` で描画し、セッションタイトル・会話・スキル提案・承認 summary も日本語の文に差し替えた。
+    ツール結果の行(`edited …` / `wrote …` / テスト出力)は製品が英語固定で出力するため英語のまま。
+  - PNG は tEXt/eXIf 等のメタデータ chunk を持たず、寸法も英語版と同等(2880×1800 / 1612×364 / 1640×434)。
+
 ## v0.1.0 の実装メモ 79(2026-11-22、GitHub 専用の公開導線と個人情報の掃除)
 
 - **Forgejo フォールバックを全削除**: GitHub Releases に 5 アセット揃ったため、install.sh /

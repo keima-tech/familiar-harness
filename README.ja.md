@@ -18,11 +18,11 @@ Familiar は、モデルをツールループ(read/write/edit、bash、glob/grep
 ターンが終わるたびに別のエージェントが内容をレビューし、次回以降に活かせる知見を提案します。提案はいったん保留され、承認したものだけが反映されます。
 
 <p align="center">
-  <img src="docs/screenshots/chat.png" width="820" alt="Familiar の Web UI。ツールカード・diff・コンテキストゲージを含むエージェントのターン">
+  <img src="docs/screenshots/chat.ja.png" width="820" alt="Familiar の Web UI。ツールカード・diff・コンテキストゲージを含むエージェントのターン">
 </p>
 <p align="center">
-  <img src="docs/screenshots/self-improve.png" width="48%" alt="承認待ちのスキル提案カード">
-  <img src="docs/screenshots/approval.png" width="48%" alt="ファイル書き込みの前に表示される承認カード">
+  <img src="docs/screenshots/self-improve.ja.png" width="48%" alt="承認待ちのスキル提案カード">
+  <img src="docs/screenshots/approval.ja.png" width="48%" alt="ファイル書き込みの前に表示される承認カード">
 </p>
 
 ## はじめかた

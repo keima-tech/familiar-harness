@@ -2,8 +2,8 @@
 // Remove generated build outputs so a build never ships stale files.
 //
 // `tsc -b` only writes the files it knows about; when a source file is
-// renamed or deleted, stale JavaScript stays in dist/ and ends up
-// in the release tarball and in the desktop packages. Cleaning dist/ and the
+// renamed or deleted, the old JavaScript stays in dist/ and ends up in the
+// release tarball and in the desktop packages. Cleaning dist/ and the
 // incremental build info before every build keeps the artifacts in sync
 // with the sources.
 import fs from "node:fs";

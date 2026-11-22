@@ -14,6 +14,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fitWordmark, visibleWidth, wordmarkRows } from "../dist/ui/tui.js";
 
 const repoRoot = path.resolve(new URL("../../..", import.meta.url).pathname);
 const familiarBin = path.join(repoRoot, "packages", "cli", "dist", "familiar.js");
@@ -94,6 +95,29 @@ function run(args, cwd, home) {
       resolve({ code: code ?? -1, stdout, stderr, parsed, lines });
     });
   });
+}
+
+// ---------------------------------------------------------------------------
+// Scenario: CLI startup wordmark
+// ---------------------------------------------------------------------------
+console.log("— scenario: CLI startup wordmark —");
+{
+  const stripAnsi = (s) => s.replace(/\x1b\[[0-9;]*m/g, "");
+  const familiar = wordmarkRows(false).map(stripAnsi);
+  const full = wordmarkRows(true).map(stripAnsi);
+  assert(familiar.length === 4 && full.length === 4, "wordmark has four rows");
+  assert(familiar[0].includes(" ▀▀ "), "familiar f glyph is present");
+  assert(familiar[0].includes("▀▀ ▀▀"), "familiar m glyph is present");
+  assert(familiar[0].includes(" ▄  "), "familiar l glyph is present");
+  assert(
+    Math.max(...familiar.map(visibleWidth)) === 40 && Math.max(...full.map(visibleWidth)) === 75,
+    "wordmark rows keep their expected display width",
+  );
+  const wide = fitWordmark(80);
+  const narrow = fitWordmark(70);
+  assert(wide?.width === 75 && wide.left >= 1, "wide terminals show both wordmark words");
+  assert(narrow?.width === 40, "narrow terminals fall back to familiar only");
+  assert(fitWordmark(40) === null, "too-narrow terminals omit the wordmark");
 }
 
 // ---------------------------------------------------------------------------

@@ -98,18 +98,8 @@ else
   if fetch "http://127.0.0.1:46210/healthz" >/dev/null 2>&1; then
     log "web UI already running: http://localhost:46210/"
   else
-    # mirror the CLI's home resolution: ~/.familiar wins, an existing
-    # The legacy home is used when ~/.familiar does not exist.
-    FAMILIAR_HOME_DIR="${FAMILIAR_HOME:-}"
-    if [ -z "$FAMILIAR_HOME_DIR" ]; then
-      if [ -d "$HOME/.familiar" ]; then
-        FAMILIAR_HOME_DIR="$HOME/.familiar"
-      elif [ -d "$HOME/.familiar" ]; then
-        FAMILIAR_HOME_DIR="$HOME/.familiar"
-      else
-        FAMILIAR_HOME_DIR="$HOME/.familiar"
-      fi
-    fi
+    # Use the same home resolution as the CLI.
+    FAMILIAR_HOME_DIR="${FAMILIAR_HOME:-$HOME/.familiar}"
     mkdir -p "$FAMILIAR_HOME_DIR"
     ( setsid "$INSTALL_LIB/packages/cli/dist/familiar.js" serve > "$FAMILIAR_HOME_DIR/serve.log" 2>&1 < /dev/null & )
     sleep 2

@@ -201,11 +201,14 @@ const cc = {
 // wordmark — opencode-style lowercase block letters
 // ---------------------------------------------------------------------------
 
-// Glyph semantics (opencode logo font): each letter is 4 columns; "_" is a
+// Glyph semantics (opencode logo font): each letter is 4–5 columns; "_" is a
 // hollow counter (a shadowed-background space), "^" a filled top (▀ painted
 // over the hollow bg), "~" a shadowed top line. Row 0 carries ascender marks.
-// Letters cover "familiar harness": o r b i t h a e s (+n for future words).
+// The map covers every letter used by "familiar harness".
 const WM_GLYPHS: Record<string, string[]> = {
+  f: [" ▀▀ ", " █  ", "▀█▀▀", " █  "],
+  m: ["▀▀ ▀▀", "█▀▀▄█", "█   █", "█   █"],
+  l: [" ▄  ", " █  ", " █  ", " ▀  "],
   o: ["    ", "█▀▀█", "█__█", "▀▀▀▀"],
   r: ["    ", "█▀▀▄", "█▀__", "▀▀▀▀"],
   b: ["▄   ", "█▀▀█", "█__█", "▀▀▀▀"],
@@ -240,7 +243,7 @@ function markHalf(word: string, row: number, rightHalf: boolean): string {
 }
 
 /** Two-tone wordmark rows (opencode exit-splash style). */
-function markRows(withHarness: boolean): string[] {
+export function wordmarkRows(withHarness: boolean): string[] {
   const rows: string[] = [];
   for (let row = 0; row < 4; row++) {
     let line = markHalf("familiar", row, false);
@@ -251,6 +254,28 @@ function markRows(withHarness: boolean): string[] {
     rows.push(line.replace(/ +$/, ""));
   }
   return rows;
+}
+
+export interface WordmarkLayout {
+  rows: string[];
+  width: number;
+  left: number;
+}
+
+/**
+ * Fit the startup wordmark to the terminal. Prefer both words, fall back to
+ * "familiar" when the full mark cannot fit, and never draw a clipped word.
+ */
+export function fitWordmark(terminalWidth: number): WordmarkLayout | null {
+  const margin = 1;
+  for (const withHarness of [true, false]) {
+    const rows = wordmarkRows(withHarness);
+    const width = rows.reduce((max, row) => Math.max(max, visibleWidth(row)), 0);
+    if (width + margin <= terminalWidth) {
+      return { rows, width, left: Math.max(0, Math.floor((terminalWidth - width) / 2)) };
+    }
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1094,13 +1119,8 @@ export class FullScreenTui {
   // ---- wordmark ------------------------------------------------------------
 
   /** Splash wordmark rows + width (null when the screen is too small). */
-  private wordmark(): { rows: string[]; width: number; left: number } | null {
-    const w = this.width;
-    if (w < 28) return null;
-    const rows = markRows(w >= 61);
-    let total = 0;
-    for (const r of rows) total = Math.max(total, visibleWidth(r));
-    return { rows, width: total, left: Math.max(0, Math.floor((w - total) / 2)) };
+  private wordmark(): WordmarkLayout | null {
+    return fitWordmark(this.width);
   }
 
   // ---- compose ------------------------------------------------------------

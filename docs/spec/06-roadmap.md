@@ -417,8 +417,8 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
 ## v0.1.0 の実装メモ㉓(2026-10-18、TUI OpenCode 風全面改修・/models ポップアップ)
 
 - **スプラッシュ wordmark**: 中央に大型ブロック文字 "familiar harness"
-  を配置(`harness` は hi 側バイト色の 2 トーン)。幅 61 未満は "familiar"、
-  28 未満では描画しない。会話開始後(トランスクリプト有)はロゴを消して
+  を配置(`harness` は hi 側バイト色の 2 トーン)。幅 76 未満は "familiar" だけ、
+  41 未満では描画しない。会話開始後(トランスクリプト有)はロゴを消して
   フロー表示へ切替(先頭行に ▲ 遺留マーカー)。高さ 12 未満でもロゴ省略。
 - **OpenCode 風レイアウト**: 外枠ボーダーを撤廃。下部固定は
   [パッド行] プロンプトパネル(丸角・左アクセントバー)メタ行
@@ -952,30 +952,43 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
 - **結論**: **Electron シェル(`packages/desktop`)を継続**。サイズは別途
   electron-builder 設定(locale 削減等)で圧縮する。
 
-## v0.1.0 の実装メモ 83(2026-11-22、Familiar Harness への改称)
+## v0.1.0 の実装メモ 84(2026-11-22、CLI ワードマーク修復と旧名称互換の整理)
+
+- **CLI 起動画面のワードマーク**: 改称時に表示文字列だけを `familiar` / `harness` へ替えたため、
+  旧単語用グリフ表に無い `f` / `m` / `l` が空白扱いとなり、画面がビットの塊に見えていた。
+  - 3 文字分の 4〜5 列ブロックグリフを追加し、`familiar` / `harness` 全体が正しく読めるようにする。
+  - 広い端末では 2 語を並べ、収まらない場合は `familiar` だけを表示し、幅を超える描画の左端を
+    切り落とさない。端末幅ごとの判定は純粋関数としてテストする。
+- **旧名称の互換経路を撤去**: 現行製品名の設定・データだけで動作する。
+  - ホーム解決は `FAMILIAR_HOME` → `~/.familiar` の順とし、旧ホームディレクトリは参照しない。
+  - プロジェクト persona は `<cwd>/.familiar/SOUL.md` のみを読む。
+  - `install.sh` のバックグラウンド起動先も常に `~/.familiar` を使う。
+  - SSH プローブは `familiar` コマンドのみを探索する。SSH プロキシ方式ではリモートに CLI を
+    導入しないため、リモート側の応答に CLI version が含まれないことは正常である。
+- **リモートホスト**: 2 台の SSH 先への Node.js / CLI 導入は行わない。プロキシ方式では不要であり、
+  OS レベルの変更もしない。
+
+## v0.1.0 の実装メモ 83(2026-11-22、旧製品名から Familiar Harness への改称)
 
 - 製品名・リポジトリ名を **Familiar Harness** に改称。GitHub の同名リポジトリが
   多数存在し検索で埋もれるため、`keima-tech/familiar-harness`(グローバル同名 0 件)を採用した。
-- 変更対象(追跡ファイル内の旧名称 1,213 箇所 / 環境変数 15 種):
-  - npm スコープを **`@familiar/*`** に統一(旧スコープは他者が使用済みで公開できないため)
-  - バイナリを **`familiar`**(`packages/cli/src/familiar.ts`、
-    `bin.familiar` → `dist/familiar.js`)に変更
-  - ルート package `familiar-harness`、desktop の `productName` / `appId` /
-    `artifactName` / `.desktop` ファイル名、`executableName`(`familiar`)
-  - 環境変数 `FAMILIAR_*` → `FAMILIAR_*`(HOME / REPO / FORGEJO / GITHUB_API / GITHUB_REPO /
+- 変更対象(追跡ファイル内 旧名称 1,213 箇所 / 環境変数 15 種):
+  - npm スコープを **`@familiar/*`** に変更(旧スコープは他者が使用済みで公開できないため)
+  - CLI 実行ファイルを **`familiar`** に変更(`packages/cli/src/familiar.ts`、
+    `bin.familiar` → `dist/familiar.js`)
+  - ルート package を `familiar-harness` に変更。desktop の `productName` / `appId` /
+    `artifactName` / `.desktop` ファイル名、`executableName`(`familiar`)も変更。
+  - 環境変数の接頭辞を `FAMILIAR_*` に変更(HOME / REPO / FORGEJO / GITHUB_API / GITHUB_REPO /
     INSTALL_DIR / BIN_DIR / PORTS / SPAWN_PORT / ASKPASS_FILE / TLS_STRICT / READY など)
-  - 識別子 `familiarHome` → `familiarHome`、`familiarPaths` → `familiarPaths`、`FamiliarTransport` →
-    `FamiliarTransport`、`RemoteFamiliarClient` → `RemoteFamiliarClient` など
-  - 認証 cookie と systemd ユニットを現行製品名へ変更
-  - 内部 id(`rIdFamiliarSlide` 等の OOXML リレーション id)も `rIdFamiliar*` に変更
-- 既存データの無傷移行:
+  - 内部識別子を `familiarHome` / `familiarPaths` / `FamiliarTransport` /
+    `RemoteFamiliarClient` などへ変更。
+  - 認証 cookie と systemd ユニットを現行製品名へ変更。
+  - OOXML の内部リレーション id も現行製品名の接頭辞へ変更。
+- **既存データの移行**: 移行対象の実体を旧形式名のまま残さず、現行形式のホームへ移した。
   - `familiarHome()` は `FAMILIAR_HOME` → `~/.familiar` の順で解決する。
-    改名前に作られたインストールは `~/.familiar` が存在しない限り旧ホームをそのまま使い、
-    セッション・設定・secret・トークンは読み書きされる(コピーも破壊もしない)。
-  - プロジェクト persona は `<cwd>/.familiar/SOUL.md` を読む。
-  - install.sh のバックグラウンド起動も CLI と同じ解決順でログ先を決める(空の `~/.familiar` を
-    作って旧データを覆い隠す事故を防ぐ)。
-  - SSH プローブは `familiar` コマンドを探索する。
+  - プロジェクト persona(`<cwd>/.familiar/SOUL.md`)だけを対象とする。
+  - `install.sh` のバックグラウンド起動も `~/.familiar` を使う。
+  - SSH プローブは `familiar` コマンドだけを探索する。
 - アイコン: アプリアイコンを新デザイン(紺地に金の軌道线条の黒猫)に差し替え。
   `packages/server/public/{icon-512,icon-192,icon-32,brand}.png` と
   `packages/desktop/build/icon.{png,ico}` および `build/icons/*.png` を 1024px 原図から生成し、

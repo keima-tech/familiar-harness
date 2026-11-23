@@ -1,6 +1,6 @@
 # 05 — 設定リファレンス(~/.familiar/config.yaml)
 
-ステータス: 確定 / 最終更新: 2026-10-17
+ステータス: 確定 / 最終更新: 2026-11-23
 
 初回起動時にテンプレートを自動生成する(`familiar init`; 存在時は上書きしない)。
 シークレットをこのファイルに書かないこと(ファイル参照 or 環境変数)。
@@ -209,6 +209,31 @@ lsp:
 # 実行時上書き(優先: settings.json > config.yaml)
 #   ~/.familiar/settings.json: { "memory_write_approval": bool, "skills_write_approval": bool }
 ```
+
+## プロバイダーのブランドマーク表示
+
+Web UI / Desktop のプロバイダー選択では、設定画面の「接続済み」「接続候補」、composer の
+モデル選択ピッカーの provider グループ見出し、選択中の model チップにブランドマークを表示する。
+provider 名・model 名はマークと併記し、装飾用の SVG 自体はスクリーンリーダーから隠す。
+
+- 既知の組み込み ID は `openai` / `anthropic` / `google` / `nvidia` / `openrouter` / `ollama`。
+  各ブランド形状を 24×24 のローカル埋め込み SVG path として保持する。
+- 判定優先順位は「既知 ID」→「実効エンドポイント」→「中立フォールバック」とする。
+  既知 ID はユーザーが明示した provider 名なので、`base_url` が変更されても ID を優先する。
+- 独自 ID の実効エンドポイントは、設定された `base_url` を使う。`base_url` 未指定時は
+  kind の既定 URL (`openai_compatible` = `https://api.openai.com/v1`、
+  `anthropic` = `https://api.anthropic.com/v1`) を使う。
+- 実効エンドポイントが既知のホスト
+  (`api.openai.com` / `api.anthropic.com` / `generativelanguage.googleapis.com` /
+  `integrate.api.nvidia.com` / `openrouter.ai`) に一致する場合は、そのブランドとして表示する。
+  ローカル Ollama は `localhost` / `127.0.0.1` / `::1` のポート `11434` を判定する。
+- ID と実効エンドポイントの両方から判定できないカスタム provider は、名称先頭文字の中立的な
+  モノグラムへフォールバックする。provider 名の表示は変更しない。
+- マークはアプリへローカル埋め込みし、CDN や外部 API を参照しない。path data は
+  Simple Icons (CC0 1.0) 由来のブランド形状であり、各ブランド商標の権利は各提供者に帰属する。
+- 回帰テストは、既知 ID、独自 ID + 実効エンドポイント、不明 provider のフォールバックを
+  DOM 非依存の単体テストで検証し、Electron の実 DOM テストで設定画面・モデル選択 UI・
+  選択中 model チップへの描画とアクセシビリティ属性を検証する。
 
 ## 上書き順序(優先度 高→低)
 

@@ -509,6 +509,81 @@ console.log("— scenario I: web ui transport —");
   const appJs = await fetch(`http://127.0.0.1:${PORT}/app.js`).then((r) => r.text());
   assert(appJs.includes("session.send"), "web UI app.js served");
 
+  // Provider brand resolution is DOM-free and lives in a marked section so it
+  // can be exercised without a browser.
+  const brandStart = appJs.indexOf("// ---- provider-brand ----");
+  const brandEnd = appJs.indexOf("// ---- end provider-brand ----");
+  assert(brandStart >= 0 && brandEnd > brandStart, "provider brand section is marked");
+  if (brandStart >= 0 && brandEnd > brandStart) {
+    const entity = (name) => "&" + name + ";";
+    const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => (
+      {
+        "&": entity("amp"),
+        "<": entity("lt"),
+        ">": entity("gt"),
+        '"': entity("quot"),
+        "'": entity("#39"),
+      }[char]
+    ));
+    const brand = new Function(
+      "esc",
+      `${appJs.slice(brandStart, brandEnd)}; return { PROVIDER_MARKS, providerKnown, providerBrandId, providerTile };`,
+    )(escapeHtml);
+    const knownIds = ["openai", "anthropic", "google", "nvidia", "openrouter", "ollama"];
+    const knownTiles = knownIds.map((id) => brand.providerTile(id, "#8a8a94"));
+    assert(
+      knownIds.every((id) => brand.providerBrandId(id) === id) &&
+        knownTiles.every((tile) => tile.includes("<svg") && tile.includes('aria-hidden="true"') && tile.includes('focusable="false"')),
+      "known provider IDs resolve to accessible local brand marks",
+    );
+    assert(
+      new Set(knownIds.map((id) => brand.PROVIDER_MARKS[id])).size === knownIds.length,
+      "known provider IDs use distinct brand mark paths",
+    );
+    const hostCases = [
+      ["my-openai", "https://api.openai.com/v1", "openai"],
+      ["my-anthropic", "https://api.anthropic.com/v1", "anthropic"],
+      ["my-gemini", "https://generativelanguage.googleapis.com/v1beta/openai", "google"],
+      ["my-nvidia", "https://integrate.api.nvidia.com/v1", "nvidia"],
+      ["my-openrouter", "https://openrouter.ai/api/v1", "openrouter"],
+      ["my-ollama", "http://localhost:11434/v1", "ollama"],
+    ];
+    assert(
+      hostCases.every(([id, url, expected]) => brand.providerBrandId(id, url) === expected),
+      "custom provider IDs resolve their brand from base_url",
+    );
+    assert(
+      brand.providerBrandId("my-default-openai", "", "openai_compatible") === "openai" &&
+        brand.providerBrandId("my-default-anthropic", "", "anthropic") === "anthropic" &&
+        brand.providerBrandId("my-mock", "", "mock") === null,
+      "custom provider IDs resolve their brand from the effective kind endpoint",
+    );
+    assert(
+      brand.providerBrandId("openai", "https://example.com/v1") === "openai" &&
+        brand.providerBrandId("custom", "https://example.com/v1", "openai_compatible") === null,
+      "explicit known IDs win while explicit custom endpoints override kind defaults",
+    );
+    const fallback = brand.providerTile("custom", "#8a8a94", "https://example.com/v1");
+    assert(
+      brand.providerBrandId("custom", "https://example.com/v1") === null &&
+        brand.providerBrandId("spoof", "https://api.openai.com.evil.test/v1") === null &&
+        !fallback.includes("<svg") && fallback.includes(">C<") &&
+        fallback.includes("color:#151519") && fallback.includes('aria-hidden="true"'),
+      "unknown providers use the accessible neutral monogram fallback",
+    );
+    const hostileFallback = brand.providerTile("&<img src=x>", "#8a8a94", "https://example.com/v1");
+    assert(
+      hostileFallback.includes(entity("amp")) && !hostileFallback.includes("&<"),
+      "fallback provider initials are HTML-escaped",
+    );
+    assert(
+      appJs.includes('class="mp-group">${providerTile(') &&
+        appJs.includes("providerTile(name, color, hint, kind)") &&
+        appJs.includes("providerTile(provider, known?.color"),
+      "settings and model-picker provider marks are wired",
+    );
+  }
+
   // A cached document must revalidate when ANY asset changes. The ETag used to
   // track only app.js, so an index.html- or CSS-only update kept serving stale
   // markup (which is exactly how a stale logo survived a reload).

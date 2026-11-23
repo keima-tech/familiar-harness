@@ -6,6 +6,7 @@
  * Run: node scripts/e2e.mjs
  */
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
@@ -38,20 +39,146 @@ async function freePort() {
   });
 }
 
+/** Wait for a child to exit, without rejecting when the grace period expires. */
+function waitForExit(child, timeoutMs) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  return new Promise((resolve) => {
+    const onExit = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      child.off("exit", onExit);
+      resolve();
+    }, timeoutMs);
+    child.once("exit", onExit);
+  });
+}
+
+function signalProcessGroup(child, signal) {
+  if (!child?.pid) return;
+  try {
+    process.kill(-child.pid, signal);
+  } catch {
+    try {
+      child.kill(signal);
+    } catch {
+      /* already exited */
+    }
+  }
+}
+
+function processGroupAlive(pid) {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForProcessGroupExit(pid, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (processGroupAlive(pid) && Date.now() < deadline) await sleep(50);
+  return !processGroupAlive(pid);
+}
+
+/** Stop Electron and every child it spawned, then wait for the group to exit. */
+async function terminateProcessTree(child) {
+  if (!child?.pid) return;
+  signalProcessGroup(child, "SIGTERM");
+  await waitForExit(child, 5_000);
+  if (!(await waitForProcessGroupExit(child.pid, 2_000))) {
+    signalProcessGroup(child, "SIGKILL");
+    await waitForExit(child, 2_000);
+    await waitForProcessGroupExit(child.pid, 2_000);
+  }
+}
+
+/** Stop a directly managed child (used for the isolated Xvfb server). */
+async function stopChild(child) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  try {
+    child.kill("SIGTERM");
+  } catch {
+    return;
+  }
+  await waitForExit(child, 5_000);
+  if (child.exitCode === null && child.signalCode === null) {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      /* already exited */
+    }
+    await waitForExit(child, 2_000);
+  }
+}
+
+/** Start an Xvfb display directly so the test can wait for and reap it. */
+async function startXvfb() {
+  const proc = spawn(
+    "Xvfb",
+    ["-displayfd", "1", "-screen", "0", "1280x1024x24", "-nolisten", "tcp", "-ac"],
+    { stdio: ["ignore", "pipe", "pipe"] },
+  );
+  let stderr = "";
+  proc.stderr.setEncoding("utf8");
+  proc.stderr.on("data", (chunk) => {
+    stderr = (stderr + chunk).slice(-4_000);
+  });
+  const display = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      proc.kill("SIGKILL");
+      reject(new Error(`Xvfb did not allocate a display: ${stderr.trim()}`));
+    }, 10_000);
+    proc.stdout.once("data", (chunk) => {
+      clearTimeout(timer);
+      const value = String(chunk).trim().split(/\s+/)[0] ?? "";
+      if (!/^\d+$/.test(value)) {
+        proc.kill("SIGKILL");
+        reject(new Error(`Xvfb returned an invalid display: ${value}`));
+        return;
+      }
+      resolve(value);
+    });
+    proc.once("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    proc.once("exit", (code) => {
+      clearTimeout(timer);
+      reject(new Error(`Xvfb exited before startup (${code}): ${stderr.trim()}`));
+    });
+  });
+  return { process: proc, display: `:${display}` };
+}
+
 const home = fs.mkdtempSync(path.join(os.tmpdir(), "familiar-desktop-"));
-const servePort = await freePort();
-let fallbackPort = await freePort();
-while (fallbackPort === servePort) fallbackPort = await freePort();
-let debugPort = await freePort();
-while (debugPort === servePort || debugPort === fallbackPort) debugPort = await freePort();
-// The mock kind keeps model discovery local; base_url still exercises the
-// provider-brand resolver without making any external API request.
+const electronProfile = path.join(home, "electron-profile");
+fs.mkdirSync(electronProfile, { recursive: true });
+const unusedProviderEnv = `FAMILIAR_E2E_UNUSED_${process.pid}`;
+const runId = randomUUID();
+const isolatedOpenAiUrl = `https://api.openai.com/v1?e2e=${runId}`;
+// Every built-in provider is explicitly non-usable. The two mock providers
+// exercise brand resolution while keeping model discovery entirely local.
 const config = `version: 1
 default_provider: my-openai
 providers:
+  openai:
+    auth: { env: ${unusedProviderEnv} }
+  anthropic:
+    auth: { env: ${unusedProviderEnv} }
+  google:
+    auth: { env: ${unusedProviderEnv} }
+  nvidia:
+    auth: { env: ${unusedProviderEnv} }
+  openrouter:
+    auth: { env: ${unusedProviderEnv} }
+  ollama:
+    auth: { env: ${unusedProviderEnv} }
   my-openai:
     kind: mock
-    base_url: https://api.openai.com/v1
+    base_url: ${isolatedOpenAiUrl}
   custom:
     kind: mock
     base_url: https://example.com/v1
@@ -60,6 +187,9 @@ server:
   bind: 127.0.0.1
 `;
 fs.writeFileSync(path.join(home, "config.yaml"), config);
+
+let servePort = 0;
+let debugPort = 0;
 
 let failures = 0;
 const check = (okFlag, label, extra = "") => {
@@ -125,7 +255,7 @@ async function pageTarget() {
   const targets = await fetch(`http://127.0.0.1:${debugPort}/json/list`).then((response) => response.json());
   return targets.find(
     (target) => target.type === "page" && (target.url ?? "").startsWith(`http://127.0.0.1:${servePort}`),
-  ) ?? targets.find((target) => target.type === "page" && (target.url ?? "").startsWith("http://127.0.0.1:"));
+  );
 }
 
 async function evaluate(expression) {
@@ -173,36 +303,72 @@ async function evaluateAtViewport(width, height, expression) {
   }
 }
 
-const app = spawn(
-  "xvfb-run",
-  [
-    "-a",
-    electronBin,
-    "--no-sandbox",
-    "--disable-gpu",
-    `--remote-debugging-port=${debugPort}`,
-    path.join(repoRoot, "packages", "desktop"),
-  ],
-  {
-    env: {
-      ...process.env,
-      FAMILIAR_HOME: home,
-      FAMILIAR_PORTS: `${servePort},${fallbackPort}`,
-      FAMILIAR_SPAWN_PORT: String(servePort),
-    },
-    stdio: "ignore",
-    detached: true,
-  },
-);
+let app = null;
+let xvfb = null;
 
 try {
+  xvfb = await startXvfb();
+  // A foreign process may still claim the reserved port before Electron binds
+  // it. The config-identity check below refuses to mutate such a server.
+  servePort = await freePort();
+  debugPort = await freePort();
+  while (debugPort === servePort) debugPort = await freePort();
+
+  const testEnv = { ...process.env };
+  for (const key of [
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY",
+    "NVIDIA_API_KEY",
+    "OPENROUTER_API_KEY",
+    unusedProviderEnv,
+    "ELECTRON_RUN_AS_NODE",
+    "XAUTHORITY",
+  ]) {
+    delete testEnv[key];
+  }
+  const runtimeDir = path.join(home, "runtime");
+  fs.mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
+  testEnv.DISPLAY = xvfb.display;
+  testEnv.HOME = home;
+  testEnv.USERPROFILE = home;
+  testEnv.XDG_CONFIG_HOME = path.join(home, "xdg-config");
+  testEnv.XDG_CACHE_HOME = path.join(home, "xdg-cache");
+  testEnv.XDG_DATA_HOME = path.join(home, "xdg-data");
+  testEnv.XDG_RUNTIME_DIR = runtimeDir;
+  testEnv.FAMILIAR_HOME = home;
+  testEnv.FAMILIAR_PORTS = String(servePort);
+  testEnv.FAMILIAR_SPAWN_PORT = String(servePort);
+
+  app = spawn(
+    electronBin,
+    [
+      "--no-sandbox",
+      "--disable-gpu",
+      `--user-data-dir=${electronProfile}`,
+      "--remote-debugging-address=127.0.0.1",
+      `--remote-debugging-port=${debugPort}`,
+      path.join(repoRoot, "packages", "desktop"),
+    ],
+    {
+      env: testEnv,
+      stdio: "ignore",
+      detached: true,
+    },
+  );
+  let appError = null;
+  app.on("error", (err) => {
+    appError = err;
+  });
+
   let uiUrl = "";
   for (let i = 0; i < 100 && !uiUrl; i++) {
+    if (appError) throw appError;
     await sleep(250);
     try {
       const targets = await fetch(`http://127.0.0.1:${debugPort}/json/list`).then((response) => response.json());
       uiUrl = targets.find(
-        (target) => target.type === "page" && (target.url ?? "").startsWith("http://127.0.0.1:"),
+        (target) => target.type === "page" && (target.url ?? "").startsWith(`http://127.0.0.1:${servePort}`),
       )?.url ?? "";
     } catch {
       /* debugger not up yet */
@@ -219,6 +385,36 @@ try {
     serveUp = false;
   }
   check(serveUp, "embedded familiar serve is reachable");
+
+  const isolated = await evaluate(`(async () => {
+    const cfg = await rpc("config.get");
+    const providers = cfg.providers ?? {};
+    const connected = Object.entries(providers)
+      .filter(([, provider]) =>
+        provider?.auth?.source === "none" ||
+        provider?.auth?.source === "env:none" ||
+        provider?.auth?.resolved === true)
+      .map(([name]) => name)
+      .sort();
+    return {
+      myOpenai: providers["my-openai"]?.base_url ?? "",
+      custom: providers["custom"]?.base_url ?? "",
+      connected,
+    };
+  })()`);
+  const isolatedProviders = ["custom", "my-openai"];
+  const isolatedOk =
+    isolated?.myOpenai === isolatedOpenAiUrl &&
+    isolated?.custom === "https://example.com/v1" &&
+    JSON.stringify(isolated?.connected) === JSON.stringify(isolatedProviders);
+  check(
+    isolatedOk,
+    "desktop attached to the isolated provider configuration",
+    JSON.stringify(isolated),
+  );
+  if (!isolatedOk) {
+    throw new Error("desktop attached to a non-test server; refusing to mutate its config");
+  }
 
   const settings = await evaluate(`(async () => {
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -251,7 +447,7 @@ try {
     };
   })()`);
   check(
-    settings?.cards >= 3 && settings?.rows >= 5 && settings?.logos === settings?.cards + settings?.rows,
+    settings?.cards === 2 && settings?.rows === 6 && settings?.logos === settings?.cards + settings?.rows,
     "settings renders connected and candidate provider rows",
     JSON.stringify(settings),
   );
@@ -311,7 +507,8 @@ try {
     return result;
   })()`);
   check(
-    picker?.knownSvg === 1 && picker?.fallbackSvg === 0 && picker?.fallbackText === "C",
+    picker?.knownSvg === 1 && picker?.fallbackSvg === 0 && picker?.fallbackText === "C" &&
+      JSON.stringify([...(picker?.groups ?? [])].sort()) === JSON.stringify(["custom", "my-openai"]),
     "model picker renders provider brand shapes and the neutral fallback",
     JSON.stringify(picker),
   );
@@ -352,16 +549,9 @@ try {
 } catch (err) {
   check(false, "desktop e2e completed without an unexpected error", String(err?.stack ?? err));
 } finally {
-  try {
-    process.kill(-app.pid, "SIGTERM");
-  } catch {
-    try {
-      app.kill("SIGTERM");
-    } catch {
-      /* already exited */
-    }
-  }
-  await sleep(200);
+  if (app) await terminateProcessTree(app);
+  if (xvfb) await stopChild(xvfb.process);
+  await sleep(100);
   fs.rmSync(home, { recursive: true, force: true });
 }
 

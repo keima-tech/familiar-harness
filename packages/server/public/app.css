@@ -1366,6 +1366,29 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
   padding: 10px;
 }
 .connector-server-list > .card { min-width: 0; margin: 0; }
+.connector-server-list .pair {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) auto;
+  align-items: center; gap: 4px 10px;
+}
+.connector-server-list .pair .k {
+  grid-column: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere;
+}
+.connector-server-list .pair .v {
+  grid-column: 2; min-width: 0; overflow-wrap: anywhere;
+}
+.connector-server-list .pair .ext-reconnect {
+  grid-column: 3; justify-self: end;
+}
+@media (max-width: 520px) {
+  .connector-server-list .pair { grid-template-columns: minmax(0, 1fr) auto; }
+  .connector-server-list .pair .k { grid-column: 1; grid-row: 1; }
+  .connector-server-list .pair .v {
+    grid-column: 1; grid-row: 2; text-align: left;
+  }
+  .connector-server-list .pair .ext-reconnect {
+    grid-column: 2; grid-row: 1 / span 2; align-self: center;
+  }
+}
 .connector-external-group { padding-top: 18px; border-top: 1px solid var(--border); }
 .connector-external-group > .connector-group-head { padding: 0 0 10px; background: transparent; }
 .connector-external-list { display: flex; flex-direction: column; gap: 10px; }

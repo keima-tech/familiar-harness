@@ -1774,7 +1774,13 @@ try {
     const serviceGroup = c.querySelector('[data-connector-group="services"]');
     const mcpCard = serverGroup?.querySelector('.card[data-section="mcp"]');
     const lspCard = serverGroup?.querySelector('.card[data-section="lsp"]');
-    const googleCard = serviceGroup?.querySelector('.card[data-connector="google"]');
+    const externalCards = [...c.querySelectorAll('.card[data-connector]')];
+    const serverStyle = serverGroup ? getComputedStyle(serverGroup) : null;
+    const frameEdges = serverStyle
+      ? ["Top", "Right", "Bottom", "Left"].every((side) =>
+          serverStyle["border" + side + "Style"] !== "none" &&
+          Number.parseFloat(serverStyle["border" + side + "Width"]) > 0)
+      : false;
     const res = {
       mcp: !!c.querySelector('.card[data-section="mcp"]'),
       lsp: !!c.querySelector('.card[data-section="lsp"]'),
@@ -1783,12 +1789,16 @@ try {
       skillsCard: !!c.querySelector('.card[data-section="skills"]'),
       serverGroup: !!serverGroup,
       serviceGroup: !!serviceGroup,
-      serverGroupFramed: !!serverGroup && getComputedStyle(serverGroup).borderTopStyle !== "none" &&
-        Number.parseFloat(getComputedStyle(serverGroup).borderTopWidth) > 0,
+      serverGroupFramed: frameEdges,
+      serverGroupBackground: !!serverStyle &&
+        serverStyle.backgroundColor !== "rgba(0, 0, 0, 0)" && serverStyle.backgroundColor !== "transparent",
       mcpInServerGroup: !!mcpCard,
       lspInServerGroup: !!lspCard,
-      googleInServiceGroup: !!googleCard,
-      externalOutsideServerGroup: !!googleCard && !serverGroup?.contains(googleCard),
+      externalCardCount: externalCards.length,
+      allExternalInServiceGroup: externalCards.length > 0 &&
+        externalCards.every((card) => serviceGroup?.contains(card)),
+      noExternalInServerGroup: externalCards.length > 0 &&
+        externalCards.every((card) => !serverGroup?.contains(card)),
     };
     closeSettingsModal();
     return res;
@@ -1802,10 +1812,12 @@ try {
   );
   check(
     connectorUi?.serverGroup === true && connectorUi?.serviceGroup === true &&
-      connectorUi?.serverGroupFramed === true && connectorUi?.mcpInServerGroup === true &&
-      connectorUi?.lspInServerGroup === true && connectorUi?.googleInServiceGroup === true &&
-      connectorUi?.externalOutsideServerGroup === true,
-    "Connectors frames MCP/LSP separately from external-service settings",
+      connectorUi?.serverGroupFramed === true && connectorUi?.serverGroupBackground === true &&
+      connectorUi?.mcpInServerGroup === true && connectorUi?.lspInServerGroup === true &&
+      connectorUi?.externalCardCount === 11 &&
+      connectorUi?.allExternalInServiceGroup === true &&
+      connectorUi?.noExternalInServerGroup === true,
+    "Connectors frames MCP/LSP separately from all external-service settings",
     JSON.stringify(connectorUi),
   );
 
@@ -2145,6 +2157,14 @@ try {
   const langSwitch = await evalOnce(`(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     setLang("ja");
+    openSettingsModal("connectors");
+    await sleep(300);
+    const groupText = (id, selector) =>
+      (document.querySelector('[data-connector-group="' + id + '"] ' + selector)?.textContent ?? "").trim();
+    const serverHeadingJa = groupText("servers", "h3");
+    const serverDescJa = groupText("servers", "p");
+    const serviceHeadingJa = groupText("services", "h3");
+    const serviceDescJa = groupText("services", "p");
     openSettingsModal("general");
     await sleep(200);
     const navText = () => [...document.querySelectorAll("#settings-nav .nav-item")].map((e) => e.textContent).join("|");
@@ -2170,6 +2190,10 @@ try {
       extensionsEn: navEn.includes("Extensions"),
       serverHeadingEn: serverHeading === "Servers",
       serviceHeadingEn: serviceHeading === "External services",
+      serverHeadingJa: serverHeadingJa === "サーバー",
+      serverDescJa: serverDescJa === "MCP / LSP サーバーの接続状態と設定",
+      serviceHeadingJa: serviceHeadingJa === "外部サービス",
+      serviceDescJa: serviceDescJa === "Gmail / GitHub などの外部サービスに接続します。",
     };
   })()`);
   check(langSwitch?.changed === true, "switching language updates the settings nav immediately", JSON.stringify(langSwitch));
@@ -2181,6 +2205,12 @@ try {
   check(
     langSwitch?.serverHeadingEn === true && langSwitch?.serviceHeadingEn === true,
     "the English Connectors view labels server and external-service groups",
+    JSON.stringify(langSwitch),
+  );
+  check(
+    langSwitch?.serverHeadingJa === true && langSwitch?.serverDescJa === true &&
+      langSwitch?.serviceHeadingJa === true && langSwitch?.serviceDescJa === true,
+    "the Japanese Connectors view labels server and external-service groups",
     JSON.stringify(langSwitch),
   );
   check(langSwitch?.cjkInContent === false, "switching language updates the settings panel immediately", JSON.stringify(langSwitch));

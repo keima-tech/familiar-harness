@@ -509,7 +509,13 @@ try {
     const serviceGroup = document.querySelector('#settings-content [data-connector-group="services"]');
     const mcpCard = serverGroup?.querySelector('.card[data-section="mcp"]');
     const lspCard = serverGroup?.querySelector('.card[data-section="lsp"]');
-    const googleCard = serviceGroup?.querySelector('.card[data-connector="google"]');
+    const externalCards = [...document.querySelectorAll('#settings-content .card[data-connector]')];
+    const serverStyle = serverGroup ? getComputedStyle(serverGroup) : null;
+    const frameEdges = serverStyle
+      ? ["Top", "Right", "Bottom", "Left"].every((side) =>
+          serverStyle["border" + side + "Style"] !== "none" &&
+          Number.parseFloat(serverStyle["border" + side + "Width"]) > 0)
+      : false;
     const connectors = {
       mcp: !!document.querySelector('#settings-content .card[data-section="mcp"]'),
       lsp: !!document.querySelector('#settings-content .card[data-section="lsp"]'),
@@ -518,12 +524,16 @@ try {
       github: !!document.querySelector('#settings-content .card[data-connector="github"]'),
       serverGroup: !!serverGroup,
       serviceGroup: !!serviceGroup,
-      serverGroupFramed: !!serverGroup && getComputedStyle(serverGroup).borderTopStyle !== "none" &&
-        Number.parseFloat(getComputedStyle(serverGroup).borderTopWidth) > 0,
+      serverGroupFramed: frameEdges,
+      serverGroupBackground: !!serverStyle &&
+        serverStyle.backgroundColor !== "rgba(0, 0, 0, 0)" && serverStyle.backgroundColor !== "transparent",
       mcpInServerGroup: !!mcpCard,
       lspInServerGroup: !!lspCard,
-      googleInServiceGroup: !!googleCard,
-      externalOutsideServerGroup: !!googleCard && !serverGroup?.contains(googleCard),
+      externalCardCount: externalCards.length,
+      allExternalInServiceGroup: externalCards.length > 0 &&
+        externalCards.every((card) => serviceGroup?.contains(card)),
+      noExternalInServerGroup: externalCards.length > 0 &&
+        externalCards.every((card) => !serverGroup?.contains(card)),
     };
     closeSettingsModal();
     return { nav, skills, connectors };
@@ -551,11 +561,13 @@ try {
     settingsSections?.connectors?.serverGroup === true &&
       settingsSections?.connectors?.serviceGroup === true &&
       settingsSections?.connectors?.serverGroupFramed === true &&
+      settingsSections?.connectors?.serverGroupBackground === true &&
       settingsSections?.connectors?.mcpInServerGroup === true &&
       settingsSections?.connectors?.lspInServerGroup === true &&
-      settingsSections?.connectors?.googleInServiceGroup === true &&
-      settingsSections?.connectors?.externalOutsideServerGroup === true,
-    "Connectors frames MCP/LSP separately from external-service settings",
+      settingsSections?.connectors?.externalCardCount === 11 &&
+      settingsSections?.connectors?.allExternalInServiceGroup === true &&
+      settingsSections?.connectors?.noExternalInServerGroup === true,
+    "Connectors frames MCP/LSP separately from all external-service settings",
     JSON.stringify(settingsSections?.connectors),
   );
 
@@ -591,6 +603,136 @@ try {
     connectorIndependence?.externalReady === true && connectorIndependence?.mcpPending === true,
     "slow MCP discovery does not block external connector settings",
     JSON.stringify(connectorIndependence),
+  );
+
+  const narrowConnectorLayout = await evaluateAtViewport(320, 800, `(async () => {
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const realRpc = window.rpc;
+    const longName = "mcp-server-with-an-extremely-long-name-that-must-wrap-without-clipping";
+    window.rpc = (method, params) => {
+      if (method === "mcp.status") {
+        return Promise.resolve({
+          servers: [{ name: longName, state: "ready", tools: ["alpha", "beta", "gamma"] }],
+        });
+      }
+      if (method === "config.get") {
+        return realRpc(method, params).then((cfg) => ({
+          ...cfg,
+          lsp: { servers: { [longName]: { extensions: ["ts", "tsx"] } } },
+        }));
+      }
+      return realRpc(method, params);
+    };
+    try {
+      openSettingsModal("connectors");
+      const group = document.querySelector('#settings-content [data-connector-group="servers"]');
+      for (let i = 0; i < 50; i++) {
+        if (group?.querySelector('.card[data-section="mcp"] .ext-reconnect') &&
+            group?.querySelector('.card[data-section="lsp"] .pair')) break;
+        await sleep(100);
+      }
+      const mcpCard = group?.querySelector('.card[data-section="mcp"]');
+      const lspCard = group?.querySelector('.card[data-section="lsp"]');
+      const mcpRow = mcpCard?.querySelector('.pair');
+      const lspRow = lspCard?.querySelector('.pair');
+      const button = mcpRow?.querySelector(".ext-reconnect");
+      button?.focus();
+      const groupRect = group?.getBoundingClientRect();
+      const buttonRect = button?.getBoundingClientRect();
+      const fits = (el) => !!el && el.scrollWidth <= el.clientWidth + 1;
+      return {
+        hasRows: !!mcpRow && !!lspRow && !!button,
+        groupFits: fits(group),
+        mcpCardFits: fits(mcpCard),
+        lspCardFits: fits(lspCard),
+        mcpRowFits: fits(mcpRow),
+        lspRowFits: fits(lspRow),
+        buttonVisible: !!groupRect && !!buttonRect && buttonRect.width > 0 && buttonRect.height > 0 &&
+          buttonRect.left >= groupRect.left - 0.5 && buttonRect.right <= groupRect.right + 0.5 &&
+          buttonRect.top >= groupRect.top - 0.5 && buttonRect.bottom <= groupRect.bottom + 0.5,
+        buttonFocused: document.activeElement === button,
+        metrics: {
+          group: group ? { scroll: group.scrollWidth, client: group.clientWidth } : null,
+          mcpRow: mcpRow ? { scroll: mcpRow.scrollWidth, client: mcpRow.clientWidth } : null,
+          button: buttonRect ? { left: buttonRect.left, right: buttonRect.right } : null,
+          groupRect: groupRect ? { left: groupRect.left, right: groupRect.right } : null,
+        },
+      };
+    } finally {
+      window.rpc = realRpc;
+      closeSettingsModal();
+    }
+  })()`);
+  check(
+    narrowConnectorLayout?.hasRows === true && narrowConnectorLayout?.groupFits === true &&
+      narrowConnectorLayout?.mcpCardFits === true && narrowConnectorLayout?.lspCardFits === true &&
+      narrowConnectorLayout?.mcpRowFits === true && narrowConnectorLayout?.lspRowFits === true &&
+      narrowConnectorLayout?.buttonVisible === true && narrowConnectorLayout?.buttonFocused === true,
+    "long MCP/LSP names wrap without clipping the reconnect control at 320px",
+    JSON.stringify(narrowConnectorLayout),
+  );
+
+  const connectorStaleRender = await evaluate(`(async () => {
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const realRpc = window.rpc;
+    let release = () => {};
+    const gate = new Promise((resolve) => { release = resolve; });
+    const pending = new Set();
+    let configCalls = 0;
+    window.rpc = (method, params) => {
+      if (method === "mcp.status" || method === "connectors.get") {
+        pending.add(method);
+        return gate.then(() => {
+          pending.delete(method);
+          return realRpc(method, params);
+        });
+      }
+      if (method === "config.get") {
+        configCalls += 1;
+        if (configCalls === 1) {
+          pending.add(method);
+          return gate.then(() => {
+            pending.delete(method);
+            return realRpc(method, params);
+          });
+        }
+      }
+      return realRpc(method, params);
+    };
+    try {
+      openSettingsModal("connectors");
+      for (let i = 0; i < 50; i++) {
+        if (pending.has("mcp.status") && pending.has("config.get") && pending.has("connectors.get")) break;
+        await sleep(50);
+      }
+      const pendingBefore = [...pending].sort();
+      openSettingsModal("general");
+      release();
+      await sleep(300);
+      const content = document.querySelector("#settings-content");
+      return {
+        pendingBefore,
+        activeSection: document.querySelector("#settings-nav .nav-item.active")?.dataset.section ?? "",
+        connectorGroups: content.querySelectorAll("[data-connector-group]").length,
+        serverCards: content.querySelectorAll('.card[data-section="mcp"], .card[data-section="lsp"]').length,
+        externalCards: content.querySelectorAll(".card[data-connector]").length,
+      };
+    } finally {
+      release();
+      window.rpc = realRpc;
+      closeSettingsModal();
+    }
+  })()`);
+  check(
+    connectorStaleRender?.pendingBefore?.includes("mcp.status") === true &&
+      connectorStaleRender?.pendingBefore?.includes("config.get") === true &&
+      connectorStaleRender?.pendingBefore?.includes("connectors.get") === true &&
+      connectorStaleRender?.activeSection === "general" &&
+      connectorStaleRender?.connectorGroups === 0 &&
+      connectorStaleRender?.serverCards === 0 &&
+      connectorStaleRender?.externalCards === 0,
+    "connector RPCs completing after navigation cannot render into another settings section",
+    JSON.stringify(connectorStaleRender),
   );
 
   const picker = await evaluate(`(async () => {

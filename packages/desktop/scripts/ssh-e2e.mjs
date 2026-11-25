@@ -2187,6 +2187,7 @@ try {
       cjkInContent: /[\\u3040-\\u30ff\\u3400-\\u9fff]/.test(content),
       skillsEn: navEn.includes("Skills"),
       connectorsEn: navEn.includes("Connectors"),
+      websearchEn: navEn.includes("Web search"),
       extensionsEn: navEn.includes("Extensions"),
       serverHeadingEn: serverHeading === "Servers",
       serviceHeadingEn: serviceHeading === "External services",
@@ -2198,8 +2199,9 @@ try {
   })()`);
   check(langSwitch?.changed === true, "switching language updates the settings nav immediately", JSON.stringify(langSwitch));
   check(
-    langSwitch?.skillsEn === true && langSwitch?.connectorsEn === true && langSwitch?.extensionsEn === false,
-    "the English settings nav exposes Skills and Connectors without Extensions",
+    langSwitch?.skillsEn === true && langSwitch?.connectorsEn === true &&
+      langSwitch?.websearchEn === true && langSwitch?.extensionsEn === false,
+    "the English settings nav exposes Skills, Connectors and Web search without Extensions",
     JSON.stringify(langSwitch),
   );
   check(

@@ -189,7 +189,7 @@ needsApproval → required でない → 実行
 - バックエンドは **DuckDuckGo HTML が既定**(API キー・設定不要)。
   `permissions.websearch.provider: searxng` と `base_url` を設定すると SearXNG JSON API
   を使う(インスタンスは利用者が用意する)。`searxng` なのに `base_url` が空なら
-  設定方法のヒント付きエラー。設定は「設定 → 権限」の Web 検索カードからも変更できる。
+  設定方法のヒント付きエラー。設定は独立した「設定 → Web検索」項目から変更できる。
 - 返却: `n. title — url` + snippet。
 
 ### todo(セッション単位の作業リスト)

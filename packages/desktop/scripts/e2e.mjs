@@ -735,6 +735,28 @@ try {
     JSON.stringify(connectorStaleRender),
   );
 
+  const connectorCasing = await evaluate(`(async () => {
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    openSettingsModal("connectors");
+    for (let i = 0; i < 60; i++) {
+      if (document.querySelectorAll('.connector-external-list > .card h4').length >= 11) break;
+      await sleep(100);
+    }
+    const titles = [...document.querySelectorAll('.connector-external-list > .card h4')].map((h) => ({
+      text: (h.textContent ?? '').trim(),
+      transform: getComputedStyle(h).textTransform,
+    }));
+    closeSettingsModal();
+    return titles;
+  })()`);
+  check(
+    connectorCasing?.some((t) => t.text === "GitHub") === true &&
+      connectorCasing?.some((t) => t.text === "Jira") === true &&
+      connectorCasing.every((t) => t.transform === "none"),
+    "external connector titles keep official casing (GitHub / Jira)",
+    JSON.stringify(connectorCasing),
+  );
+
   const serverConfigUi = await evaluate(`(async () => {
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const realRpc = window.rpc;
@@ -875,8 +897,14 @@ try {
       return null;
     };
     try {
-      openSettingsModal("approvals");
+      openSettingsModal("websearch");
       if (!(await waitCard())) return { stage: 'web-card' };
+      const navHasSection = [...document.querySelectorAll('#settings-nav .nav-item')]
+        .some((item) => item.dataset.section === 'websearch');
+      openSettingsModal("approvals");
+      const approvalsHasCard = !!document.querySelector('#settings-content .card[data-section="websearch"]');
+      openSettingsModal("websearch");
+      if (!(await waitCard())) return { stage: 'web-card-again' };
       const sel = card().querySelector('select');
       const input = card().querySelector('.perm-input');
       sel.value = 'searxng';
@@ -894,15 +922,16 @@ try {
       input.value = 'http://should-be-cleared.invalid';
       card().querySelector('.perm-save').click();
       const resetCfg = await waitCfg((w) => w?.provider === 'duckduckgo' && w?.base_url === '');
-      return { guarded, unchanged, saved, reset: !!resetCfg };
+      return { navHasSection, approvalsHasCard, guarded, unchanged, saved, reset: !!resetCfg };
     } finally {
       closeSettingsModal();
     }
   })()`);
   check(
-    webSearchUi?.guarded === true && webSearchUi?.unchanged === true &&
+    webSearchUi?.navHasSection === true && webSearchUi?.approvalsHasCard === false &&
+      webSearchUi?.guarded === true && webSearchUi?.unchanged === true &&
       webSearchUi?.saved === true && webSearchUi?.reset === true,
-    "SearXNG endpoint is configurable from the Permissions settings, DuckDuckGo clears it",
+    "SearXNG endpoint is configurable from the Web search settings, DuckDuckGo clears it",
     JSON.stringify(webSearchUi),
   );
 

@@ -1946,7 +1946,7 @@ Web UI / サーバ RPC / CLI を含む変更のため GUI e2e も確認する。
   `familiar init` のテンプレートと spec が `searxng` + 空 `base_url` のままで
   ギャップがあった。テンプレートと `03-tools.md` / `05-config.md` を
   DuckDuckGo 既定に合わせる。SearXNG は利用者が用意する任意のバックエンド。
-- **設定 → 権限に Web 検索カード**: provider(DuckDuckGo / SearXNG)と
-  SearXNG のエンドポイントを GUI から編集できるようにする。新 RPC
+- **設定 → Web検索(独立項目)**: provider(DuckDuckGo / SearXNG)と
+  SearXNG のエンドポイントを専用の設定項目から編集できるようにする。新 RPC
   `permissions.websearch.set` が config.yaml へ永続化し、稼働中の設定へ反映する。
   `base_url` は http(s) のみ受け付け、DuckDuckGo 選択時はクリアされる。

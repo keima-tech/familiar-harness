@@ -667,11 +667,12 @@ console.log("— scenario I: web ui transport —");
     "web UI: Tab mode copy describes Plan and the previous permission mode, not Build/Plan",
   );
   assert(
-    appJs.includes("permissions.websearch.set") && appJs.includes("perm.webTitle") &&
+    appJs.includes("permissions.websearch.set") && appJs.includes("nav.websearch") &&
       appJs.includes("perm.webDdg") && appJs.includes("perm.webSearxng") &&
       appJs.includes("perm.webUrl") && appJs.includes("perm.webNeedUrl") &&
-      appJs.includes("fillWebSearchCard"),
-    "web UI: Permissions exposes a web search provider/endpoint editor",
+      appJs.includes('id: "websearch"') && appJs.includes('labelKey: "nav.websearch"') &&
+      appJs.includes("renderWebSearchSection") && appJs.includes("fillWebSearchCard"),
+    "web UI: a standalone Web search section exposes the provider/endpoint editor",
   );
   assert(
     !page.includes('id="stop"') && appJs.includes("steerRunningTurn") &&

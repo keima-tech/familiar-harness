@@ -846,7 +846,7 @@ export class AgentServer {
     }
   }
 
-  /** Settings → Permissions → web search: persist provider + SearXNG endpoint. */
+  /** Settings → Web search: persist provider + SearXNG endpoint. */
   private websearchSet(params: Record<string, unknown>): Record<string, unknown> {
     const provider = params["provider"];
     if (provider !== "duckduckgo" && provider !== "searxng") {

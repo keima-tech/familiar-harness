@@ -352,6 +352,7 @@ const STR = {
     "nav.connections": "接続",
     "nav.cron": "Cron",
     "nav.approvals": "権限",
+    "nav.websearch": "Web検索",
     "nav.system": "このアプリについて",
     "perm.desc": "bash コマンドの allow/ask/deny ポリシーを編集できます。組み込みの保護パターンは常に union されます。下のテスターで判定を確認できます。",
     "perm.mode": "既定モード",
@@ -372,7 +373,6 @@ const STR = {
     "perm.decision.allow": "許可(承認なしで実行)",
     "perm.decision.ask": "承認が必要",
     "perm.decision.deny": "ブロック",
-    "perm.webTitle": "Web 検索",
     "perm.webDesc": "DuckDuckGo は設定不要で利用できます。SearXNG を使う場合は、ご自身で用意したインスタンスの URL を設定してください。",
     "perm.webProvider": "検索バックエンド",
     "perm.webProviderHint": "duckduckgo=設定不要 / searxng=下のエンドポイントが必要",
@@ -1000,6 +1000,7 @@ const STR = {
     "nav.connections": "Connections",
     "nav.cron": "Cron",
     "nav.approvals": "Permissions",
+    "nav.websearch": "Web search",
     "nav.system": "About",
     "perm.desc": "Edit the bash allow/ask/deny policy. Built-in guards are always unioned in. Use the tester below to check a command.",
     "perm.mode": "Default mode",
@@ -1020,7 +1021,6 @@ const STR = {
     "perm.decision.allow": "allowed (runs without approval)",
     "perm.decision.ask": "needs approval",
     "perm.decision.deny": "blocked",
-    "perm.webTitle": "Web search",
     "perm.webDesc": "DuckDuckGo works with no setup. To use SearXNG, set the URL of your own instance below.",
     "perm.webProvider": "Search backend",
     "perm.webProviderHint": "duckduckgo = no setup / searxng = endpoint required",
@@ -4830,6 +4830,7 @@ const SETTINGS_SECTIONS = [
   { id: "skills", labelKey: "nav.skills", icon: "✦" },
   { id: "templates", labelKey: "nav.templates", icon: "📄" },
   { id: "connectors", labelKey: "nav.connectors", icon: "🔗" },
+  { id: "websearch", labelKey: "nav.websearch", icon: "🔍" },
   { id: "connections", labelKey: "nav.connections", icon: "🖥" },
   { id: "cron", labelKey: "nav.cron", icon: "⏱" },
   { id: "approvals", labelKey: "nav.approvals", icon: "🛡" },
@@ -4883,6 +4884,7 @@ function renderSettingsSection(id) {
   else if (id === "skills") void renderSkillsSection(content, stale);
   else if (id === "templates") void renderTemplatesSection(content, stale);
   else if (id === "connectors") void renderConnectorsSection(content, stale);
+  else if (id === "websearch") void renderWebSearchSection(content, stale);
   else if (id === "connections") void renderConnectionsSection(content, stale);
   else if (id === "cron") void renderCronSection(content, stale);
   else if (id === "approvals") void renderApprovalsSection(content, stale);
@@ -6482,7 +6484,15 @@ async function renderConnectionsSection(content, stale = () => false) {
 }
 
 /** Settings → templates: register Office files whose design office_create reuses. */
-/** Web search editor loads independently of the bash policy RPC. */
+/** Settings → Web search: standalone section for the search backend. */
+function renderWebSearchSection(content, stale = () => false) {
+  const webCard = card(t("nav.websearch"), t("perm.webDesc"));
+  webCard.dataset.section = "websearch";
+  content.appendChild(webCard);
+  void fillWebSearchCard(webCard, stale);
+}
+
+/** Web search editor for the standalone Settings → Web search section. */
 async function fillWebSearchCard(webCard, stale = () => false) {
   try {
     const cfg = await rpc("config.get");
@@ -6549,10 +6559,7 @@ async function fillWebSearchCard(webCard, stale = () => false) {
 
 async function renderApprovalsSection(content, stale = () => false) {
   const c = card(t("nav.approvals"), t("perm.desc"));
-  const webCard = card(t("perm.webTitle"), t("perm.webDesc"));
-  webCard.dataset.section = "websearch";
-  content.append(c, webCard);
-  void fillWebSearchCard(webCard, stale);
+  content.appendChild(c);
   let policy;
   try {
     policy = await rpc("permissions.policy", {});

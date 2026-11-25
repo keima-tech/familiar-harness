@@ -913,7 +913,7 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
 }
 .card h4 {
   margin: 0 0 8px; font-size: 12px; color: var(--accent);
-  letter-spacing: 0.5px; text-transform: uppercase;
+  letter-spacing: 0.5px; /* keep the source string's casing (e.g. GitHub, Jira) */
 }
 .card h4 .note { color: var(--ok); text-transform: none; letter-spacing: 0; font-weight: 400; }
 .card .pair { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; padding: 2px 0; }
@@ -1411,6 +1411,10 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
 .connector-external-group > .connector-group-head { padding: 0 0 10px; background: transparent; }
 .connector-external-list { display: flex; flex-direction: column; gap: 10px; }
 .connector-external-list > .card { margin: 0; }
+/* Product names keep their official casing (GitHub, GitLab, Jira, …). */
+.connector-server-list > .card h4, .connector-external-list > .card h4 {
+  text-transform: none; letter-spacing: 0;
+}
 .conn-field { margin-bottom: 8px; }
 .setting-input {
   width: 100%; box-sizing: border-box; padding: 8px 10px;

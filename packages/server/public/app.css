@@ -1343,6 +1343,33 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
 
 
 /* ---- settings: connectors ---- */
+.connector-group { min-width: 0; }
+.connector-server-group {
+  margin-bottom: 22px;
+  border: 1px solid var(--border); border-radius: 12px;
+  background: var(--panel); overflow: hidden;
+}
+.connector-group-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  padding: 11px 13px; background: var(--panel2);
+}
+.connector-server-group > .connector-group-head { border-bottom: 1px solid var(--border); }
+.connector-group-copy { min-width: 0; }
+.connector-group-head h3 { margin: 0; color: var(--text); font-size: 12.5px; font-weight: 700; }
+.connector-group-head p { margin: 2px 0 0; color: var(--dim); font-size: 11px; line-height: 1.45; }
+.connector-group-badge {
+  flex: none; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg); color: var(--dim); font-size: 10px; font-weight: 600; letter-spacing: 0.03em;
+}
+.connector-server-list {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 10px;
+}
+.connector-server-list > .card { min-width: 0; margin: 0; }
+.connector-external-group { padding-top: 18px; border-top: 1px solid var(--border); }
+.connector-external-group > .connector-group-head { padding: 0 0 10px; background: transparent; }
+.connector-external-list { display: flex; flex-direction: column; gap: 10px; }
+.connector-external-list > .card { margin: 0; }
 .conn-field { margin-bottom: 8px; }
 .setting-input {
   width: 100%; box-sizing: border-box; padding: 8px 10px;

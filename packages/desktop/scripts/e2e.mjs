@@ -505,12 +505,25 @@ try {
       if (ready) break;
       await sleep(100);
     }
+    const serverGroup = document.querySelector('#settings-content [data-connector-group="servers"]');
+    const serviceGroup = document.querySelector('#settings-content [data-connector-group="services"]');
+    const mcpCard = serverGroup?.querySelector('.card[data-section="mcp"]');
+    const lspCard = serverGroup?.querySelector('.card[data-section="lsp"]');
+    const googleCard = serviceGroup?.querySelector('.card[data-connector="google"]');
     const connectors = {
       mcp: !!document.querySelector('#settings-content .card[data-section="mcp"]'),
       lsp: !!document.querySelector('#settings-content .card[data-section="lsp"]'),
       skills: !!document.querySelector('#settings-content .card[data-section="skills"]'),
       google: !!document.querySelector('#settings-content .card[data-connector="google"]'),
       github: !!document.querySelector('#settings-content .card[data-connector="github"]'),
+      serverGroup: !!serverGroup,
+      serviceGroup: !!serviceGroup,
+      serverGroupFramed: !!serverGroup && getComputedStyle(serverGroup).borderTopStyle !== "none" &&
+        Number.parseFloat(getComputedStyle(serverGroup).borderTopWidth) > 0,
+      mcpInServerGroup: !!mcpCard,
+      lspInServerGroup: !!lspCard,
+      googleInServiceGroup: !!googleCard,
+      externalOutsideServerGroup: !!googleCard && !serverGroup?.contains(googleCard),
     };
     closeSettingsModal();
     return { nav, skills, connectors };
@@ -532,6 +545,17 @@ try {
       settingsSections?.connectors?.google === true && settingsSections?.connectors?.github === true &&
       settingsSections?.connectors?.skills === false,
     "the Connectors section owns MCP, LSP, and external-service settings",
+    JSON.stringify(settingsSections?.connectors),
+  );
+  check(
+    settingsSections?.connectors?.serverGroup === true &&
+      settingsSections?.connectors?.serviceGroup === true &&
+      settingsSections?.connectors?.serverGroupFramed === true &&
+      settingsSections?.connectors?.mcpInServerGroup === true &&
+      settingsSections?.connectors?.lspInServerGroup === true &&
+      settingsSections?.connectors?.googleInServiceGroup === true &&
+      settingsSections?.connectors?.externalOutsideServerGroup === true,
+    "Connectors frames MCP/LSP separately from external-service settings",
     JSON.stringify(settingsSections?.connectors),
   );
 

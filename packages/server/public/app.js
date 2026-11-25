@@ -161,6 +161,10 @@ const STR = {
     "set.developer": "開発者",
     "conn.title": "コネクタ",
     "conn.desc": "外部サービスとの接続設定。保存すると AI がコネクタツール経由で利用できます。",
+    "conn.serverGroupTitle": "サーバー",
+    "conn.serverGroupDesc": "MCP / LSP サーバーの接続状態と設定",
+    "conn.externalGroupTitle": "外部サービス",
+    "conn.externalGroupDesc": "Gmail / GitHub などの外部サービスに接続します。",
     "conn.baseUrl": "ベース URL (例: https://example.atlassian.net)",
     "conn.email": "メールアドレス",
     "conn.token": "API トークン",
@@ -763,6 +767,10 @@ const STR = {
     "set.developer": "developer",
     "conn.title": "connectors",
     "conn.desc": "Connect external services — once saved, the AI can use them through connector tools.",
+    "conn.serverGroupTitle": "Servers",
+    "conn.serverGroupDesc": "Connection status and configuration for MCP and LSP servers",
+    "conn.externalGroupTitle": "External services",
+    "conn.externalGroupDesc": "Connect to external services such as Gmail and GitHub.",
     "conn.baseUrl": "base URL (e.g. https://example.atlassian.net)",
     "conn.email": "email",
     "conn.token": "API token",
@@ -5646,6 +5654,40 @@ async function renderSkillsSection(content, stale = () => false) {
   }
 }
 
+/** Build a titled group used to separate connector kinds in Settings. */
+function buildConnectorGroup(id, title, description, badge = "") {
+  const group = document.createElement("section");
+  group.className = "connector-group";
+  group.dataset.connectorGroup = id;
+
+  const headingId = `connector-group-${id}-title`;
+  group.setAttribute("aria-labelledby", headingId);
+
+  const head = document.createElement("header");
+  head.className = "connector-group-head";
+  const copy = document.createElement("div");
+  copy.className = "connector-group-copy";
+  const heading = document.createElement("h3");
+  heading.id = headingId;
+  heading.textContent = title;
+  const desc = document.createElement("p");
+  desc.textContent = description;
+  copy.append(heading, desc);
+  head.appendChild(copy);
+
+  if (badge) {
+    const tag = document.createElement("span");
+    tag.className = "connector-group-badge";
+    tag.textContent = badge;
+    head.appendChild(tag);
+  }
+
+  const body = document.createElement("div");
+  body.className = "connector-group-body";
+  group.append(head, body);
+  return { group, body };
+}
+
 /** Build the MCP server card used by Settings → Connectors. */
 function buildMcpServersCard() {
   const mcpCard = card(t("ext.mcp"), t("ext.mcpDesc"));
@@ -6442,24 +6484,43 @@ async function renderConnectorsSection(content, stale = () => false) {
   // every append goes through here: a section the user navigated away
   // from while an RPC was in flight must not land in the new tab
   const put = (node) => { if (!stale()) content.appendChild(node); };
+  const putInto = (parent, node) => { if (!stale()) parent.appendChild(node); };
 
-  // MCP and LSP are server-side connectors and share this section. Their
-  // status/config calls load independently so a slow MCP discovery cannot
-  // block the external-service settings below.
+  // MCP and LSP are server-side connectors and share a framed subsection.
+  // Their status/config calls load independently so a slow MCP discovery
+  // cannot block the external-service settings below.
+  const serverGroup = buildConnectorGroup(
+    "servers",
+    t("conn.serverGroupTitle"),
+    t("conn.serverGroupDesc"),
+    "MCP / LSP",
+  );
+  serverGroup.group.classList.add("connector-server-group");
+  serverGroup.body.classList.add("connector-server-list");
   const mcpCard = buildMcpServersCard();
   const lspCard = buildLspServersCard();
-  put(mcpCard);
-  put(lspCard);
+  serverGroup.body.append(mcpCard, lspCard);
+  put(serverGroup.group);
   void fillMcpServersCard(mcpCard, stale);
   void fillLspServersCard(lspCard, stale);
 
   if (!(await ensureNsConfig())) return;
   if (stale()) return;
+
+  const externalGroup = buildConnectorGroup(
+    "services",
+    t("conn.externalGroupTitle"),
+    t("conn.externalGroupDesc"),
+  );
+  externalGroup.group.classList.add("connector-external-group");
+  externalGroup.body.classList.add("connector-external-list");
+  put(externalGroup.group);
+
   let stored = {};
   try {
     stored = (await rpc("connectors.get")).connectors ?? {};
   } catch (err) {
-    put(sectionError(t("conn.title"), err));
+    putInto(externalGroup.body, sectionError(t("conn.title"), err));
     return;
   }
   // ---- Google (OAuth: Gmail / カレンダー) ----
@@ -6589,7 +6650,7 @@ async function renderConnectorsSection(content, stale = () => false) {
     gCal.hidden = false;
   }
   googleCard.appendChild(gList);
-  put(googleCard);
+  putInto(externalGroup.body, googleCard);
 
   const KINDS = [
     { id: "github", label: "GitHub", fields: [["token", t("conn.token"), true]] },
@@ -6670,7 +6731,7 @@ async function renderConnectorsSection(content, stale = () => false) {
     });
     actions.append(save, test, del, result);
     cardEl.appendChild(actions);
-    put(cardEl);
+    putInto(externalGroup.body, cardEl);
   }
 }
 

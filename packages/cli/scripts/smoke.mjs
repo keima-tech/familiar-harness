@@ -650,6 +650,11 @@ console.log("— scenario I: web ui transport —");
     "web UI: Skills and Connectors replace the Extensions settings section",
   );
   assert(
+    appJs.includes("buildConnectorGroup") && appJs.includes("connector-server-list") &&
+      appJs.includes("connector-external-list") && appJs.includes("dataset.connectorGroup"),
+    "web UI: Connectors separates MCP/LSP servers from external services",
+  );
+  assert(
     !page.includes('id="stop"') && appJs.includes("steerRunningTurn") &&
       appJs.includes('rpc("session.steer"') && appJs.includes("mobileComposer") &&
       appJs.includes("composer.phMobile"),

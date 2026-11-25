@@ -1770,12 +1770,25 @@ try {
       if (ready) break;
       await sleep(100);
     }
+    const serverGroup = c.querySelector('[data-connector-group="servers"]');
+    const serviceGroup = c.querySelector('[data-connector-group="services"]');
+    const mcpCard = serverGroup?.querySelector('.card[data-section="mcp"]');
+    const lspCard = serverGroup?.querySelector('.card[data-section="lsp"]');
+    const googleCard = serviceGroup?.querySelector('.card[data-connector="google"]');
     const res = {
       mcp: !!c.querySelector('.card[data-section="mcp"]'),
       lsp: !!c.querySelector('.card[data-section="lsp"]'),
       google: !!c.querySelector('.card[data-connector="google"]'),
       github: !!c.querySelector('.card[data-connector="github"]'),
       skillsCard: !!c.querySelector('.card[data-section="skills"]'),
+      serverGroup: !!serverGroup,
+      serviceGroup: !!serviceGroup,
+      serverGroupFramed: !!serverGroup && getComputedStyle(serverGroup).borderTopStyle !== "none" &&
+        Number.parseFloat(getComputedStyle(serverGroup).borderTopWidth) > 0,
+      mcpInServerGroup: !!mcpCard,
+      lspInServerGroup: !!lspCard,
+      googleInServiceGroup: !!googleCard,
+      externalOutsideServerGroup: !!googleCard && !serverGroup?.contains(googleCard),
     };
     closeSettingsModal();
     return res;
@@ -1785,6 +1798,14 @@ try {
       connectorUi?.google === true && connectorUi?.github === true &&
       connectorUi?.skillsCard === false,
     "the Connectors section owns MCP, LSP, and external-service settings",
+    JSON.stringify(connectorUi),
+  );
+  check(
+    connectorUi?.serverGroup === true && connectorUi?.serviceGroup === true &&
+      connectorUi?.serverGroupFramed === true && connectorUi?.mcpInServerGroup === true &&
+      connectorUi?.lspInServerGroup === true && connectorUi?.googleInServiceGroup === true &&
+      connectorUi?.externalOutsideServerGroup === true,
+    "Connectors frames MCP/LSP separately from external-service settings",
     JSON.stringify(connectorUi),
   );
 
@@ -2106,6 +2127,8 @@ try {
       "files.csvRows", "files.sheet", "files.slide", "files.docxEmpty",
       "nav.templates", "tpl.intro", "tpl.add", "tpl.empty", "tpl.delete", "tpl.how",
       "tpl.importFailed", "tpl.added", "tpl.deleted", "tpl.confirm",
+      "conn.serverGroupTitle", "conn.serverGroupDesc",
+      "conn.externalGroupTitle", "conn.externalGroupDesc",
     ];
     const bad = /[\u3040-\u30ff\u3400-\u9fff\uff66-\uff9f]/;
     return keys.filter((k) => bad.test(t(k))).map((k) => k + "=" + t(k));
@@ -2132,6 +2155,10 @@ try {
     sel.dispatchEvent(new Event("change", { bubbles: true }));
     await sleep(300);
     const navEn = navText();
+    openSettingsModal("connectors");
+    await sleep(300);
+    const serverHeading = (document.querySelector('[data-connector-group="servers"] h3')?.textContent ?? "").trim();
+    const serviceHeading = (document.querySelector('[data-connector-group="services"] h3')?.textContent ?? "").trim();
     const content = (document.querySelector("#settings-content")?.textContent ?? "").slice(0, 120);
     closeSettingsModal();
     setLang("ja");
@@ -2141,12 +2168,19 @@ try {
       skillsEn: navEn.includes("Skills"),
       connectorsEn: navEn.includes("Connectors"),
       extensionsEn: navEn.includes("Extensions"),
+      serverHeadingEn: serverHeading === "Servers",
+      serviceHeadingEn: serviceHeading === "External services",
     };
   })()`);
   check(langSwitch?.changed === true, "switching language updates the settings nav immediately", JSON.stringify(langSwitch));
   check(
     langSwitch?.skillsEn === true && langSwitch?.connectorsEn === true && langSwitch?.extensionsEn === false,
     "the English settings nav exposes Skills and Connectors without Extensions",
+    JSON.stringify(langSwitch),
+  );
+  check(
+    langSwitch?.serverHeadingEn === true && langSwitch?.serviceHeadingEn === true,
+    "the English Connectors view labels server and external-service groups",
     JSON.stringify(langSwitch),
   );
   check(langSwitch?.cjkInContent === false, "switching language updates the settings panel immediately", JSON.stringify(langSwitch));

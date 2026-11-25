@@ -1631,7 +1631,9 @@ try {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     openSettingsModal("general");
     await sleep(600);
-    const nav = [...document.querySelectorAll("#settings-nav .nav-item")].map((n) => n.textContent);
+    const navItems = [...document.querySelectorAll("#settings-nav .nav-item")];
+    const nav = navItems.map((n) => n.textContent);
+    const navSections = navItems.map((n) => n.dataset.section);
     closeSettingsModal();
     const gear = document.querySelector(".top-actions #open-settings");
     const gauge = document.querySelector(".top-actions #ctx-gauge");
@@ -1639,7 +1641,13 @@ try {
     const order = [...document.querySelectorAll(".top-actions > *")].map((el) => el.id || el.className);
     return {
       nav,
+      navSections,
       hasProposalsSection: nav.some((n) => n.includes("提案")),
+      hasExtensionsSection: navSections.includes("extensions"),
+      hasSkillsSection: navSections.includes("skills"),
+      hasConnectorsSection: navSections.includes("connectors"),
+      skillsLabel: nav.some((n) => n.includes("スキル")),
+      connectorsLabel: nav.some((n) => n.includes("コネクタ")),
       todoChip: !!document.querySelector("#todo-progress"),
       todoFn: typeof refreshTodoProgress === "function",
       gearLeftOfGauge: !!(gear && gauge) && (gear.compareDocumentPosition(gauge) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
@@ -1653,6 +1661,13 @@ try {
     props?.hasProposalsSection === false,
     "settings has no proposals section",
     JSON.stringify(props?.nav),
+  );
+  check(
+    props?.hasExtensionsSection === false &&
+      props?.hasSkillsSection === true && props?.hasConnectorsSection === true &&
+      props?.skillsLabel === true && props?.connectorsLabel === true,
+    "settings replaces Extensions with independent Skills and Connectors sections",
+    JSON.stringify(props),
   );
   check(
     props?.todoChip === true && props?.todoFn === true,
@@ -1673,9 +1688,13 @@ try {
   // ---- skills: filter + bulk delete ---------------------------------------
   const extUi = await evalOnce(`(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-    openSettingsModal("extensions");
-    await sleep(900);
+    openSettingsModal("skills");
     const c = document.querySelector("#settings-content");
+    for (let i = 0; i < 50; i++) {
+      const summary = c.querySelector(".skill-details summary")?.textContent?.trim() ?? "";
+      if (summary || c.querySelector(".status-err")) break;
+      await sleep(100);
+    }
     const rows = [...c.querySelectorAll(".skill-row")];
     const external = rows.filter((r) => r.classList.contains("skill-external"));
     const familiar = rows.filter((r) => !r.classList.contains("skill-external"));
@@ -1684,7 +1703,11 @@ try {
     const firstExternal = external[0];
     if (firstExternal) {
       firstExternal.querySelector(".skill-open").click();
-      await sleep(700);
+      for (let i = 0; i < 20; i++) {
+        const next = firstExternal.nextElementSibling;
+        if (next?.classList.contains("skill-editor")) break;
+        await sleep(100);
+      }
       const ed = firstExternal.nextElementSibling;
       if (ed && ed.classList.contains("skill-editor")) {
         const acts = [...ed.querySelectorAll(".skill-editor-actions button")];
@@ -1696,6 +1719,9 @@ try {
       }
     }
     const res = {
+      skillsCard: !!c.querySelector('.card[data-section="skills"]'),
+      hasMcp: !!c.querySelector('.card[data-section="mcp"]'),
+      hasLsp: !!c.querySelector('.card[data-section="lsp"]'),
       filter: !!c.querySelector(".skill-toolbar .skill-filter"),
       selAll: [...c.querySelectorAll(".skill-toolbar .ghost")].some((b) => /選択|select all/i.test(b.textContent)),
       delDisabled: !!c.querySelector(".skill-toolbar .ghost.danger")?.disabled,
@@ -1708,6 +1734,11 @@ try {
     closeSettingsModal();
     return res;
   })()`);
+  check(
+    extUi?.skillsCard === true && extUi?.hasMcp === false && extUi?.hasLsp === false,
+    "the Skills section owns only the skills catalog",
+    JSON.stringify(extUi),
+  );
   check(
     extUi?.filter === true && extUi?.selAll === true && extUi?.delDisabled === true,
     "the skills section has a filter and a (disabled) bulk delete",
@@ -1724,6 +1755,37 @@ try {
         extUi?.extEditor?.deleteHidden === true),
     "an external skill opens as a view-only editor (no save, no delete)",
     JSON.stringify(extUi?.extEditor),
+  );
+
+  // ---- connectors: service settings + MCP / LSP servers --------------------
+  const connectorUi = await evalOnce(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    openSettingsModal("connectors");
+    const c = document.querySelector("#settings-content");
+    for (let i = 0; i < 50; i++) {
+      const ready = !!c.querySelector('.card[data-section="mcp"]') &&
+        !!c.querySelector('.card[data-section="lsp"]') &&
+        !!c.querySelector('.card[data-connector="google"]') &&
+        !!c.querySelector('.card[data-connector="github"]');
+      if (ready) break;
+      await sleep(100);
+    }
+    const res = {
+      mcp: !!c.querySelector('.card[data-section="mcp"]'),
+      lsp: !!c.querySelector('.card[data-section="lsp"]'),
+      google: !!c.querySelector('.card[data-connector="google"]'),
+      github: !!c.querySelector('.card[data-connector="github"]'),
+      skillsCard: !!c.querySelector('.card[data-section="skills"]'),
+    };
+    closeSettingsModal();
+    return res;
+  })()`);
+  check(
+    connectorUi?.mcp === true && connectorUi?.lsp === true &&
+      connectorUi?.google === true && connectorUi?.github === true &&
+      connectorUi?.skillsCard === false,
+    "the Connectors section owns MCP, LSP, and external-service settings",
+    JSON.stringify(connectorUi),
   );
 
   // ---- rich file previews (csv / json / office) ---------------------------
@@ -2073,9 +2135,20 @@ try {
     const content = (document.querySelector("#settings-content")?.textContent ?? "").slice(0, 120);
     closeSettingsModal();
     setLang("ja");
-    return { changed: navJa !== navEn, cjkInContent: /[\\u3040-\\u30ff\\u3400-\\u9fff]/.test(content) };
+    return {
+      changed: navJa !== navEn,
+      cjkInContent: /[\\u3040-\\u30ff\\u3400-\\u9fff]/.test(content),
+      skillsEn: navEn.includes("Skills"),
+      connectorsEn: navEn.includes("Connectors"),
+      extensionsEn: navEn.includes("Extensions"),
+    };
   })()`);
   check(langSwitch?.changed === true, "switching language updates the settings nav immediately", JSON.stringify(langSwitch));
+  check(
+    langSwitch?.skillsEn === true && langSwitch?.connectorsEn === true && langSwitch?.extensionsEn === false,
+    "the English settings nav exposes Skills and Connectors without Extensions",
+    JSON.stringify(langSwitch),
+  );
   check(langSwitch?.cjkInContent === false, "switching language updates the settings panel immediately", JSON.stringify(langSwitch));
 
   // ---- left rail collapse / session tabs / labelled settings button --------

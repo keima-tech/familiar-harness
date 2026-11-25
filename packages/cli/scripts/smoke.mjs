@@ -643,6 +643,13 @@ console.log("— scenario I: web ui transport —");
     "web UI: skills filter/bulk wired; external skills are view-only",
   );
   assert(
+    appJs.includes('id: "skills"') && appJs.includes('labelKey: "nav.skills"') &&
+      appJs.includes('id: "connectors"') && !appJs.includes('id: "extensions"') &&
+      appJs.includes("renderSkillsSection") && appJs.includes("buildMcpServersCard") &&
+      appJs.includes("buildLspServersCard"),
+    "web UI: Skills and Connectors replace the Extensions settings section",
+  );
+  assert(
     !page.includes('id="stop"') && appJs.includes("steerRunningTurn") &&
       appJs.includes('rpc("session.steer"') && appJs.includes("mobileComposer") &&
       appJs.includes("composer.phMobile"),

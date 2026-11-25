@@ -182,10 +182,10 @@ const STR = {
     "skills.suggestTitle": "AI がスキルの作成を提案しています",
     "skills.approveCreate": "承認して作成",
     "skills.rejectShort": "却下",
-    "skills.createdMsg": "スキルを作成しました — 設定 → 拡張機能 で編集できます",
+    "skills.createdMsg": "スキルを作成しました — 設定 → スキル で編集できます",
     "skills.rejectedMsg": "提案を却下しました",
     "skills.dismiss": "閉じる",
-    "skills.dismissTitle": "このカードを閉じます(提案は設定 → 拡張機能 に残ります)",
+    "skills.dismissTitle": "このカードを閉じます",
     "skills.partialResult": "{0} 件成功 / {1} 件失敗: {2}",
     "skills.stale": "適用不可 — 対象のスキルが提案後に変更されています",
     "skills.staleShort": "適用不可(対象が変更済み)",
@@ -342,7 +342,7 @@ const STR = {
     "nav.transcript": "トランスクリプト",
     "nav.shortcuts": "ショートカット",
     "nav.providers": "プロバイダー",
-    "nav.extensions": "拡張機能",
+    "nav.skills": "スキル",
     "nav.templates": "テンプレート",
     "nav.connectors": "コネクタ",
     "nav.connections": "接続",
@@ -784,10 +784,10 @@ const STR = {
     "skills.suggestTitle": "The AI suggests creating a skill",
     "skills.approveCreate": "approve & create",
     "skills.rejectShort": "dismiss",
-    "skills.createdMsg": "skill created — edit it in Settings → Extensions",
+    "skills.createdMsg": "skill created — edit it in Settings → Skills",
     "skills.rejectedMsg": "proposal dismissed",
     "skills.dismiss": "Dismiss",
-    "skills.dismissTitle": "close this card (proposals stay in Settings → Extensions)",
+    "skills.dismissTitle": "close this card",
     "skills.partialResult": "{0} succeeded / {1} failed: {2}",
     "skills.stale": "cannot apply — the target skill changed after this proposal was staged",
     "skills.staleShort": "stale (target changed)",
@@ -944,7 +944,7 @@ const STR = {
     "nav.transcript": "Transcript",
     "nav.shortcuts": "Shortcuts",
     "nav.providers": "Providers",
-    "nav.extensions": "Extensions",
+    "nav.skills": "Skills",
     "nav.templates": "Templates",
     "nav.connectors": "Connectors",
     "nav.connections": "Connections",
@@ -3931,7 +3931,7 @@ async function maybeSuggestSkills() {
     card.append(body, actions);
     tr.appendChild(card);
     scrollBottom();
-    // ✕ closes the card only — the proposals stay in Settings → Extensions
+    // ✕ closes the suggestion card only; the staged proposal remains server-side
     dismiss.addEventListener("click", () => card.remove());
     // approve/reject each proposal independently so one stale item
     // (e.g. a CAS-refused patch) cannot block the rest
@@ -4735,7 +4735,7 @@ const SETTINGS_SECTIONS = [
   { id: "transcript", labelKey: "nav.transcript", icon: "▤" },
   { id: "shortcuts", labelKey: "nav.shortcuts", icon: "⌘" },
   { id: "providers", labelKey: "nav.providers", icon: "▣" },
-  { id: "extensions", labelKey: "nav.extensions", icon: "↯" },
+  { id: "skills", labelKey: "nav.skills", icon: "✦" },
   { id: "templates", labelKey: "nav.templates", icon: "📄" },
   { id: "connectors", labelKey: "nav.connectors", icon: "🔗" },
   { id: "connections", labelKey: "nav.connections", icon: "🖥" },
@@ -4766,6 +4766,7 @@ function renderSettingsNav() {
     const item = document.createElement("button");
     item.type = "button";
     item.className = `nav-item${s.id === settingsSection ? " active" : ""}`;
+    item.dataset.section = s.id;
     item.innerHTML = `<span class="ni">${esc(s.icon)}</span>${esc(t(s.labelKey))}`;
     item.addEventListener("click", () => {
       settingsSection = s.id;
@@ -4787,13 +4788,19 @@ function renderSettingsSection(id) {
   else if (id === "transcript") renderTranscriptSection(content);
   else if (id === "shortcuts") renderShortcutsSection(content);
   else if (id === "providers") void renderProvidersSection(content, stale);
-  else if (id === "extensions") void renderExtensionsSection(content, stale);
+  else if (id === "skills") void renderSkillsSection(content, stale);
   else if (id === "templates") void renderTemplatesSection(content, stale);
   else if (id === "connectors") void renderConnectorsSection(content, stale);
   else if (id === "connections") void renderConnectionsSection(content, stale);
   else if (id === "cron") void renderCronSection(content, stale);
   else if (id === "approvals") void renderApprovalsSection(content, stale);
   else if (id === "system") void renderSystemSection(content, stale);
+}
+
+/** Refresh an async action's section only while it is still the active one. */
+function refreshSettingsSectionIfActive(id) {
+  if (settingsSection !== id) return;
+  renderSettingsSection(id);
 }
 
 /** Top-bar task progress ("done/total"), hidden while there is no task list. */
@@ -5393,12 +5400,13 @@ function providerCard(name, pc) {
   return wrap;
 }
 
-async function renderExtensionsSection(content, stale = () => false) {
+async function renderSkillsSection(content, stale = () => false) {
   // every append goes through here: a section the user navigated away
   // from while an RPC was in flight must not land in the new tab
   const put = (node) => { if (!stale()) content.appendChild(node); };
   // Skills (M3 self-improvement catalog)
   const skillCard = card(t("ext.skills"), t("ext.skillsDesc"));
+  skillCard.dataset.section = "skills";
   put(skillCard);
 
   // collapsible list (open by default so inline editors are usable)
@@ -5488,7 +5496,7 @@ async function renderExtensionsSection(content, stale = () => false) {
       try {
         await rpc("skills.save", { name, body: editorBody.value });
         toast(t("skills.saved", name), "ok");
-        renderSettingsSection("extensions");
+        refreshSettingsSectionIfActive("skills");
       } catch (err) {
         toast(err.message, "err");
         saveBtn.disabled = false;
@@ -5501,7 +5509,7 @@ async function renderExtensionsSection(content, stale = () => false) {
       try {
         await rpc("skills.delete", { name });
         toast(t("skills.deleted", name), "ok");
-        renderSettingsSection("extensions");
+        refreshSettingsSectionIfActive("skills");
       } catch (err) {
         toast(err.message, "err");
         delBtn.disabled = false;
@@ -5620,7 +5628,7 @@ async function renderExtensionsSection(content, stale = () => false) {
     }
     if (failed.length === 0) toast(t("skills.deletedBulk", String(ok)), "ok");
     else toast(t("skills.partialResult", String(ok), String(failed.length), failed.join(", ")), "err");
-    renderSettingsSection("extensions");
+    refreshSettingsSectionIfActive("skills");
   });
 
   try {
@@ -5636,11 +5644,29 @@ async function renderExtensionsSection(content, stale = () => false) {
     row.textContent = err.message;
     mount.appendChild(row);
   }
-  // MCP servers (proxy sessions report the ssh host's servers)
+}
+
+/** Build the MCP server card used by Settings → Connectors. */
+function buildMcpServersCard() {
+  const mcpCard = card(t("ext.mcp"), t("ext.mcpDesc"));
+  mcpCard.dataset.section = "mcp";
+  return mcpCard;
+}
+
+/** Populate the MCP card without blocking other connector settings. */
+async function fillMcpServersCard(mcpCard, stale = () => false) {
+  if (stale()) return;
   try {
     const res = await rpc("mcp.status", state.sessionId ? { session: state.sessionId } : {});
-    const mcpCard = card(t("ext.mcp"), res.remote ? `SSH: ${res.remote} · ${t("ext.mcpDesc")}` : t("ext.mcpDesc"));
-    put(mcpCard);
+    if (stale()) return;
+
+    // Proxy sessions report the SSH host's servers.
+    const note = mcpCard.querySelector(".note");
+    if (note) {
+      note.textContent = res.remote
+        ? `SSH: ${res.remote} · ${t("ext.mcpDesc")}`
+        : t("ext.mcpDesc");
+    }
     const servers = res.servers ?? [];
     if (servers.length === 0) {
       mcpCard.appendChild(pairRow("—", t("stat.noServers")));
@@ -5671,7 +5697,7 @@ async function renderExtensionsSection(content, stale = () => false) {
             ...(state.sessionId ? { session: state.sessionId } : {}),
           });
           toast(t("ext.reconnected", sv.name), "ok");
-          renderSettingsSection("extensions");
+          refreshSettingsSectionIfActive("connectors");
         } catch (err) {
           toast(t("ext.reconnectFailed", err.message), "err");
           btn.disabled = false;
@@ -5681,18 +5707,27 @@ async function renderExtensionsSection(content, stale = () => false) {
       mcpCard.appendChild(row);
     }
   } catch (err) {
-    const mcpCard = card(t("ext.mcp"), t("ext.mcpDesc"));
-    put(mcpCard);
+    if (stale()) return;
     const row = document.createElement("div");
     row.className = "status-err";
     row.textContent = err.message;
     mcpCard.appendChild(row);
   }
-  // LSP servers (config.yaml lsp.servers)
+}
+
+/** Build the LSP server card used by Settings → Connectors. */
+function buildLspServersCard() {
   const lspCard = card(t("ext.lsp"), t("ext.lspDesc"));
-  put(lspCard);
+  lspCard.dataset.section = "lsp";
+  return lspCard;
+}
+
+/** Populate the LSP card without blocking other connector settings. */
+async function fillLspServersCard(lspCard, stale = () => false) {
+  if (stale()) return;
   try {
     const cfg = await rpc("config.get");
+    if (stale()) return;
     const lsp = cfg.lsp?.servers;
     const names = lsp && typeof lsp === "object" ? Object.keys(lsp) : [];
     if (names.length === 0) {
@@ -5706,6 +5741,7 @@ async function renderExtensionsSection(content, stale = () => false) {
       ));
     }
   } catch (err) {
+    if (stale()) return;
     const row = document.createElement("div");
     row.className = "status-err";
     row.textContent = err.message;
@@ -6406,8 +6442,19 @@ async function renderConnectorsSection(content, stale = () => false) {
   // every append goes through here: a section the user navigated away
   // from while an RPC was in flight must not land in the new tab
   const put = (node) => { if (!stale()) content.appendChild(node); };
+
+  // MCP and LSP are server-side connectors and share this section. Their
+  // status/config calls load independently so a slow MCP discovery cannot
+  // block the external-service settings below.
+  const mcpCard = buildMcpServersCard();
+  const lspCard = buildLspServersCard();
+  put(mcpCard);
+  put(lspCard);
+  void fillMcpServersCard(mcpCard, stale);
+  void fillLspServersCard(lspCard, stale);
+
   if (!(await ensureNsConfig())) return;
-    if (stale()) return;
+  if (stale()) return;
   let stored = {};
   try {
     stored = (await rpc("connectors.get")).connectors ?? {};
@@ -6417,6 +6464,7 @@ async function renderConnectorsSection(content, stale = () => false) {
   }
   // ---- Google (OAuth: Gmail / カレンダー) ----
   const googleCard = card(t("conn.googleTitle"), t("conn.googleDesc"));
+  googleCard.dataset.connector = "google";
   const g = stored.google ?? {};
   const gInputs = {};
   for (const [key, label, secret] of [
@@ -6532,7 +6580,7 @@ async function renderConnectorsSection(content, stale = () => false) {
   gCal.addEventListener("click", () => void loadList("calendar"));
   gDel.addEventListener("click", async () => {
     await rpc("connectors.delete", { kind: "google" });
-    renderSettingsSection("connectors");
+    refreshSettingsSectionIfActive("connectors");
   });
   gActions.append(gSave, gAuth, gTest, gMail, gCal, gResult, gDel);
   googleCard.appendChild(gActions);
@@ -6558,6 +6606,7 @@ async function renderConnectorsSection(content, stale = () => false) {
   for (const k of KINDS) {
     const saved = stored[k.id] ?? {};
     const cardEl = card(`${k.label}`, t("conn.desc"));
+    cardEl.dataset.connector = k.id;
     const inputs = {};
     for (const [key, label, secret] of k.fields) {
       const input = document.createElement("input");
@@ -6617,7 +6666,7 @@ async function renderConnectorsSection(content, stale = () => false) {
     del.textContent = t("conn.delete");
     del.addEventListener("click", async () => {
       await rpc("connectors.delete", { kind: k.id });
-      renderSettingsSection("connectors");
+      refreshSettingsSectionIfActive("connectors");
     });
     actions.append(save, test, del, result);
     cardEl.appendChild(actions);

@@ -1577,7 +1577,7 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
   #rightpane { width: 100vw !important; }
 }
 
-/* ---- skills: filter + bulk delete (settings -> extensions) ---- */
+/* ---- skills: filter + bulk delete (settings -> skills) ---- */
 .skill-toolbar { display: flex; gap: 6px; margin-bottom: 8px; align-items: center; flex-wrap: wrap; }
 .skill-toolbar .skill-filter { flex: 1; min-width: 140px; }
 .skill-toolbar .ghost {

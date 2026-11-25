@@ -386,6 +386,18 @@ try {
   }
   check(serveUp, "embedded familiar serve is reachable");
 
+  // The page target can exist before the classic app.js script finishes
+  // evaluating. Wait for its runtime API before issuing RPC-backed checks.
+  let appReady = false;
+  for (let i = 0; i < 100 && !appReady; i++) {
+    await sleep(100);
+    appReady = await evaluate(
+      `typeof rpc === "function" && typeof openSettingsModal === "function"`,
+    ).catch(() => false);
+  }
+  check(appReady, "desktop web UI runtime is ready");
+  if (!appReady) throw new Error("Electron web UI runtime did not initialize");
+
   const isolated = await evaluate(`(async () => {
     const cfg = await rpc("config.get");
     const providers = cfg.providers ?? {};
@@ -467,6 +479,94 @@ try {
     settings?.distinctPaths === 6 && settings?.allSvgAccessible === true,
     "settings renders six distinct accessible brand shapes",
     JSON.stringify(settings),
+  );
+
+  const settingsSections = await evaluate(`(async () => {
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    openSettingsModal("general");
+    const nav = [...document.querySelectorAll("#settings-nav .nav-item")].map((item) => item.dataset.section);
+    openSettingsModal("skills");
+    for (let i = 0; i < 50; i++) {
+      const summary = document.querySelector("#settings-content .skill-details summary")?.textContent?.trim() ?? "";
+      if (summary || document.querySelector("#settings-content .status-err")) break;
+      await sleep(100);
+    }
+    const skills = {
+      card: !!document.querySelector('#settings-content .card[data-section="skills"]'),
+      mcp: !!document.querySelector('#settings-content .card[data-section="mcp"]'),
+      lsp: !!document.querySelector('#settings-content .card[data-section="lsp"]'),
+    };
+    openSettingsModal("connectors");
+    for (let i = 0; i < 50; i++) {
+      const ready = !!document.querySelector('#settings-content .card[data-section="mcp"]') &&
+        !!document.querySelector('#settings-content .card[data-section="lsp"]') &&
+        !!document.querySelector('#settings-content .card[data-connector="google"]') &&
+        !!document.querySelector('#settings-content .card[data-connector="github"]');
+      if (ready) break;
+      await sleep(100);
+    }
+    const connectors = {
+      mcp: !!document.querySelector('#settings-content .card[data-section="mcp"]'),
+      lsp: !!document.querySelector('#settings-content .card[data-section="lsp"]'),
+      skills: !!document.querySelector('#settings-content .card[data-section="skills"]'),
+      google: !!document.querySelector('#settings-content .card[data-connector="google"]'),
+      github: !!document.querySelector('#settings-content .card[data-connector="github"]'),
+    };
+    closeSettingsModal();
+    return { nav, skills, connectors };
+  })()`);
+  check(
+    settingsSections?.nav.includes("skills") && settingsSections?.nav.includes("connectors") &&
+      !settingsSections?.nav.includes("extensions"),
+    "settings navigation exposes Skills and Connectors without Extensions",
+    JSON.stringify(settingsSections?.nav),
+  );
+  check(
+    settingsSections?.skills?.card === true && settingsSections?.skills?.mcp === false &&
+      settingsSections?.skills?.lsp === false,
+    "the Skills section owns only the skills catalog",
+    JSON.stringify(settingsSections?.skills),
+  );
+  check(
+    settingsSections?.connectors?.mcp === true && settingsSections?.connectors?.lsp === true &&
+      settingsSections?.connectors?.google === true && settingsSections?.connectors?.github === true &&
+      settingsSections?.connectors?.skills === false,
+    "the Connectors section owns MCP, LSP, and external-service settings",
+    JSON.stringify(settingsSections?.connectors),
+  );
+
+  const connectorIndependence = await evaluate(`(async () => {
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const realRpc = window.rpc;
+    let releaseMcp = () => {};
+    const mcpGate = new Promise((resolve) => { releaseMcp = resolve; });
+    window.rpc = (method, params) => method === "mcp.status"
+      ? mcpGate.then(() => realRpc(method, params))
+      : realRpc(method, params);
+    try {
+      openSettingsModal("connectors");
+      const content = document.querySelector("#settings-content");
+      for (let i = 0; i < 50; i++) {
+        if (content.querySelector('.card[data-connector="google"]') &&
+            content.querySelector('.card[data-connector="github"]')) break;
+        await sleep(100);
+      }
+      const externalReady = !!content.querySelector('.card[data-connector="google"]') &&
+        !!content.querySelector('.card[data-connector="github"]');
+      const mcpPending = !content.querySelector('.card[data-section="mcp"] .pair');
+      releaseMcp();
+      await sleep(200);
+      return { externalReady, mcpPending };
+    } finally {
+      releaseMcp();
+      window.rpc = realRpc;
+      closeSettingsModal();
+    }
+  })()`);
+  check(
+    connectorIndependence?.externalReady === true && connectorIndependence?.mcpPending === true,
+    "slow MCP discovery does not block external connector settings",
+    JSON.stringify(connectorIndependence),
   );
 
   const picker = await evaluate(`(async () => {

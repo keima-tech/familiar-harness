@@ -855,6 +855,57 @@ try {
     JSON.stringify(modeCopy),
   );
 
+  const webSearchUi = await evaluate(`(async () => {
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const rpcGet = window.rpc;
+    const card = () => document.querySelector('#settings-content .card[data-section="websearch"]');
+    const waitCard = async () => {
+      for (let i = 0; i < 60; i++) {
+        if (card()?.querySelector('.perm-save')) return true;
+        await sleep(100);
+      }
+      return false;
+    };
+    const waitCfg = async (check) => {
+      for (let i = 0; i < 60; i++) {
+        const cfg = await rpcGet('config.get');
+        if (check(cfg.permissions?.websearch)) return cfg;
+        await sleep(100);
+      }
+      return null;
+    };
+    try {
+      openSettingsModal("approvals");
+      if (!(await waitCard())) return { stage: 'web-card' };
+      const sel = card().querySelector('select');
+      const input = card().querySelector('.perm-input');
+      sel.value = 'searxng';
+      input.value = '';
+      card().querySelector('.perm-save').click();
+      const guarded = [...document.querySelectorAll('#toasts .toast')]
+        .some((n) => (n.textContent ?? '').includes('エンドポイントを入力'));
+      const cfgBefore = await rpcGet('config.get');
+      const unchanged = cfgBefore.permissions?.websearch?.provider !== 'searxng';
+      input.value = 'http://127.0.0.1:8399';
+      card().querySelector('.perm-save').click();
+      const savedCfg = await waitCfg((w) => w?.provider === 'searxng' && w?.base_url === 'http://127.0.0.1:8399');
+      const saved = !!savedCfg;
+      sel.value = 'duckduckgo';
+      input.value = 'http://should-be-cleared.invalid';
+      card().querySelector('.perm-save').click();
+      const resetCfg = await waitCfg((w) => w?.provider === 'duckduckgo' && w?.base_url === '');
+      return { guarded, unchanged, saved, reset: !!resetCfg };
+    } finally {
+      closeSettingsModal();
+    }
+  })()`);
+  check(
+    webSearchUi?.guarded === true && webSearchUi?.unchanged === true &&
+      webSearchUi?.saved === true && webSearchUi?.reset === true,
+    "SearXNG endpoint is configurable from the Permissions settings, DuckDuckGo clears it",
+    JSON.stringify(webSearchUi),
+  );
+
   const picker = await evaluate(`(async () => {
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     closeSettingsModal();

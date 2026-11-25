@@ -186,7 +186,10 @@ needsApproval → required でない → 実行
 | `query` | string | 検索語 |
 | `count` | number | 既定 5(上限 20) |
 
-- バックエンド: SearXNG JSON API(`permissions.websearch.base_url`)。未設定なら設定方法のヒント付きエラー。
+- バックエンドは **DuckDuckGo HTML が既定**(API キー・設定不要)。
+  `permissions.websearch.provider: searxng` と `base_url` を設定すると SearXNG JSON API
+  を使う(インスタンスは利用者が用意する)。`searxng` なのに `base_url` が空なら
+  設定方法のヒント付きエラー。設定は「設定 → 権限」の Web 検索カードからも変更できる。
 - 返却: `n. title — url` + snippet。
 
 ### todo(セッション単位の作業リスト)

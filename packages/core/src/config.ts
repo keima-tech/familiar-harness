@@ -710,6 +710,61 @@ export function writeServerConfig(
   return servers;
 }
 
+/**
+ * Shared validation for websearch settings, used by config loading (warn and
+ * fall back to DuckDuckGo) and by the GUI write path (throw on bad input).
+ */
+export function normalizeWebSearchConfig(raw: unknown, strict = false): WebSearchConfig {
+  const fallback: WebSearchConfig = { ...DEFAULT_CONFIG.permissions.websearch };
+  const invalid = (reason: string): WebSearchConfig => {
+    if (strict) throw new Error(`websearch ${reason}`);
+    log.warn(`invalid permissions.websearch ignored: ${reason}`);
+    return fallback;
+  };
+  if (!isPlainObject(raw)) return invalid("config must be a mapping");
+  const provider = raw["provider"];
+  if (provider !== "duckduckgo" && provider !== "searxng") {
+    return invalid("provider must be duckduckgo or searxng");
+  }
+  const base = typeof raw["base_url"] === "string" ? raw["base_url"].trim().replace(/\/+$/, "") : "";
+  if (base !== "" && !/^https?:\/\//i.test(base)) {
+    return invalid("base_url must start with http:// or https://");
+  }
+  if (provider === "searxng") {
+    if (base === "") return invalid("base_url is required for searxng");
+    return { provider, base_url: base };
+  }
+  return { provider: "duckduckgo", base_url: "" };
+}
+
+/** Persist the GUI websearch settings (DuckDuckGo default / optional SearXNG). */
+export function writeWebSearchConfig(
+  provider: WebSearchConfig["provider"],
+  baseUrl: string,
+  options: LoadConfigOptions = {},
+): WebSearchConfig {
+  const next = normalizeWebSearchConfig({ provider, base_url: baseUrl }, true);
+  const file = configFilePath(options.configFile);
+  let doc: Record<string, unknown> = {};
+  if (fs.existsSync(file)) {
+    const parsed = parseYaml(fs.readFileSync(file, "utf8"));
+    if (parsed !== null && parsed !== undefined) {
+      if (!isPlainObject(parsed)) throw new Error(`config file must be a YAML mapping: ${file}`);
+      doc = parsed;
+    }
+  }
+  const permissions = isPlainObject(doc["permissions"])
+    ? (doc["permissions"] as Record<string, unknown>)
+    : ((doc["permissions"] = {}) as Record<string, unknown>);
+  permissions["websearch"] = next;
+  const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(tmp, stringifyYaml(doc), { mode: 0o600 });
+  fs.renameSync(tmp, file);
+  log.info(`websearch provider set to ${provider}`);
+  return next;
+}
+
 export interface LoadConfigOptions {
   configFile?: string;
   /** e.g. { default_provider } from CLI flags */
@@ -985,6 +1040,10 @@ export function loadConfig(options: LoadConfigOptions = {}): ResolvedConfig {
     user.deny = union(builtin.deny, user.deny);
   }
 
+  // Websearch: a hand-edited config must obey the same rules as the GUI.
+  // Invalid values fall back to DuckDuckGo instead of reaching the tool.
+  cfg.permissions.websearch = normalizeWebSearchConfig(cfg.permissions.websearch);
+
   // Provider entries: kind defaults to openai_compatible when only base_url is given.
   for (const [id, pc] of Object.entries(cfg.providers)) {
     pc.kind = pc.kind ?? "openai_compatible";
@@ -1138,8 +1197,11 @@ permissions:
     allow_domains: []
     # internal addresses are denied by default (SSRF protection)
   websearch:
-    provider: searxng
-    base_url: ""    # e.g. http://127.0.0.1:8080
+    provider: duckduckgo   # default — no API key or configuration needed
+    # SearXNG: prepare your own instance, then set:
+    #   provider: searxng
+    #   base_url: "http://127.0.0.1:8080"
+    base_url: ""    # only used when provider is searxng
 
 # Token budget guard (all limits 0 = off). Usage counts prompt+completion
 # tokens per turn (the last step's prompt + completion), tracked per session

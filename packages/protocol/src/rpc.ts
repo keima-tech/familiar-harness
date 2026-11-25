@@ -121,6 +121,7 @@ export const RPC_METHODS = [
   "mcp.status",
   "mcp.servers.set",
   "mcp.servers.delete",
+  "permissions.websearch.set",
   "lsp.servers.set",
   "lsp.servers.delete",
   "cron.status",

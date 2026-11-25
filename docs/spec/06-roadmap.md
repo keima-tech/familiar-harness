@@ -1939,3 +1939,14 @@ Web UI / サーバ RPC / CLI を含む変更のため GUI e2e も確認する。
   「Build / Plan を切替」は、4 権限モード化後に残った古い文言だった。
   「Plan ⇔ 直前の権限モード(既定: 編集を許可)」へ修正し、ja/en を同期する。
   CLI TUI の build/plan は正当な表現のため変更しない。
+
+## v0.1.0 の実装メモ㊹(2026-11-26、Web 検索の既定と SearXNG 設定 UI)
+
+- **DuckDuckGo を既定に統一**: ランタイム既定は以前から `duckduckgo` だったが、
+  `familiar init` のテンプレートと spec が `searxng` + 空 `base_url` のままで
+  ギャップがあった。テンプレートと `03-tools.md` / `05-config.md` を
+  DuckDuckGo 既定に合わせる。SearXNG は利用者が用意する任意のバックエンド。
+- **設定 → 権限に Web 検索カード**: provider(DuckDuckGo / SearXNG)と
+  SearXNG のエンドポイントを GUI から編集できるようにする。新 RPC
+  `permissions.websearch.set` が config.yaml へ永続化し、稼働中の設定へ反映する。
+  `base_url` は http(s) のみ受け付け、DuckDuckGo 選択時はクリアされる。

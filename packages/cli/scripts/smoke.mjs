@@ -667,6 +667,13 @@ console.log("— scenario I: web ui transport —");
     "web UI: Tab mode copy describes Plan and the previous permission mode, not Build/Plan",
   );
   assert(
+    appJs.includes("permissions.websearch.set") && appJs.includes("perm.webTitle") &&
+      appJs.includes("perm.webDdg") && appJs.includes("perm.webSearxng") &&
+      appJs.includes("perm.webUrl") && appJs.includes("perm.webNeedUrl") &&
+      appJs.includes("fillWebSearchCard"),
+    "web UI: Permissions exposes a web search provider/endpoint editor",
+  );
+  assert(
     !page.includes('id="stop"') && appJs.includes("steerRunningTurn") &&
       appJs.includes('rpc("session.steer"') && appJs.includes("mobileComposer") &&
       appJs.includes("composer.phMobile"),
@@ -901,6 +908,33 @@ console.log("— scenario I: web ui transport —");
       !cfgAfterServers.result?.lsp?.servers?.["smoke-lsp"],
     "deleted servers disappear from config.get",
   );
+  // Web search settings: DuckDuckGo out of the box, SearXNG endpoint via GUI RPC
+  const webDdg = await rpcCall(253, "permissions.websearch.set", { provider: "duckduckgo", base_url: "" });
+  assert(
+    webDdg.result?.ok === true && webDdg.result?.websearch?.provider === "duckduckgo",
+    "permissions.websearch.set accepts the DuckDuckGo default", JSON.stringify(webDdg.error ?? {}).slice(0, 160),
+  );
+  const webSearxng = await rpcCall(254, "permissions.websearch.set", {
+    provider: "searxng", base_url: "http://127.0.0.1:8080/",
+  });
+  assert(
+    webSearxng.result?.websearch?.base_url === "http://127.0.0.1:8080",
+    "permissions.websearch.set stores a SearXNG endpoint", JSON.stringify(webSearxng.error ?? {}).slice(0, 160),
+  );
+  const cfgWeb = await rpcCall(255, "config.get", {});
+  assert(
+    cfgWeb.result?.permissions?.websearch?.provider === "searxng" &&
+      cfgWeb.result.permissions.websearch.base_url === "http://127.0.0.1:8080",
+    "SearXNG settings appear in config.get",
+  );
+  const webBadProvider = await rpcCall(256, "permissions.websearch.set", { provider: "nope", base_url: "" });
+  const webBadEmpty = await rpcCall(257, "permissions.websearch.set", { provider: "searxng", base_url: "" });
+  const webBadUrl = await rpcCall(258, "permissions.websearch.set", { provider: "searxng", base_url: "ftp://x" });
+  assert(!!webBadProvider.error && !!webBadEmpty.error && !!webBadUrl.error, "websearch.set rejects invalid input");
+  const webBack = await rpcCall(259, "permissions.websearch.set", {
+    provider: "duckduckgo", base_url: "http://ignored.example",
+  });
+  assert(webBack.result?.websearch?.base_url === "", "choosing DuckDuckGo clears the endpoint");
   // v1.1: models.probe — list models from an endpoint that is NOT saved yet
   const probeOllama = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
     method: "POST",
@@ -1580,7 +1614,19 @@ console.log("— scenario Q: bash approval tiers —");
   const { commandDecision } = await import(
     path.join(repoRoot, "packages/core/dist/tools/permissions.js")
   );
-  const { DEFAULT_CONFIG } = await import(path.join(repoRoot, "packages/core/dist/config.js"));
+  const { DEFAULT_CONFIG, CONFIG_TEMPLATE, loadConfig: loadWebConfig } = await import(path.join(repoRoot, "packages/core/dist/config.js"));
+  assert(
+    DEFAULT_CONFIG.permissions.websearch.provider === "duckduckgo" &&
+      /websearch:\s*\n\s*provider:\s*duckduckgo/.test(CONFIG_TEMPLATE),
+    "runtime default and init template both use DuckDuckGo for web search",
+  );
+  const badWebFile = path.join(tmpBase, "websearch-invalid.yaml");
+  fs.writeFileSync(badWebFile, "version: 1\npermissions:\n  websearch:\n    provider: weird\n    base_url: ftp://x\n");
+  const badWebCfg = loadWebConfig({ configFile: badWebFile });
+  assert(
+    badWebCfg.permissions.websearch.provider === "duckduckgo" && badWebCfg.permissions.websearch.base_url === "",
+    "invalid websearch config falls back to DuckDuckGo on load",
+  );
   const bcfg = DEFAULT_CONFIG.permissions.bash;
   const table = [
     // [command, expected action]

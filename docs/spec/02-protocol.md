@@ -81,6 +81,7 @@ POST /rpc
 | `permissions.policy` | `{}` | `{ user, effective }` — bash ポリシー(ユーザー定義 + 実効) |
 | `permissions.test` | `{ command }` | `{ action: "allow"\|"ask"\|"deny", reason? }` — ルールテスタ |
 | `permissions.setPolicy` | `{ mode?, allow?, ask?, deny? }` | `{ ok: true, effective }` — 保存 + 反映 |
+| `permissions.websearch.set` | `{ provider: "duckduckgo"\|"searxng", base_url: string }` | `{ ok: true, websearch }` — config.yaml に保存 + 稼働中設定へ反映 |
 
 ### serve の静的配信(M4)
 

@@ -34,6 +34,7 @@ import {
   writeProviderToDisk,
   writeServerConfig,
   writeCronJobEnabled,
+  writeWebSearchConfig,
   readBashPolicy,
   writeBashPolicy,
   commandDecision,
@@ -68,6 +69,7 @@ import {
   type CronJob,
   type CuratorScheduler,
   type ResolvedConfig,
+  type WebSearchConfig,
   type ProviderConfig,
   type ProviderPatch,
   type SessionStore,
@@ -800,6 +802,8 @@ export class AgentServer {
         }
         return commandDecision(command, this.cfg.permissions.bash);
       }
+      case "permissions.websearch.set":
+        return this.websearchSet(params);
       case "permissions.setPolicy": {
         const asList = (v: unknown): string[] | undefined =>
           Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : undefined;
@@ -840,6 +844,24 @@ export class AgentServer {
       default:
         throw new RpcError(RPC_ERROR_METHOD_NOT_FOUND, `unknown method: ${method}`);
     }
+  }
+
+  /** Settings → Permissions → web search: persist provider + SearXNG endpoint. */
+  private websearchSet(params: Record<string, unknown>): Record<string, unknown> {
+    const provider = params["provider"];
+    if (provider !== "duckduckgo" && provider !== "searxng") {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, "provider must be duckduckgo or searxng");
+    }
+    const rawBase = str(params, "base_url") ?? "";
+    let updated: WebSearchConfig;
+    try {
+      updated = writeWebSearchConfig(provider, rawBase, { configFile: this.cfg.configFile });
+    } catch (err) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, err instanceof Error ? err.message : String(err));
+    }
+    // mutate in place: tool contexts capture the same config reference
+    this.cfg.permissions.websearch = updated;
+    return { ok: true, websearch: { ...updated } };
   }
 
   /** GUI "プロバイダー" settings: persist kind / endpoint / default model and

@@ -372,6 +372,20 @@ const STR = {
     "perm.decision.allow": "許可(承認なしで実行)",
     "perm.decision.ask": "承認が必要",
     "perm.decision.deny": "ブロック",
+    "perm.webTitle": "Web 検索",
+    "perm.webDesc": "DuckDuckGo は設定不要で利用できます。SearXNG を使う場合は、ご自身で用意したインスタンスの URL を設定してください。",
+    "perm.webProvider": "検索バックエンド",
+    "perm.webProviderHint": "duckduckgo=設定不要 / searxng=下のエンドポイントが必要",
+    "perm.webDdg": "DuckDuckGo (既定)",
+    "perm.webSearxng": "SearXNG (セルフホスト)",
+    "perm.webUrl": "SearXNG エンドポイント",
+    "perm.webUrlPh": "http://127.0.0.1:8080",
+    "perm.webUrlHint": "http(s) で始まる URL。DuckDuckGo 選択時は保存時にクリアされます。",
+    "perm.webSave": "Web 検索設定を保存",
+    "perm.webSaved": "Web 検索設定を保存しました",
+    "perm.webLoadFailed": "Web 検索設定を読み込めませんでした: {0}",
+    "perm.webBadUrl": "エンドポイントは http:// または https:// で始めてください",
+    "perm.webNeedUrl": "SearXNG を利用する場合はエンドポイントを入力してください(ご自身でインスタンスを用意してください)",
     "cron.desc": "config の cron.jobs で定義したスケジュール実行。ここから手動実行・一時停止できます。",
     "cron.empty": "スケジュールされたジョブはありません",
     "cron.once": "起動時に1回",
@@ -1006,6 +1020,20 @@ const STR = {
     "perm.decision.allow": "allowed (runs without approval)",
     "perm.decision.ask": "needs approval",
     "perm.decision.deny": "blocked",
+    "perm.webTitle": "Web search",
+    "perm.webDesc": "DuckDuckGo works with no setup. To use SearXNG, set the URL of your own instance below.",
+    "perm.webProvider": "Search backend",
+    "perm.webProviderHint": "duckduckgo = no setup / searxng = endpoint required",
+    "perm.webDdg": "DuckDuckGo (default)",
+    "perm.webSearxng": "SearXNG (self-hosted)",
+    "perm.webUrl": "SearXNG endpoint",
+    "perm.webUrlPh": "http://127.0.0.1:8080",
+    "perm.webUrlHint": "Must start with http(s). Cleared when DuckDuckGo is selected.",
+    "perm.webSave": "Save web search settings",
+    "perm.webSaved": "web search settings saved",
+    "perm.webLoadFailed": "could not load web search settings: {0}",
+    "perm.webBadUrl": "endpoint must start with http:// or https://",
+    "perm.webNeedUrl": "enter an endpoint to use SearXNG (prepare your own instance)",
     "cron.desc": "Scheduled runs from cron.jobs in config. Run now or pause from here.",
     "cron.empty": "no scheduled jobs",
     "cron.once": "once at boot",
@@ -6454,13 +6482,82 @@ async function renderConnectionsSection(content, stale = () => false) {
 }
 
 /** Settings → templates: register Office files whose design office_create reuses. */
+/** Web search editor loads independently of the bash policy RPC. */
+async function fillWebSearchCard(webCard, stale = () => false) {
+  try {
+    const cfg = await rpc("config.get");
+    if (stale()) return;
+    const web = cfg.permissions?.websearch ?? {};
+    let urlInput;
+    const providerSel = selectControl(
+      [[t("perm.webDdg"), "duckduckgo"], [t("perm.webSearxng"), "searxng"]],
+      web.provider ?? "duckduckgo",
+      () => { if (urlInput) urlInput.required = providerSel.value === "searxng"; },
+    );
+    webCard.appendChild(settingRow(t("perm.webProvider"), t("perm.webProviderHint"), providerSel));
+
+    const urlHead = document.createElement("div");
+    urlHead.className = "perm-list-head";
+    urlHead.textContent = `${t("perm.webUrl")} — ${t("perm.webUrlHint")}`;
+    urlInput = document.createElement("input");
+    urlInput.type = "text";
+    urlInput.className = "perm-input";
+    urlInput.spellcheck = false;
+    urlInput.required = providerSel.value === "searxng";
+    urlInput.placeholder = t("perm.webUrlPh");
+    urlInput.value = web.base_url ?? "";
+    const urlWrap = document.createElement("div");
+    urlWrap.className = "perm-list";
+    urlWrap.append(urlHead, urlInput);
+    webCard.appendChild(urlWrap);
+
+    const webSave = document.createElement("button");
+    webSave.type = "button";
+    webSave.className = "perm-save";
+    webSave.textContent = t("perm.webSave");
+    webSave.addEventListener("click", async () => {
+      const url = urlInput.value.trim();
+      if (providerSel.value === "searxng" && url === "") {
+        toast(t("perm.webNeedUrl"), "err");
+        return;
+      }
+      if (url !== "" && !/^https?:\/\//i.test(url)) {
+        toast(t("perm.webBadUrl"), "err");
+        return;
+      }
+      webSave.disabled = true;
+      try {
+        await rpc("permissions.websearch.set", { provider: providerSel.value, base_url: url });
+        if (stale()) return;
+        toast(t("perm.webSaved"), "ok");
+      } catch (err) {
+        if (stale()) return;
+        toast(t("perm.saveFailed", err.message), "err");
+      } finally {
+        webSave.disabled = false;
+      }
+    });
+    webCard.appendChild(webSave);
+  } catch (err) {
+    if (stale()) return;
+    const note = document.createElement("div");
+    note.className = "note";
+    note.textContent = t("perm.webLoadFailed", err.message);
+    webCard.appendChild(note);
+  }
+}
+
 async function renderApprovalsSection(content, stale = () => false) {
   const c = card(t("nav.approvals"), t("perm.desc"));
-  content.appendChild(c);
+  const webCard = card(t("perm.webTitle"), t("perm.webDesc"));
+  webCard.dataset.section = "websearch";
+  content.append(c, webCard);
+  void fillWebSearchCard(webCard, stale);
   let policy;
   try {
     policy = await rpc("permissions.policy", {});
   } catch (err) {
+    if (stale()) return;
     const note = document.createElement("div");
     note.className = "note";
     note.textContent = t("perm.loadFailed", err.message);

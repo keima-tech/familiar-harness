@@ -105,8 +105,11 @@ permissions:
       - localhost
       - 127.*.N.1          # 実装は 127.* / ::1 / 10.* / 192.168.* / 172.16-31.* / 169.254.* を包含
   websearch:               # M2
-    provider: searxng
-    base_url: ""           # 例: http://127.0.0.1:8080 (未設定なら websearch ツールはエラー+ヒント)
+    provider: duckduckgo   # 既定。API キー・追加設定なしで利用可
+    base_url: ""           # SearXNG 利用時のみ。例: http://127.0.0.1:8080
+                           # provider: searxng で base_url 空ならエラー+ヒント。
+                           # 「設定 → 権限」の Web 検索カードからも変更可。
+                           # 手編集で不正な値の場合は起動時に警告し DuckDuckGo へ戻す。
 budget:                    # トークン予算ガード(全 0 = 無効)
   max_tokens_per_session: 0 # 1 セッションの上限(例 2000000)
   max_tokens_per_day: 0     # 1 日(UTC)合計の上限(例 10000000)

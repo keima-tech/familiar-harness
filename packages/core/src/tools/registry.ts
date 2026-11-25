@@ -75,6 +75,11 @@ export class ToolRegistry {
     this.tools.set(tool.name, tool);
   }
 
+  /** Drop a dynamically registered tool (e.g. an MCP server removed in settings). */
+  unregister(name: string): void {
+    this.tools.delete(name);
+  }
+
   get(name: string): Tool | undefined {
     return this.tools.get(name);
   }

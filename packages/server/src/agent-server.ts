@@ -32,6 +32,7 @@ import {
   configFilePath,
   writeConnectorsToDisk,
   writeProviderToDisk,
+  writeServerConfig,
   writeCronJobEnabled,
   readBashPolicy,
   writeBashPolicy,
@@ -214,6 +215,8 @@ export class AgentServer {
   private mcpDiscover?: Promise<void>;
   /** MCP hubs bound to SSH hosts (proxy sessions), one per target */
   private readonly remoteMcpHubs = new Map<string, McpHub>();
+  /** Config snapshot each remote hub was built from (rebuild on GUI edits). */
+  private readonly remoteMcpHubConfigKeys = new Map<string, string>();
   /** SSH profiles + remote-serve tunnels, shared with the desktop shell */
   readonly sshConnections: SshConnectionManager;
   /** M5: lifecycle hooks */
@@ -253,6 +256,7 @@ export class AgentServer {
     this.mcp?.stopAll();
     for (const hub of this.remoteMcpHubs.values()) hub.stopAll();
     this.remoteMcpHubs.clear();
+    this.remoteMcpHubConfigKeys.clear();
     this.cronScheduler?.stop();
     if (this.uploadPruner) clearInterval(this.uploadPruner);
     this.uploadPruner = undefined;
@@ -363,14 +367,17 @@ export class AgentServer {
     if (removed > 0) log.info(`uploads: pruned ${removed} item(s) older than ${days}d`);
   }
 
-  /** MCP hub for an SSH target (lazily spawned, cached per host). */
+  /** MCP hub for an SSH target (lazily spawned, cached per host + config). */
   private remoteMcpHub(target: SessionRemote): McpHub {
     const key = `${target.user ?? ""}@${target.host}:${target.port ?? 22}:${target.identityFile ?? ""}`;
+    const configKey = JSON.stringify(this.cfg.mcp.servers);
     let hub = this.remoteMcpHubs.get(key);
-    if (!hub) {
+    if (!hub || this.remoteMcpHubConfigKeys.get(key) !== configKey) {
+      hub?.stopAll();
       hub = new McpHub(this.cfg, { remote: target });
       installMcpExitCleanup(hub);
       this.remoteMcpHubs.set(key, hub);
+      this.remoteMcpHubConfigKeys.set(key, configKey);
     }
     return hub;
   }
@@ -737,6 +744,14 @@ export class AgentServer {
         await this.mcpReady();
         return { servers: this.mcp?.status() ?? [] };
       }
+      case "mcp.servers.set":
+        return this.serverConfigSet("mcp", params);
+      case "mcp.servers.delete":
+        return this.serverConfigDelete("mcp", params);
+      case "lsp.servers.set":
+        return this.serverConfigSet("lsp", params);
+      case "lsp.servers.delete":
+        return this.serverConfigDelete("lsp", params);
       case "mcp.restart": {
         const name = str(params, "name");
         if (!name) throw new RpcError(RPC_ERROR_INVALID_PARAMS, "server name is required");
@@ -877,6 +892,94 @@ export class AgentServer {
         auth: describeAuthSource(nextPc.auth),
       },
     };
+  }
+
+  /**
+   * Settings → Connectors → servers: create/update one MCP or LSP server.
+   * Persists to config.yaml, then hot-swaps the shared config so the live
+   * MCP hub / LSP hub pick up the change without a server restart.
+   */
+  private async serverConfigSet(
+    kind: "mcp" | "lsp",
+    params: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const name = str(params, "name");
+    if (!name || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, "server name (alphanumeric) is required");
+    }
+    const command = str(params, "command")?.trim();
+    if (!command || /[\r\n]/.test(command)) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, "command must be a non-empty single line");
+    }
+    // Every GUI field is written explicitly: false / [] / null clear the old
+    // value instead of being dropped by the YAML merge. writeServerConfig
+    // removes those empty values from disk so the config stays readable.
+    const entry: Record<string, unknown> = {
+      command,
+      args: serverStringList(params["args"], "args", 64),
+    };
+    if (Object.prototype.hasOwnProperty.call(params, "timeout_ms")) {
+      // null = the timeout field was cleared in the GUI
+      entry["timeout_ms"] = serverTimeout(params["timeout_ms"]) ?? null;
+    }
+    if (kind === "mcp") {
+      // "***" values are restored by writeServerConfig from the on-disk value.
+      entry["env"] = serverEnv(params["env"]);
+      entry["read_only"] = params["read_only"] === true;
+    } else {
+      const extensions = serverStringList(params["extensions"], "extensions", 64);
+      if (extensions.length === 0) {
+        throw new RpcError(RPC_ERROR_INVALID_PARAMS, "at least one extension is required");
+      }
+      for (const ext of extensions) {
+        if (!/^[A-Za-z0-9][A-Za-z0-9+#._-]*$/.test(ext)) {
+          throw new RpcError(RPC_ERROR_INVALID_PARAMS, `invalid extension: ${ext}`);
+        }
+      }
+      entry["extensions"] = extensions;
+    }
+    entry["disabled"] = params["disabled"] === true;
+
+    const options = { configFile: this.cfg.configFile };
+    writeServerConfig(kind, name, entry, options);
+    await this.applyServerConfig(kind, options.configFile);
+    return { updated: true, name };
+  }
+
+  /** Settings → Connectors → servers: remove one MCP or LSP server. */
+  private async serverConfigDelete(
+    kind: "mcp" | "lsp",
+    params: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const name = str(params, "name");
+    if (!name || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, "server name (alphanumeric) is required");
+    }
+    const options = { configFile: this.cfg.configFile };
+    writeServerConfig(kind, name, null, options);
+    await this.applyServerConfig(kind, options.configFile);
+    return { deleted: true, name };
+  }
+
+  /** Share the freshly written subtree into the in-memory config and refresh hubs. */
+  private async applyServerConfig(kind: "mcp" | "lsp", configFile?: string): Promise<void> {
+    const fresh = loadConfig({ configFile });
+    const servers = kind === "mcp" ? fresh.mcp.servers : fresh.lsp.servers;
+    const target = kind === "mcp" ? this.cfg.mcp : this.cfg.lsp;
+    for (const key of Object.keys(target.servers)) delete target.servers[key];
+    Object.assign(target.servers, servers);
+
+    if (kind === "lsp") return; // LspHub rebuilds itself when the config key changes
+    if (!this.mcp) return; // --disable-mcp (CLI): nothing to refresh
+    const oldTools = this.mcp.tools().map((tool) => tool.name);
+    this.mcp.sync(this.cfg.mcp.servers);
+    if (this.mcp.hasServers()) installMcpExitCleanup(this.mcp);
+    this.runner.unregisterExtraTools(oldTools);
+    this.mcpDiscover = undefined;
+    // Discovery can wait on a child process handshake: keep the save RPC
+    // responsive. `mcp.status` awaits the same memoized promise, so the card
+    // shows the result once it is ready.
+    void this.mcpReady();
   }
 
   /** provider -> { model -> context window }, learned from models.list */
@@ -2567,6 +2670,50 @@ function str(params: Record<string, unknown>, key: string): string | undefined {
 function num(params: Record<string, unknown>, key: string): number | undefined {
   const v = params[key];
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+
+/** GUI server form: a list of short single-line strings (args / extensions). */
+function serverStringList(raw: unknown, label: string, max: number): string[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) throw new RpcError(RPC_ERROR_INVALID_PARAMS, `${label} must be an array`);
+  const out: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== "string") throw new RpcError(RPC_ERROR_INVALID_PARAMS, `${label} must contain strings`);
+    const value = item.trim();
+    if (value === "") continue;
+    if (/[\r\n]/.test(value)) throw new RpcError(RPC_ERROR_INVALID_PARAMS, `${label} entries must be single-line`);
+    out.push(value);
+    if (out.length > max) throw new RpcError(RPC_ERROR_INVALID_PARAMS, `${label} has too many entries`);
+  }
+  return out;
+}
+
+/** GUI server form: env keys are identifiers; "***" means "keep the saved secret". */
+function serverEnv(raw: unknown): Record<string, string> {
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new RpcError(RPC_ERROR_INVALID_PARAMS, "env must be an object");
+  }
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, `invalid env key: ${key}`);
+    }
+    if (typeof value !== "string" || /[\r\n]/.test(value)) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, `invalid env value for ${key}`);
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
+function serverTimeout(raw: unknown): number | undefined {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  const value = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(value) || value < 100 || value > 600_000) {
+    throw new RpcError(RPC_ERROR_INVALID_PARAMS, "timeout_ms must be between 100 and 600000");
+  }
+  return Math.floor(value);
 }
 
 /** Composer permission mode: ask | edit | yolo (absent → keep legacy yolo/plan). */

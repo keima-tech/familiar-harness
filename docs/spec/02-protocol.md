@@ -71,6 +71,10 @@ POST /rpc
 | `curator.run`(M4) | `{ dryRun?, consolidate? }` | `{ phase1, consolidation? }` — phase-1 遷移 + (opt-in) 統合提案の staging |
 | `mcp.status`(M5) | `{}` or `{ session? }` | `{ servers: [{ name, state, tools[], error?, reconnects, lastOkAt? }], remote? }` — 接続状態・ツール・再接続回数 |
 | `mcp.restart`(M5) | `{ name, session? }` | `{ name, servers }` — 1 サーバを再起動して再 discovery |
+| `mcp.servers.set` | `{ name, command, args?, env?, timeout_ms?, read_only?, disabled? }` | `{ updated: true, name }` — config.yaml に永続化 + 稼働中ハブを再構築 |
+| `mcp.servers.delete` | `{ name }` | `{ deleted: true, name }` |
+| `lsp.servers.set` | `{ name, command, args?, extensions, timeout_ms?, disabled? }` | `{ updated: true, name }` — config.yaml に永続化 |
+| `lsp.servers.delete` | `{ name }` | `{ deleted: true, name }` |
 | `cron.status`(M5) | `{}` | `{ started, jobs: [{ name, everyMinutes, prompt, lastRunAt?, lastStatus?, nextRunAt?, onceAtBoot, ranOnce, enabled }] }` |
 | `cron.run` | `{ name }` | `{ started: true }` — ジョブを即時実行(スケジューラ未起動でも可) |
 | `cron.setEnabled` | `{ name, enabled }` | `{ name, enabled }` — 稼働中へ反映 + config.yaml に永続化 |

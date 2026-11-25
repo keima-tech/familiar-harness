@@ -628,6 +628,88 @@ export function writeConnectorsToDisk(
   log.info(`connectors updated in ${file}`);
 }
 
+export type ServerConfigKind = "mcp" | "lsp";
+
+/**
+ * Restore `"***"` placeholders from the on-disk value so GUI round-trips never
+ * overwrite a secret with the mask. Keys absent from `incoming` are removed —
+ * the GUI sends the complete env it wants to keep.
+ */
+function restoreMaskedEnv(incoming: unknown, existing: unknown): Record<string, unknown> {
+  const prior = isPlainObject(existing) ? existing : {};
+  const out: Record<string, unknown> = {};
+  if (!isPlainObject(incoming)) return out;
+  for (const [key, value] of Object.entries(incoming)) {
+    if (value === "***") {
+      if (Object.prototype.hasOwnProperty.call(prior, key)) out[key] = prior[key];
+    } else {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+/**
+ * Persist one MCP/LSP server entry (`null` deletes it) into config.yaml.
+ * A YAML round-trip preserves every other key, including `remote` overrides
+ * that the GUI intentionally does not edit. Values are never logged.
+ */
+export function writeServerConfig(
+  kind: ServerConfigKind,
+  name: string,
+  entry: Record<string, unknown> | null,
+  options: LoadConfigOptions = {},
+): Record<string, unknown> {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) {
+    throw new Error(`invalid server name: ${name}`);
+  }
+  const file = configFilePath(options.configFile);
+  let doc: Record<string, unknown> = {};
+  if (fs.existsSync(file)) {
+    const parsed = parseYaml(fs.readFileSync(file, "utf8"));
+    if (parsed !== null && parsed !== undefined) {
+      if (!isPlainObject(parsed)) throw new Error(`config file must be a YAML mapping: ${file}`);
+      doc = parsed;
+    }
+  }
+  const section = isPlainObject(doc[kind])
+    ? (doc[kind] as Record<string, unknown>)
+    : ((doc[kind] = {}) as Record<string, unknown>);
+  const servers = isPlainObject(section["servers"])
+    ? (section["servers"] as Record<string, unknown>)
+    : ((section["servers"] = {}) as Record<string, unknown>);
+
+  if (entry === null) {
+    delete servers[name];
+  } else {
+    const existing = isPlainObject(servers[name]) ? (servers[name] as Record<string, unknown>) : {};
+    const merged: Record<string, unknown> = { ...existing };
+    // Explicit empty values mean "clear this key" — needed so GUI checkboxes
+    // and optional fields can be turned back off after being set once.
+    for (const [key, value] of Object.entries(entry)) {
+      if (value === null || value === false || value === "" ||
+          (Array.isArray(value) && value.length === 0)) {
+        delete merged[key];
+      } else {
+        merged[key] = value;
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(entry, "env")) {
+      merged["env"] = restoreMaskedEnv(entry["env"], existing["env"]);
+      if (Object.keys(merged["env"] as Record<string, unknown>).length === 0) delete merged["env"];
+    }
+    // GUI does not expose remote overrides: preserve them as-is.
+    if (isPlainObject(existing["remote"])) merged["remote"] = existing["remote"];
+    servers[name] = merged;
+  }
+  const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(tmp, stringifyYaml(doc), { mode: 0o600 });
+  fs.renameSync(tmp, file);
+  log.info(`${kind} server ${name} ${entry === null ? "removed from" : "written to"} ${file}`);
+  return servers;
+}
+
 export interface LoadConfigOptions {
   configFile?: string;
   /** e.g. { default_provider } from CLI flags */
@@ -963,6 +1045,24 @@ export function sanitizeConfigForApi(cfg: ResolvedConfig): Record<string, unknow
       }
     }
   }
+  // MCP/LSP env values may hold tokens — expose only the fact that a value
+  // exists. The GUI preserves "***" when saving (see writeServerConfig).
+  const maskServerEnvs = (section: unknown): void => {
+    if (!isPlainObject(section) || !isPlainObject(section["servers"])) return;
+    for (const server of Object.values(section["servers"] as Record<string, unknown>)) {
+      if (!isPlainObject(server)) continue;
+      const slots: unknown[] = [server["env"]];
+      if (isPlainObject(server["remote"])) slots.push((server["remote"] as Record<string, unknown>)["env"]);
+      for (const slot of slots) {
+        if (!isPlainObject(slot)) continue;
+        for (const [key, value] of Object.entries(slot as Record<string, unknown>)) {
+          if (typeof value === "string" && value !== "") (slot as Record<string, unknown>)[key] = "***";
+        }
+      }
+    }
+  };
+  maskServerEnvs(clone["mcp"]);
+  maskServerEnvs(clone["lsp"]);
   delete clone["homeDir"];
   delete clone["configFile"];
   return clone;}

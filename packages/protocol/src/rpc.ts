@@ -119,6 +119,10 @@ export const RPC_METHODS = [
   "fs.delete",
   "curator.run",
   "mcp.status",
+  "mcp.servers.set",
+  "mcp.servers.delete",
+  "lsp.servers.set",
+  "lsp.servers.delete",
   "cron.status",
 ] as const;
 

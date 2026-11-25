@@ -287,22 +287,39 @@ export class McpClient {
 export class McpHub {
   private readonly clients = new Map<string, McpClient>();
   private discovery?: Promise<void>;
+  private readonly remote?: SessionRemote;
 
-  constructor(private readonly cfg: ResolvedConfig, opts: { remote?: SessionRemote } = {}) {
-    for (const [name, serverCfg] of Object.entries(cfg.mcp?.servers ?? {})) {
+  constructor(private cfg: ResolvedConfig, opts: { remote?: SessionRemote } = {}) {
+    this.remote = opts.remote;
+    this.buildClients(cfg.mcp?.servers ?? {});
+  }
+
+  private buildClients(servers: Record<string, McpServerConfig>): void {
+    for (const [name, serverCfg] of Object.entries(servers)) {
       if (serverCfg.disabled === true) continue;
       let spec: StdioSpec | undefined;
-      if (opts.remote) {
+      if (this.remote) {
         const rc = serverCfg.remote ?? {};
         const cwd = rc.cwd ?? serverCfg.cwd;
         const env = rc.env ?? serverCfg.env;
-        spec = sshStdioSpec(opts.remote, rc.command ?? serverCfg.command, rc.args ?? serverCfg.args ?? [], {
+        spec = sshStdioSpec(this.remote, rc.command ?? serverCfg.command, rc.args ?? serverCfg.args ?? [], {
           ...(cwd ? { cwd } : {}),
           ...(env ? { env } : {}),
         });
       }
       this.clients.set(name, new McpClient(name, serverCfg, spec));
     }
+  }
+
+  /** Replace the configured servers after a GUI config change. Stops the old
+   *  children, rebuilds clients and clears the memoized discovery promise.
+   *  Callers must re-run discover() and refresh the registered tools. */
+  sync(servers: Record<string, McpServerConfig>): void {
+    this.stopAll();
+    this.clients.clear();
+    this.cfg = { ...this.cfg, mcp: { servers } };
+    this.buildClients(servers);
+    this.discovery = undefined;
   }
 
   /** Connect + tool-list every configured server (errors are recorded, not fatal). */

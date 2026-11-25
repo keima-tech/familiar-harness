@@ -655,6 +655,18 @@ console.log("— scenario I: web ui transport —");
     "web UI: Connectors separates MCP/LSP servers from external services",
   );
   assert(
+    appJs.includes("serverForm") && appJs.includes("srvAddRow") &&
+      appJs.includes('`${kind}.servers.set`') && appJs.includes('`${kind}.servers.delete`') &&
+      appJs.includes("srv.advancedNote") && appJs.includes("srv.deleteConfirm"),
+    "web UI: MCP/LSP servers can be added, edited and deleted in Connectors",
+  );
+  assert(
+    appJs.includes("Plan ⇔ 直前の権限モード") &&
+      appJs.includes("Toggle Plan and the previous permission mode") &&
+      !appJs.includes("Build / Plan"),
+    "web UI: Tab mode copy describes Plan and the previous permission mode, not Build/Plan",
+  );
+  assert(
     !page.includes('id="stop"') && appJs.includes("steerRunningTurn") &&
       appJs.includes('rpc("session.steer"') && appJs.includes("mobileComposer") &&
       appJs.includes("composer.phMobile"),
@@ -824,6 +836,71 @@ console.log("— scenario I: web ui transport —");
     }),
   }).then((r) => r.json());
   assert(!!provBad.error, "config.provider.set rejects invalid input", JSON.stringify(provBad).slice(0, 160));
+  // GUI server config: MCP/LSP set/delete, secret masking and validation
+  const mcpSet = await rpcCall(240, "mcp.servers.set", {
+    name: "smoke-mcp", command: "node", args: ["-e", "0"],
+    env: { SMOKE_TOKEN: "super-secret-123" }, read_only: true, disabled: true,
+  });
+  assert(
+    mcpSet.result?.updated === true && mcpSet.result?.name === "smoke-mcp",
+    "mcp.servers.set accepts a server", JSON.stringify(mcpSet.error ?? {}).slice(0, 160),
+  );
+  const lspSet = await rpcCall(241, "lsp.servers.set", {
+    name: "smoke-lsp", command: "node", args: ["-e", "0"], extensions: ["ts", "tsx"], disabled: true,
+  });
+  assert(
+    lspSet.result?.updated === true && lspSet.result?.name === "smoke-lsp",
+    "lsp.servers.set accepts a server", JSON.stringify(lspSet.error ?? {}).slice(0, 160),
+  );
+  const cfgServers = await rpcCall(242, "config.get", {});
+  assert(
+    cfgServers.result?.mcp?.servers?.["smoke-mcp"]?.command === "node" &&
+      cfgServers.result?.lsp?.servers?.["smoke-lsp"]?.extensions?.join(",") === "ts,tsx",
+    "configured servers appear in config.get", JSON.stringify(cfgServers.result).slice(0, 160),
+  );
+  assert(
+    cfgServers.result?.mcp?.servers?.["smoke-mcp"]?.env?.SMOKE_TOKEN === "***" &&
+      JSON.stringify(cfgServers.result).indexOf("super-secret-123") < 0,
+    "MCP env values are masked and never exposed by config.get",
+  );
+  const mcpMasked = await rpcCall(243, "mcp.servers.set", {
+    name: "smoke-mcp", command: "node", env: { SMOKE_TOKEN: "***" }, disabled: true,
+  });
+  assert(mcpMasked.result?.updated === true, "mcp.servers.set accepts a masked secret round-trip", JSON.stringify(mcpMasked.error ?? {}).slice(0, 160));
+  const mcpFlagsOn = await rpcCall(250, "mcp.servers.set", {
+    name: "smoke-mcp", command: "node", env: { SMOKE_TOKEN: "***" },
+    disabled: true, read_only: true, args: ["x"], timeout_ms: 1500,
+  });
+  assert(mcpFlagsOn.result?.updated === true, "mcp.servers.set stores optional flags", JSON.stringify(mcpFlagsOn.error ?? {}).slice(0, 160));
+  const mcpFlagsOff = await rpcCall(251, "mcp.servers.set", {
+    name: "smoke-mcp", command: "node", env: { SMOKE_TOKEN: "***" },
+    disabled: false, read_only: false, args: [], timeout_ms: null,
+  });
+  assert(mcpFlagsOff.result?.updated === true, "mcp.servers.set clears optional flags", JSON.stringify(mcpFlagsOff.error ?? {}).slice(0, 160));
+  const cfgFlagsOff = await rpcCall(252, "config.get", {});
+  const offEntry = cfgFlagsOff.result?.mcp?.servers?.["smoke-mcp"] ?? {};
+  assert(
+    offEntry.disabled === undefined && offEntry.read_only === undefined &&
+      offEntry.timeout_ms === undefined && offEntry.args === undefined &&
+      offEntry.env?.SMOKE_TOKEN === "***",
+    "unchecking flags and clearing optional fields removes them from config.yaml",
+    JSON.stringify(offEntry).slice(0, 160),
+  );
+  const yamlAfterServers = fs.readFileSync(path.join(familiarHome, "config.yaml"), "utf8");
+  assert(yamlAfterServers.includes("super-secret-123"), "masked round-trip keeps the on-disk secret");
+  const badMcpName = await rpcCall(244, "mcp.servers.set", { name: "bad!!", command: "node" });
+  const badMcpEnv = await rpcCall(245, "mcp.servers.set", { name: "x", command: "node", env: { "bad-key": "v" } });
+  const badLspExt = await rpcCall(246, "lsp.servers.set", { name: "x", command: "node", extensions: [] });
+  assert(!!badMcpName.error && !!badMcpEnv.error && !!badLspExt.error, "server config methods reject invalid input");
+  const mcpDel = await rpcCall(247, "mcp.servers.delete", { name: "smoke-mcp" });
+  const lspDel = await rpcCall(248, "lsp.servers.delete", { name: "smoke-lsp" });
+  assert(mcpDel.result?.deleted === true && lspDel.result?.deleted === true, "server config methods delete entries");
+  const cfgAfterServers = await rpcCall(249, "config.get", {});
+  assert(
+    !cfgAfterServers.result?.mcp?.servers?.["smoke-mcp"] &&
+      !cfgAfterServers.result?.lsp?.servers?.["smoke-lsp"],
+    "deleted servers disappear from config.get",
+  );
   // v1.1: models.probe — list models from an endpoint that is NOT saved yet
   const probeOllama = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
     method: "POST",

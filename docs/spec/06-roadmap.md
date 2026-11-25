@@ -60,8 +60,9 @@
 - **Web UI を OpenCode Desktop 仕様に刷新**(`packages/server/public/`):
   - メッセージ: user=右寄せバブル / assistant=ベアテキスト(吹き出し廃止) /
     ツール呼び出しは **番号付き 1 行ツール行**(`1 read path ✓ 0.3s`)でクリック展開。
-  - composer: 角丸カード内に `+`(新規)/ **Build|Plan モードチップ**(`session.send` の
-    `plan` に マップ)/ **モデルチップ**(provider+model を `session.update` で永続化、
+  - composer: 角丸カード内に `+`(新規)/ **権限モードチップ**(`Plan / 承認を求める /
+    編集を許可 / フルアクセス` の 4 択。`session.send` の `plan` と `permissionMode` に
+    マップ)/ **モデルチップ**(provider+model を `session.update` で永続化、
     未作成なら次回 create に引き継ぎ)/ 円形送信ボタン。
   - topbar: トークン使用量チップ(turn.end の加算・表示専用)、**⋯ メニュー**
     (Rename=タイトルインライン編集 / Export as Markdown=クライアント側生成 DL / Delete)、
@@ -95,8 +96,10 @@
 
 ## v0.1.0 の実装メモ③(2026-10-17 深夜、設定モーダル + Tab 切替)
 
-- **Tab で Build/Plan 切替**: keydown をグローバルで捕捉(入力系別要素内は除外、
-  `#input`/body は有効)。ON/OFF は設定で切替可(OpenCode の Tab 切替踏襲)。
+- **Tab で Plan⇔直前の権限モードを切替**: keydown をグローバルで捕捉(入力系別要素内は
+  除外、`#input`/body は有効)。初期の直前モードは `edit`(編集を許可)。ON/OFF は設定で
+  切替可(OpenCode の Tab 切替踏襲)。文言は「Build / Plan」ではなく実際の 4 モードに
+  合わせる(後日の 4 択化を反映)。
 - **設定は中央モーダル化**: 左ナビ + 右ペイン(OpenCode デスクトップの設定画面準拠)。
   セクションは 一般 / 外観 / トランスクリプト / ショートカット / プロバイダー /
   拡張機能 / システム。Esc・背景クリック・✕ で閉じる。
@@ -192,8 +195,9 @@
 - **設定画面への導線**: モデルポップオーバーと新規セッションパネルに
   「プロバイダー設定…」リンク(`.link-left`)を追加。`openSettingsModal("providers")`
   で設定モーダルをプロバイダー節から開く。
-- **モード名称は Build / Plan に**: 日本語文字列でも 構築/計画 を使わず
-  `Build` / `Plan` のまま表示する(説明文は日本語のまま)。
+- **モード名称は Plan / Ask / Edit / Yolo の 4 択**: 日本語では `Plan` / `承認を求める` /
+  `編集を許可` / `フルアクセス` を表示する(旧 Build/Plan の 2 択は廃止)。
+  Web UI に `Build` モードは存在しない。CLI TUI の build/plan とは別。
 - **アプリ名を "Familiar Harness" に**: ブラウザタブタイトル・サイドバーのロゴ・
   Electron のウィンドウ title / productName。
 ## v0.1.0 の実装メモ⑨(2026-10-17 深夜、過程の可視化・コピー・tok/s・モデルピッカー)
@@ -287,8 +291,9 @@
   padding ゼロが原因で窮屈に見えていた。`.cwd-modal` は `height: auto` +
   padding 18px + gap 12px に。
 - **スラッシュコマンド(OpenCode 互換)**: 入力欄が `/` で始まるとコマンド候補
-  (`#cmd-pop`)を出す。Enter で先頭候補を実行、Escape で閉じる。実装: /new /model
-  /plan /build /export /retry /settings /search。
+  (`#cmd-pop`)を出す。Enter で先頭候補を実行、Escape で閉じる。Web UI の実装:
+  /new /model /plan /ask /edit /yolo /export /retry /settings /search
+  (`/build` は CLI TUI 専用で Web UI にはない)。
 - **設定 > 拡張機能に「スキル (Skills)」カード**: 既存 `skills.list` RPC を表示。
   名前・説明・使用回数・本文文字数。スキルは chat で依頼(skill_manage)または
   ~/.familiar/skills/<名前>/SKILL.md 手動で追加できる。
@@ -1920,3 +1925,17 @@ Web UI / サーバ RPC / CLI を含む変更のため GUI e2e も確認する。
   mkfs はハードブロック)を追加。ssh-e2e を **95 項目**に拡張(空状態の消滅、
   実行先バッジで 2 グループ、キュー投入とドレイン、ライブなコードブロックのコピー)。
   typecheck / smoke / e2e 通過。
+
+## v0.1.0 の実装メモ㊸(2026-11-25、サーバー設定の GUI 化・モード文言の修正)
+
+- **MCP / LSP サーバーを GUI で追加・編集・削除**: 設定 → コネクタ → サーバーの
+  MCP / LSP カードに追加・編集・削除ボタンとインラインフォームを追加。
+  新しい RPC `mcp.servers.set/delete` と `lsp.servers.set/delete` が config.yaml へ
+  永続化し、MCP は稼働中ハブを再構築してツール登録を差し替える。LSP ハブは設定キーの
+  変化を検出して自動再構築。`remote` / `cwd` は GUI で編集せず保存時に保持する。
+  `config.get` の MCP / LSP `env` は `"***"` にマスクし、`"***"` の再保存時は
+  ディスク上の元値を保持する(シークレットをクライアントに送らない)。
+- **モード文言の修正**: 設定の「Tab でモード切替」説明とショートカット一覧の
+  「Build / Plan を切替」は、4 権限モード化後に残った古い文言だった。
+  「Plan ⇔ 直前の権限モード(既定: 編集を許可)」へ修正し、ja/en を同期する。
+  CLI TUI の build/plan は正当な表現のため変更しない。

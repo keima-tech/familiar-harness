@@ -122,6 +122,11 @@ export class AgentRunner {
     for (const tool of tools) this.tools.register(tool);
   }
 
+  /** Retire dynamic tools whose MCP server was removed or renamed. */
+  unregisterExtraTools(names: string[]): void {
+    for (const name of names) this.tools.unregister(name);
+  }
+
   private approval: ApprovalAdapter;
   private readonly todos?: import("@familiar/protocol").TodoStore;
   private readonly taskRunner?: (args: {

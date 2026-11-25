@@ -2215,6 +2215,24 @@ try {
   );
   check(langSwitch?.cjkInContent === false, "switching language updates the settings panel immediately", JSON.stringify(langSwitch));
 
+  const modeCopyI18n = await evalOnce(`(() => {
+    setLang("ja");
+    const ja = { desc: t("set.tabToggleDesc"), shortcut: t("sc.tab") };
+    setLang("en");
+    const en = { desc: t("set.tabToggleDesc"), shortcut: t("sc.tab") };
+    setLang("ja");
+    return { ja, en };
+  })()`);
+  check(
+    modeCopyI18n?.ja?.desc?.includes("Plan ⇔ 直前の権限モード") === true &&
+      modeCopyI18n?.ja?.shortcut?.includes("Plan ⇔ 直前の権限モード") === true &&
+      modeCopyI18n?.en?.desc?.includes("previous permission mode") === true &&
+      modeCopyI18n?.en?.shortcut?.includes("previous permission mode") === true &&
+      JSON.stringify(modeCopyI18n).indexOf("Build / Plan") < 0,
+    "Tab mode copy is synchronized in Japanese and English",
+    JSON.stringify(modeCopyI18n),
+  );
+
   // ---- left rail collapse / session tabs / labelled settings button --------
   const chrome = await evalOnce(`(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

@@ -559,7 +559,7 @@ const STR = {
     "set.enterSend": "Enter で送信",
     "set.enterSendDesc": "オン: Enter で送信・Shift+Enter で改行 / オフ: Ctrl+Enter で送信・Enter で改行",
     "set.tabToggle": "Tab でモード切替",
-    "set.tabToggleDesc": "Build / Plan を Tab キーで切り替えます(メッセージ入力中も有効)",
+    "set.tabToggleDesc": "Plan ⇔ 直前の権限モード(既定: 編集を許可)を Tab キーで切り替えます(メッセージ入力中も有効)",
     "set.notify": "通知",
     "set.notifyDesc": "turn 完了時にデスクトップ通知を送ります(推奨: ウィンドウが非フォーカス時のみ)",
     "set.notifyTitle": "デスクトップ通知",
@@ -594,7 +594,7 @@ const STR = {
     "set.toolsExpanded": "ツール行を既定で展開",
     "set.toolsExpandedDesc": "ツール呼び出しの引数と結果を最初から表示します",
     "set.shortcutsSec": "ショートカット",
-    "sc.tab": "Build / Plan を切替",
+    "sc.tab": "Plan ⇔ 直前の権限モードを切替",
     "sc.enter": "メッセージ送信",
     "sc.enterNL": "改行(Enter 送信オフ時)",
     "sc.shiftEnter": "改行",
@@ -681,7 +681,7 @@ const STR = {
     "prov.keyMissing": "キー未設定",
     "prov.none": "(なし)",
     "ext.mcp": "MCP サーバー",
-    "ext.mcpDesc": "mcp.status より(n. = そのサーバーの公開ツール数)。設定は config.yaml の mcp.servers です。",
+    "ext.mcpDesc": "mcp.status より(n. = そのサーバーの公開ツール数)。追加・編集・削除はこの画面から行えます(詳細は config.yaml の mcp.servers)。",
     "ext.reconnect": "再接続",
     "ext.reconnected": "{0} を再接続しました",
     "ext.reconnectFailed": "再接続できませんでした: {0}",
@@ -695,10 +695,38 @@ const STR = {
     "ext.skillReadOnly": "読取専用",
     "ext.skillExternalNote": "外部ルート（{0}）のスキルです。読み取り専用のため、Familiar からは編集も削除もできません。",
     "skills.close": "閉じる",
-    "ext.lspDesc": "lsp_diagnostics が使用する言語サーバー。設定は config.yaml の lsp.servers です。",
+    "ext.lspDesc": "lsp_diagnostics が使用する言語サーバー。追加・編集・削除はこの画面から行えます(詳細は config.yaml の lsp.servers)。",
     "ext.enabled": "有効",
     "ext.disabled": "無効",
     "ext.tools": "{0} ツール",
+    "srv.addMcp": "MCP サーバーを追加",
+    "srv.addLsp": "LSP サーバーを追加",
+    "srv.edit": "編集",
+    "srv.delete": "削除",
+    "srv.name": "名前",
+    "srv.namePh": "例: filesystem",
+    "srv.command": "コマンド",
+    "srv.commandPh": "例: npx (1 行で入力)",
+    "srv.args": "引数(1 行につき 1 つ)",
+    "srv.extensions": "対象拡張子(カンマ・空白区切り)",
+    "srv.env": "環境変数(1 行につき KEY=VALUE)",
+    "srv.timeout": "タイムアウト(ms・省略可)",
+    "srv.readOnly": "読み取り専用ツール",
+    "srv.disabled": "無効",
+    "srv.advancedNote": "remote 上書きと cwd はこの画面では編集しません(保存時に既存値を保持)。",
+    "srv.save": "保存",
+    "srv.cancel": "キャンセル",
+    "srv.saved": "{0} を保存しました",
+    "srv.deleted": "{0} を削除しました",
+    "srv.saveFailed": "保存できませんでした: {0}",
+    "srv.deleteFailed": "削除できませんでした: {0}",
+    "srv.loadFailed": "設定を読み込めませんでした: {0}",
+    "srv.deleteConfirm": "サーバー「{0}」を設定から削除しますか?",
+    "srv.badName": "名前は英数字で始め、英数字・._- のみ使用してください",
+    "srv.badCommand": "コマンドは 1 行で入力してください",
+    "srv.badEnv": "環境変数は KEY=VALUE の形式で入力してください",
+    "srv.badExtensions": "対象拡張子を 1 つ以上入力してください",
+    "srv.badTimeout": "タイムアウトは 100〜600000 ms で入力してください",
     "sys.desc": "カレーター(自己改善 cron)とスケジューラの現在状態。詳細はステータスドロワー、設定は config.yaml です。",
   },
   en: {
@@ -1165,7 +1193,7 @@ const STR = {
     "set.enterSend": "Send with Enter",
     "set.enterSendDesc": "On: Enter sends, Shift+Enter inserts a newline. Off: Ctrl+Enter sends, Enter inserts a newline.",
     "set.tabToggle": "Toggle mode with Tab",
-    "set.tabToggleDesc": "Toggle Build / Plan with the Tab key (also while typing)",
+    "set.tabToggleDesc": "Toggle Plan and the previous permission mode (default: Allow edits) with the Tab key (also while typing)",
     "set.notify": "Notifications",
     "set.notifyDesc": "Desktop notification when a turn completes (recommended: only while unfocused)",
     "set.notifyTitle": "Desktop notifications",
@@ -1200,7 +1228,7 @@ const STR = {
     "set.toolsExpanded": "Expand tool rows by default",
     "set.toolsExpandedDesc": "show tool arguments and results from the start",
     "set.shortcutsSec": "Shortcuts",
-    "sc.tab": "toggle Build / Plan",
+    "sc.tab": "toggle Plan / previous permission mode",
     "sc.enter": "send message",
     "sc.enterNL": "newline (Enter-to-send off)",
     "sc.shiftEnter": "new line",
@@ -1287,7 +1315,7 @@ const STR = {
     "prov.keyMissing": "key missing",
     "prov.none": "(none)",
     "ext.mcp": "MCP servers",
-    "ext.mcpDesc": "from mcp.status (n. = tools exposed by that server). Configure in config.yaml [mcp.servers].",
+    "ext.mcpDesc": "from mcp.status (n. = tools exposed by that server). Add, edit and remove servers here (advanced: config.yaml [mcp.servers]).",
     "ext.reconnect": "Reconnect",
     "ext.reconnected": "reconnected {0}",
     "ext.reconnectFailed": "reconnect failed: {0}",
@@ -1301,10 +1329,38 @@ const STR = {
     "ext.skillReadOnly": "read-only",
     "ext.skillExternalNote": "Skill from an external root ({0}) — read-only: it cannot be edited or deleted from Familiar.",
     "skills.close": "Close",
-    "ext.lspDesc": "language servers used by lsp_diagnostics. Configure in config.yaml [lsp.servers].",
+    "ext.lspDesc": "language servers used by lsp_diagnostics. Add, edit and remove servers here (advanced: config.yaml [lsp.servers]).",
     "ext.enabled": "enabled",
     "ext.disabled": "disabled",
     "ext.tools": "{0} tools",
+    "srv.addMcp": "Add MCP server",
+    "srv.addLsp": "Add LSP server",
+    "srv.edit": "Edit",
+    "srv.delete": "Delete",
+    "srv.name": "Name",
+    "srv.namePh": "e.g. filesystem",
+    "srv.command": "Command",
+    "srv.commandPh": "e.g. npx (single line)",
+    "srv.args": "Arguments (one per line)",
+    "srv.extensions": "Extensions (comma or space separated)",
+    "srv.env": "Environment (one KEY=VALUE per line)",
+    "srv.timeout": "Timeout (ms, optional)",
+    "srv.readOnly": "Read-only tools",
+    "srv.disabled": "Disabled",
+    "srv.advancedNote": "remote overrides and cwd are not edited here (saved values are preserved).",
+    "srv.save": "Save",
+    "srv.cancel": "Cancel",
+    "srv.saved": "saved {0}",
+    "srv.deleted": "deleted {0}",
+    "srv.saveFailed": "could not save: {0}",
+    "srv.deleteFailed": "could not delete: {0}",
+    "srv.loadFailed": "could not load settings: {0}",
+    "srv.deleteConfirm": "Remove server \"{0}\" from the configuration?",
+    "srv.badName": "Name must start alphanumeric and contain only letters, digits, ., _ or -",
+    "srv.badCommand": "Command must be a single line",
+    "srv.badEnv": "Environment entries must be KEY=VALUE",
+    "srv.badExtensions": "Enter at least one extension",
+    "srv.badTimeout": "Timeout must be between 100 and 600000 ms",
     "sys.desc": "Curator (self-improvement cron) and scheduler state. See the status drawer for details; configure in config.yaml.",
   },
 };
@@ -5699,7 +5755,12 @@ function buildMcpServersCard() {
 async function fillMcpServersCard(mcpCard, stale = () => false) {
   if (stale()) return;
   try {
-    const res = await rpc("mcp.status", state.sessionId ? { session: state.sessionId } : {});
+    // Status and config load together: disabled servers never spawn a client,
+    // so they appear in config.get but not in mcp.status.
+    const [res, cfg] = await Promise.all([
+      rpc("mcp.status", state.sessionId ? { session: state.sessionId } : {}),
+      rpc("config.get"),
+    ]);
     if (stale()) return;
 
     // Proxy sessions report the SSH host's servers.
@@ -5709,43 +5770,49 @@ async function fillMcpServersCard(mcpCard, stale = () => false) {
         ? `SSH: ${res.remote} · ${t("ext.mcpDesc")}`
         : t("ext.mcpDesc");
     }
-    const servers = res.servers ?? [];
-    if (servers.length === 0) {
+    const byName = new Map((res.servers ?? []).map((sv) => [sv.name, sv]));
+    const configured = cfg.mcp?.servers ?? {};
+    const names = [...new Set([...Object.keys(configured), ...byName.keys()])];
+    if (names.length === 0) {
       mcpCard.appendChild(pairRow("—", t("stat.noServers")));
     }
-    for (const sv of servers) {
-      const info =
-        `${sv.state ?? "?"} · ${t("ext.tools", (sv.tools ?? []).length)}` +
-        (sv.lastOkAt ? ` · ${t("ext.lastOk", new Date(sv.lastOkAt).toLocaleTimeString())}` : "") +
-        (sv.reconnects ? ` · ${t("ext.reconnects", String(sv.reconnects))}` : "") +
-        (sv.error ? ` · ${sv.error}` : "");
+    for (const name of names) {
+      const sv = byName.get(name);
+      const conf = configured[name] ?? {};
+      const info = sv
+        ? `${sv.state ?? "?"} · ${t("ext.tools", (sv.tools ?? []).length)}` +
+          (sv.lastOkAt ? ` · ${t("ext.lastOk", new Date(sv.lastOkAt).toLocaleTimeString())}` : "") +
+          (sv.reconnects ? ` · ${t("ext.reconnects", String(sv.reconnects))}` : "") +
+          (sv.error ? ` · ${sv.error}` : "")
+        : `${conf.disabled === true ? t("ext.disabled") : t("ext.enabled")} · ${conf.command ?? ""}`;
       const row = document.createElement("div");
       row.className = "pair";
       const k = document.createElement("span");
       k.className = "k";
-      k.textContent = sv.name ?? "(unknown)";
+      k.textContent = name;
       const v = document.createElement("span");
       v.className = "v";
       v.textContent = info;
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "ghost ext-reconnect";
-      btn.textContent = t("ext.reconnect");
-      btn.addEventListener("click", async () => {
-        btn.disabled = true;
-        try {
-          await rpc("mcp.restart", {
-            name: sv.name,
-            ...(state.sessionId ? { session: state.sessionId } : {}),
-          });
-          toast(t("ext.reconnected", sv.name), "ok");
-          refreshSettingsSectionIfActive("connectors");
-        } catch (err) {
-          toast(t("ext.reconnectFailed", err.message), "err");
-          btn.disabled = false;
-        }
-      });
-      row.append(k, v, btn);
+      const extra = [];
+      if (sv) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "ghost ext-reconnect";
+        btn.textContent = t("ext.reconnect");
+        btn.addEventListener("click", async () => {
+          btn.disabled = true;
+          try {
+            await rpc("mcp.restart", { name, ...(state.sessionId ? { session: state.sessionId } : {}) });
+            toast(t("ext.reconnected", name), "ok");
+            refreshSettingsSectionIfActive("connectors");
+          } catch (err) {
+            toast(t("ext.reconnectFailed", err.message), "err");
+            btn.disabled = false;
+          }
+        });
+        extra.push(btn);
+      }
+      row.append(k, v, srvActions("mcp", name, mcpCard, stale, extra));
       mcpCard.appendChild(row);
     }
   } catch (err) {
@@ -5754,6 +5821,8 @@ async function fillMcpServersCard(mcpCard, stale = () => false) {
     row.className = "status-err";
     row.textContent = err.message;
     mcpCard.appendChild(row);
+  } finally {
+    if (!stale()) mcpCard.appendChild(srvAddRow("mcp", mcpCard, stale));
   }
 }
 
@@ -5777,10 +5846,12 @@ async function fillLspServersCard(lspCard, stale = () => false) {
     }
     for (const name of names) {
       const conf = lsp[name] ?? {};
-      lspCard.appendChild(pairRow(
+      const row = pairRow(
         name,
         `${conf.disabled ? t("ext.disabled") : t("ext.enabled")} · ${Array.isArray(conf.extensions) ? conf.extensions.join(", ") : "?"}`,
-      ));
+      );
+      row.appendChild(srvActions("lsp", name, lspCard, stale));
+      lspCard.appendChild(row);
     }
   } catch (err) {
     if (stale()) return;
@@ -5788,6 +5859,8 @@ async function fillLspServersCard(lspCard, stale = () => false) {
     row.className = "status-err";
     row.textContent = err.message;
     lspCard.appendChild(row);
+  } finally {
+    if (!stale()) lspCard.appendChild(srvAddRow("lsp", lspCard, stale));
   }
 }
 
@@ -5795,6 +5868,193 @@ function pairRow(k, v) {
   const row = document.createElement("div");
   row.className = "pair";
   row.innerHTML = `<span class="k">${esc(String(k))}</span><span class="v">${esc(String(v))}</span>`;
+  return row;
+}
+
+// ---------------------------------------------------------------------------
+// settings → connectors → MCP/LSP server editor
+// ---------------------------------------------------------------------------
+
+function srvArgsToLines(value) {
+  return Array.isArray(value) ? value.map(String).join("\n") : "";
+}
+
+function srvLinesToArgs(text) {
+  return String(text ?? "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+}
+
+function srvEnvToText(env) {
+  return env && typeof env === "object"
+    ? Object.entries(env).map(([key, value]) => `${key}=${value}`).join("\n")
+    : "";
+}
+
+function srvTextToEnv(text) {
+  const env = {};
+  for (const raw of String(text ?? "").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line === "") continue;
+    const eq = line.indexOf("=");
+    const key = eq < 0 ? "" : line.slice(0, eq).trim();
+    if (eq <= 0 || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) throw new Error(t("srv.badEnv"));
+    env[key] = line.slice(eq + 1);
+  }
+  return env;
+}
+
+/** Inline editor for one server; `cfg` is the sanitized config.get result. */
+function serverForm(kind, name, cfg, stale) {
+  const servers = (kind === "mcp" ? cfg.mcp?.servers : cfg.lsp?.servers) ?? {};
+  const existing = name ? servers[name] : undefined;
+  const isNew = !existing;
+  const form = document.createElement("div");
+  form.className = "card srv-form";
+  form.dataset.section = `${kind}-form-${isNew ? "new" : name}`;
+  form.innerHTML = `
+    <div class="field-row"><label>${esc(t("srv.name"))}</label>
+      <input class="setting-input sf-name" type="text" spellcheck="false" placeholder="${esc(t("srv.namePh"))}" ${isNew ? "" : "readonly"} /></div>
+    <div class="field-row"><label>${esc(t("srv.command"))}</label>
+      <input class="setting-input sf-command" type="text" spellcheck="false" placeholder="${esc(t("srv.commandPh"))}" /></div>
+    <div class="field-row"><label>${esc(t("srv.args"))}</label>
+      <textarea class="setting-input sf-args" rows="2" spellcheck="false"></textarea></div>
+    ${kind === "mcp"
+      ? `<div class="field-row"><label>${esc(t("srv.env"))}</label>
+           <textarea class="setting-input sf-env" rows="2" spellcheck="false"></textarea></div>`
+      : `<div class="field-row"><label>${esc(t("srv.extensions"))}</label>
+           <input class="setting-input sf-ext" type="text" spellcheck="false" /></div>`}
+    <div class="field-row"><label>${esc(t("srv.timeout"))}</label>
+      <input class="setting-input sf-timeout" type="number" min="100" max="600000" /></div>
+    <div class="sf-flags">
+      ${kind === "mcp" ? `<label><input type="checkbox" class="sf-readonly" /> ${esc(t("srv.readOnly"))}</label>` : ""}
+      <label><input type="checkbox" class="sf-disabled" /> ${esc(t("srv.disabled"))}</label>
+    </div>
+    <p class="note">${esc(t("srv.advancedNote"))}</p>
+    <div class="form-error" hidden></div>
+    <div class="pop-actions">
+      <button type="button" class="sf-save">${esc(t("srv.save"))}</button>
+      <button type="button" class="ghost sf-cancel">${esc(t("srv.cancel"))}</button>
+    </div>`;
+
+  const nameInput = form.querySelector(".sf-name");
+  nameInput.value = name ?? "";
+  form.querySelector(".sf-command").value = existing?.command ?? "";
+  form.querySelector(".sf-args").value = srvArgsToLines(existing?.args);
+  if (kind === "mcp") form.querySelector(".sf-env").value = srvEnvToText(existing?.env);
+  else form.querySelector(".sf-ext").value = Array.isArray(existing?.extensions) ? existing.extensions.join(", ") : "";
+  form.querySelector(".sf-timeout").value = existing?.timeout_ms ?? "";
+  const readOnly = form.querySelector(".sf-readonly");
+  if (readOnly) readOnly.checked = existing?.read_only === true;
+  form.querySelector(".sf-disabled").checked = existing?.disabled === true;
+
+  const errBox = form.querySelector(".form-error");
+  const setError = (msg) => { errBox.textContent = msg || ""; errBox.hidden = !msg; };
+  form.querySelector(".sf-cancel").addEventListener("click", () => form.remove());
+
+  form.querySelector(".sf-save").addEventListener("click", async () => {
+    const finalName = nameInput.value.trim();
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(finalName)) { setError(t("srv.badName")); return; }
+    const command = form.querySelector(".sf-command").value.trim();
+    if (!command || /[\r\n]/.test(command)) { setError(t("srv.badCommand")); return; }
+    const payload = {
+      name: finalName,
+      command,
+      args: srvLinesToArgs(form.querySelector(".sf-args").value),
+    };
+    const timeout = String(form.querySelector(".sf-timeout").value).trim();
+    if (timeout === "") payload.timeout_ms = null; // explicit clear
+    else {
+      const n = Number(timeout);
+      if (!Number.isFinite(n) || n < 100 || n > 600000) { setError(t("srv.badTimeout")); return; }
+      payload.timeout_ms = n;
+    }
+    try {
+      if (kind === "mcp") {
+        payload.env = srvTextToEnv(form.querySelector(".sf-env").value);
+        payload.read_only = readOnly?.checked === true; // explicit off when unchecked
+      } else {
+        const extensions = form.querySelector(".sf-ext").value.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+        if (extensions.length === 0) { setError(t("srv.badExtensions")); return; }
+        payload.extensions = extensions;
+      }
+    } catch (err) {
+      setError(err.message);
+      return;
+    }
+    payload.disabled = form.querySelector(".sf-disabled").checked === true;
+    const saveBtn = form.querySelector(".sf-save");
+    saveBtn.disabled = true;
+    try {
+      const result = await rpc(`${kind}.servers.set`, payload);
+      if (stale()) return;
+      toast(t("srv.saved", result.name ?? finalName), "ok");
+      refreshSettingsSectionIfActive("connectors");
+    } catch (err) {
+      if (stale()) return;
+      setError(err.message);
+      toast(t("srv.saveFailed", err.message), "err");
+      saveBtn.disabled = false;
+    }
+  });
+  return form;
+}
+
+/** Fetch settings lazily (only when the user opens an editor) and insert it. */
+async function showServerForm(kind, name, card, stale) {
+  let cfg;
+  try {
+    cfg = await rpc("config.get");
+  } catch (err) {
+    if (!stale()) toast(t("srv.loadFailed", err.message), "err");
+    return;
+  }
+  if (stale()) return;
+  card.querySelectorAll(".srv-form").forEach((el) => el.remove());
+  const form = serverForm(kind, name, cfg, stale);
+  const addRow = card.querySelector(".srv-add-row");
+  if (addRow) card.insertBefore(form, addRow);
+  else card.appendChild(form);
+  form.querySelector(".sf-name")?.focus();
+  form.scrollIntoView({ block: "nearest" });
+}
+
+async function deleteServer(kind, name) {
+  if (!window.confirm(t("srv.deleteConfirm", name))) return;
+  try {
+    await rpc(`${kind}.servers.delete`, { name });
+    toast(t("srv.deleted", name), "ok");
+    refreshSettingsSectionIfActive("connectors");
+  } catch (err) {
+    toast(t("srv.deleteFailed", err.message), "err");
+  }
+}
+
+function srvActions(kind, name, card, stale, extra = []) {
+  const wrap = document.createElement("span");
+  wrap.className = "srv-actions";
+  for (const button of extra) wrap.appendChild(button);
+  const edit = document.createElement("button");
+  edit.type = "button";
+  edit.className = "ghost small srv-edit";
+  edit.textContent = t("srv.edit");
+  edit.addEventListener("click", () => { if (!stale()) void showServerForm(kind, name, card, stale); });
+  const del = document.createElement("button");
+  del.type = "button";
+  del.className = "ghost small srv-delete";
+  del.textContent = t("srv.delete");
+  del.addEventListener("click", () => { if (!stale()) void deleteServer(kind, name); });
+  wrap.append(edit, del);
+  return wrap;
+}
+
+function srvAddRow(kind, card, stale) {
+  const row = document.createElement("div");
+  row.className = "srv-add-row";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "ghost small srv-add";
+  btn.textContent = kind === "mcp" ? t("srv.addMcp") : t("srv.addLsp");
+  btn.addEventListener("click", () => { if (!stale()) void showServerForm(kind, null, card, stale); });
+  row.appendChild(btn);
   return row;
 }
 

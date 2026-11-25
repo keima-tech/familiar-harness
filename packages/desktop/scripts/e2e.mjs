@@ -735,6 +735,126 @@ try {
     JSON.stringify(connectorStaleRender),
   );
 
+  const serverConfigUi = await evaluate(`(async () => {
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const realRpc = window.rpc;
+    const realConfirm = window.confirm;
+    window.confirm = () => true;
+    const waitFor = async (fn) => {
+      for (let i = 0; i < 60; i++) {
+        if (fn()) return true;
+        await sleep(100);
+      }
+      return false;
+    };
+    const waitForCfg = async (check) => {
+      for (let i = 0; i < 60; i++) {
+        const cfg = await realRpc('config.get');
+        if (check(cfg)) return cfg;
+        await sleep(100);
+      }
+      return null;
+    };
+    const card = (section) => document.querySelector('#settings-content .card[data-section="' + section + '"]');
+    const rowFor = (section, name) => {
+      const rows = card(section) ? [...card(section).querySelectorAll('.pair')] : [];
+      return rows.find((row) => row.querySelector('.k')?.textContent === name);
+    };
+    try {
+      openSettingsModal("connectors");
+      if (!(await waitFor(() => card('mcp')?.querySelector('.srv-add')))) return { stage: 'mcp-add-button' };
+      card('mcp').querySelector('.srv-add').click();
+      if (!(await waitFor(() => card('mcp')?.querySelector('.srv-form')))) return { stage: 'mcp-form' };
+      let form = card('mcp').querySelector('.srv-form');
+      form.querySelector('.sf-name').value = 'e2e-mcp';
+      form.querySelector('.sf-command').value = 'node';
+      form.querySelector('.sf-timeout').value = '5000';
+      form.querySelector('.sf-readonly').checked = true;
+      form.querySelector('.sf-disabled').checked = true;
+      form.querySelector('.sf-save').click();
+      if (!(await waitFor(() => !!rowFor('mcp', 'e2e-mcp')))) return { stage: 'mcp-row' };
+      const cfgMcp = await waitForCfg((cfg) => !!cfg.mcp?.servers?.['e2e-mcp']);
+      const mcpAdded = cfgMcp?.mcp?.servers?.['e2e-mcp']?.command === 'node' &&
+        cfgMcp.mcp.servers['e2e-mcp'].disabled === true &&
+        cfgMcp.mcp.servers['e2e-mcp'].timeout_ms === 5000 &&
+        cfgMcp.mcp.servers['e2e-mcp'].read_only === true;
+
+      rowFor('mcp', 'e2e-mcp').querySelector('.srv-edit').click();
+      if (!(await waitFor(() => card('mcp')?.querySelector('.srv-form')))) return { stage: 'mcp-edit-form' };
+      form = card('mcp').querySelector('.srv-form');
+      form.querySelector('.sf-args').value = '-e 0';
+      form.querySelector('.sf-save').click();
+      const cfgEdited = await waitForCfg((cfg) =>
+        Array.isArray(cfg.mcp?.servers?.['e2e-mcp']?.args) &&
+        cfg.mcp.servers['e2e-mcp'].args.join(' ') === '-e 0' &&
+        cfg.mcp.servers['e2e-mcp'].timeout_ms === 5000);
+
+      // Unchecking flags and clearing optional fields must actually clear them.
+      await waitFor(() => !!rowFor('mcp', 'e2e-mcp')?.querySelector('.srv-edit'));
+      rowFor('mcp', 'e2e-mcp').querySelector('.srv-edit').click();
+      if (!(await waitFor(() => card('mcp')?.querySelector('.srv-form')))) return { stage: 'mcp-clear-form' };
+      form = card('mcp').querySelector('.srv-form');
+      form.querySelector('.sf-args').value = '';
+      form.querySelector('.sf-timeout').value = '';
+      form.querySelector('.sf-readonly').checked = false;
+      form.querySelector('.sf-save').click();
+      const cfgCleared = await waitForCfg((cfg) => {
+        const sv = cfg.mcp?.servers?.['e2e-mcp'];
+        return !!sv && sv.disabled === true && sv.read_only === undefined &&
+          sv.timeout_ms === undefined && sv.args === undefined;
+      });
+
+      if (!(await waitFor(() => card('lsp')?.querySelector('.srv-add')))) return { stage: 'lsp-add-button' };
+      card('lsp').querySelector('.srv-add').click();
+      if (!(await waitFor(() => card('lsp')?.querySelector('.srv-form')))) return { stage: 'lsp-form' };
+      form = card('lsp').querySelector('.srv-form');
+      form.querySelector('.sf-name').value = 'e2e-lsp';
+      form.querySelector('.sf-command').value = 'node';
+      form.querySelector('.sf-ext').value = 'ts, tsx';
+      form.querySelector('.sf-disabled').checked = true;
+      form.querySelector('.sf-save').click();
+      const cfgLsp = await waitForCfg((cfg) => !!cfg.lsp?.servers?.['e2e-lsp']);
+      const lspAdded = cfgLsp?.lsp?.servers?.['e2e-lsp']?.extensions?.join(',') === 'ts,tsx';
+
+      await waitFor(() => !!rowFor('mcp', 'e2e-mcp')?.querySelector('.srv-delete'));
+      rowFor('mcp', 'e2e-mcp')?.querySelector('.srv-delete')?.click();
+      await waitFor(() => !!rowFor('lsp', 'e2e-lsp')?.querySelector('.srv-delete'));
+      rowFor('lsp', 'e2e-lsp')?.querySelector('.srv-delete')?.click();
+      const deleted = !!(await waitForCfg((cfg) =>
+        !cfg.mcp?.servers?.['e2e-mcp'] && !cfg.lsp?.servers?.['e2e-lsp']));
+      return { mcpAdded, mcpEdited: !!cfgEdited, mcpCleared: !!cfgCleared, lspAdded, deleted };
+    } finally {
+      window.confirm = realConfirm;
+      closeSettingsModal();
+    }
+  })()`);
+  check(
+    serverConfigUi?.mcpAdded === true && serverConfigUi?.mcpEdited === true &&
+      serverConfigUi?.mcpCleared === true && serverConfigUi?.lspAdded === true &&
+      serverConfigUi?.deleted === true,
+    "MCP/LSP servers are added, edited and deleted from the Connectors UI",
+    JSON.stringify(serverConfigUi),
+  );
+
+  const modeCopy = await evaluate(`(async () => {
+    openSettingsModal("general");
+    const general = document.querySelector('#settings-content');
+    const tabDesc = [...general.querySelectorAll('*')]
+      .map((el) => el.textContent ?? '')
+      .find((text) => text.includes('Plan ⇔ 直前の権限モード')) ?? '';
+    openSettingsModal("shortcuts");
+    const shortcuts = document.querySelector('#settings-content').textContent ?? '';
+    closeSettingsModal();
+    return { tabDesc, shortcuts };
+  })()`);
+  check(
+    modeCopy?.tabDesc?.includes('Plan ⇔ 直前の権限モード') === true &&
+      modeCopy?.shortcuts?.includes('Plan ⇔ 直前の権限モードを切替') === true &&
+      !modeCopy?.shortcuts?.includes('Build / Plan'),
+    "Tab mode copy names Plan and the previous permission mode",
+    JSON.stringify(modeCopy),
+  );
+
   const picker = await evaluate(`(async () => {
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     closeSettingsModal();

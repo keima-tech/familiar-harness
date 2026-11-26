@@ -133,7 +133,7 @@ export function buildSystemPrompt(
     parts.push(
       "# Plan mode active\n" +
         "You are in PLAN MODE: research and design only.\n" +
-        "- Allowed tools: read-only ones (read / glob / grep / webfetch / websearch). No file edits, no commands.\n" +
+        "- Allowed tools: read-only ones (read / glob / grep / ziplist / zipread / webfetch / websearch). No file edits, no commands.\n" +
         "- Produce a concrete, step-by-step implementation plan (files to touch, approach, risks) and wait for the user to approve execution.\n" +
         "- If information is missing, ask focused questions instead of guessing.",
     );

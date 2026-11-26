@@ -111,6 +111,19 @@ type ToolOutput = { content: string; isError?: boolean };
 - 出力は ripgrep 風: `path:line: プレビュー`。
 - バイナリ判定(先頭1KB の NUL / 1MB 超)でスキップ。
 
+### ziplist / zipread(read_only・ZIP 添付)
+
+| tool | param | 説明 |
+|---|---|---|
+| `ziplist` | `path` | ZIP のエントリ名・サイズ・ディレクトリ旗を一覧(展開しない) |
+| `zipread` | `path`, `entry`, `offset?`, `limit?` | 指定エントリのテキストを1行番号付きで返す。バイナリは拒否 |
+
+- 添付された `.zip` はパス参照(`@<path>`)として挿入される。エージェントは
+  これらツールで **ディスクへ展開せずに**中身を読む(`unzip` コマンド不要)。
+- 中央ディレクトリから必要なエントリだけを inflate する専用リーダを使用。
+  上限: archive 64 MB / 5000 エントリ / 1 エントリ 8 MB(zip bomb 対策)。
+- `read` と同じく cwd 外の読み取りは承認ポリシーが適用され、plan モードでも利用可。
+
 ### bash
 
 | param | 型 | 既定 | 説明 |
@@ -216,7 +229,7 @@ needsApproval → required でない → 実行
 
 - 有効化: `session.send {plan:true}` / CLI `--plan` / chat `/plan`。
 - system prompt に計画専用の節を追加(調査と設計のみ)。
-- 広告は `read_only: true` のみ(read / glob / grep / webfetch / websearch)。
+- 広告は `read_only: true` のみ(read / glob / grep / ziplist / zipread / webfetch / websearch)。
 - 非 read_only ツールは実行されずエラー返却("not available in plan mode")。ループ継続。
 - plan は turn 単位のフラグ(セッションには保存しない)。
 

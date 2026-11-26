@@ -88,6 +88,9 @@ premises you want to survive closing a conversation.
   the daemon on that host and point the app at it.
 - **Context and cost.** Per-turn token composition, estimated USD cost, a token
   budget guard, and large tool results compressed behind handles.
+- **ZIP attachments.** Attach a `.zip` and the agent can list and read text files
+  inside it (`ziplist` / `zipread`) without extracting it to disk or needing the
+  `unzip` command.
 - **Office documents.** Word / Excel / PowerPoint generation with no extra
   dependencies.
 - **Small surface.** `yaml` + `ws`, storage on Node's built-in `node:sqlite`, no

@@ -96,7 +96,7 @@ permissions:
   files:
     bounds: cwd            # cwd | unrestricted。cwd はセッションフォルダ内の
                            # 読み書きを自由、外側をゲートする
-    read: ask              # ask | allow | deny。bounds 外の read/glob/grep の扱い
+    read: ask              # ask | allow | deny。bounds 外の read/glob/grep/ziplist/zipread の扱い
                            # (ask=承認、allow=素通し、deny=常時ブロック)。
                            # 外側への write/edit は従来どおり approveWrite が承認
   webfetch:                # M2
@@ -394,6 +394,8 @@ ssh -L 46210:127.0.0.1:46210 <user>@<server-host>
 - **非画像ファイルの添付**: `fs.upload` がリモートの
   `<ホーム>/.familiar/uploads/<session-id>/` へ書き込み、`@<リモートパス>` を挿入します
   (familiar サーバ方式でも同じ RPC を使うため、リモート側のホームに保存されます)。
+   `.zip` の添付は `@<path>` として渡され、エージェントは `ziplist` / `zipread` で
+   **展開せずに**中身を読めます(`fs.preview` 自体は zip を binary として扱います)。
 - **MCP / LSP もリモートで実行**: proxy セッションでは `mcp.servers` の各サーバーと
   `lsp.servers` の言語サーバーを **ssh 経由の stdio** で起動します(子プロセスが ssh
   クライアントになり、その stdio がリモート側プロセスの stdio になる)。ローカルとは

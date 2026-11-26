@@ -190,7 +190,7 @@ export interface PermissionsConfig {
      */
     bounds: "cwd" | "unrestricted";
     /**
-     * Policy for *reads* that fall outside `bounds` (read/glob/grep):
+     * Policy for *reads* that fall outside `bounds` (read/glob/grep/ziplist/zipread):
      * "ask" (default) prompts, "allow" lets them through, "deny" blocks.
      * Writes outside the bounds always go through approveWrite.
      */
@@ -1190,7 +1190,7 @@ permissions:
     #   Reads OUTSIDE it follow "read" below; writes outside always ask.
     # unrestricted: legacy — location never gates anything.
     bounds: cwd
-    # ask (default) | allow | deny : policy for reads (read/glob/grep) that
+    # ask (default) | allow | deny : policy for reads (read/glob/grep/ziplist/zipread) that
     # fall outside the bounds. Keeps ~/.familiar/secrets/*, ~/.ssh/*, ... visible.
     read: ask
   webfetch:

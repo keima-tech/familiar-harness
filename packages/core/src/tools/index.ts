@@ -1,5 +1,13 @@
 import { createBashTool } from "./bash.js";
-import { createEditTool, createGlobTool, createGrepTool, createReadTool, createWriteTool } from "./fs-tools.js";
+import {
+  createEditTool,
+  createGlobTool,
+  createGrepTool,
+  createReadTool,
+  createWriteTool,
+  createZipListTool,
+  createZipReadTool,
+} from "./fs-tools.js";
 import { createWebFetchTool } from "./webfetch.js";
 import { createWebSearchTool } from "./websearch.js";
 import { createConnectorTools } from "./connectors.js";
@@ -16,6 +24,7 @@ export * from "./registry.js";
 export * from "./permissions.js";
 export { createBashTool, resolveShellCommand } from "./bash.js";
 export * from "./fs-tools.js";
+export * from "./zip-read.js";
 export * from "./webfetch.js";
 export * from "./websearch.js";
 export * from "./connectors.js";
@@ -39,6 +48,8 @@ export function defaultToolRegistry(): ToolRegistry {
     createOfficeCreateTool(),
     createGlobTool(),
     createGrepTool(),
+    createZipListTool(),
+    createZipReadTool(),
     createBashTool(),
     createWebFetchTool(),
     createWebSearchTool(),

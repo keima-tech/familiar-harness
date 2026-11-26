@@ -1708,6 +1708,111 @@ console.log("— scenario Q: bash approval tiers —");
   );
   if (memBefore === null) fs.rmSync(memFile, { force: true });
   else fs.writeFileSync(memFile, memBefore);
+
+  // ZIP attachments: list/read entries in memory, no extraction or unzip binary
+  const {
+    defaultToolRegistry,
+    createZipListTool: makeZipList,
+    createZipReadTool: makeZipRead,
+    zipArchive: makeZip,
+    crc32,
+  } = await import(path.join(repoRoot, "packages/core/dist/tools/index.js"));
+  assert(
+    !!defaultToolRegistry().get("ziplist") && !!defaultToolRegistry().get("zipread"),
+    "zip tools are registered in the default toolset",
+  );
+  const zipDir = fs.mkdtempSync(path.join(os.tmpdir(), "familiar-zip-"));
+  const zipPath = path.join(zipDir, "notes.zip");
+  fs.writeFileSync(zipPath, makeZip([
+    { name: "notes.txt", data: Buffer.from("hello from zip\nsecond line\n") },
+    { name: "sub/data.bin", data: Buffer.from([0, 1, 2, 3]) },
+  ], { compress: true }));
+  const zipCtx = {
+    sessionId: "s",
+    cwd: zipDir,
+    yolo: true,
+    config: {},
+    approval: { request: async () => true },
+    backend: { path, readFile: async (p) => fs.readFileSync(p) },
+  };
+  const listed = await makeZipList().execute({ path: zipPath }, zipCtx);
+  assert(
+    listed.isError !== true && listed.content.includes("notes.txt") && listed.content.includes("sub/data.bin"),
+    "ziplist lists archive entries", listed.content,
+  );
+  const unzipped = await makeZipRead().execute({ path: zipPath, entry: "notes.txt" }, zipCtx);
+  assert(unzipped.isError !== true && unzipped.content.includes("hello from zip"), "zipread returns entry text", unzipped.content);
+  const zipBinary = await makeZipRead().execute({ path: zipPath, entry: "sub/data.bin" }, zipCtx);
+  assert(zipBinary.isError === true && /binary/.test(zipBinary.content), "zipread refuses binary entries");
+  const zipMissing = await makeZipRead().execute({ path: zipPath, entry: "nope.txt" }, zipCtx);
+  assert(zipMissing.isError === true, "zipread reports a missing entry");
+  const zipListTool = makeZipList();
+  const zipReadTool = makeZipRead();
+  assert(zipListTool.read_only === true && zipReadTool.read_only === true, "zip tools are read-only");
+  const asked = [];
+  const outsideCtx = {
+    ...zipCtx,
+    yolo: false,
+    config: { permissions: { files: { bounds: "cwd", read: "ask" } } },
+    approval: { request: async () => { asked.push(1); return false; } },
+  };
+  const outside = await zipReadTool.execute(
+    { path: path.join(zipDir, "..", "outside.zip"), entry: "notes.txt" }, outsideCtx,
+  );
+  assert(outside.isError === true && asked.length === 1, "zipread asks approval for outside-cwd files and honours denial");
+  const bigCtx = { ...zipCtx, backend: { ...zipCtx.backend, stat: async () => ({ size: 65 * 1024 * 1024 }) } };
+  const huge = await zipListTool.execute({ path: zipPath }, bigCtx);
+  assert(huge.isError === true && /64 MB/.test(huge.content), "zip tools reject >64 MB before reading the file");
+  // Data-descriptor ZIP (local sizes zero) with a prepended SFX stub.
+  const descriptorZip = (entries) => {
+    const locals = [];
+    const centrals = [];
+    let off = 0;
+    for (const [name, text] of entries) {
+      const nb = Buffer.from(name);
+      const data = Buffer.from(text);
+      const crc = crc32(data);
+      const h = Buffer.alloc(30);
+      h.writeUInt32LE(0x04034b50, 0);
+      h.writeUInt16LE(20, 4);
+      h.writeUInt16LE(0x0008, 6);
+      h.writeUInt32LE(0, 14); h.writeUInt32LE(0, 18); h.writeUInt32LE(0, 22);
+      h.writeUInt16LE(nb.length, 26); h.writeUInt16LE(0, 28);
+      const desc = Buffer.alloc(16);
+      desc.writeUInt32LE(0x08074b50, 0);
+      desc.writeUInt32LE(crc, 4);
+      desc.writeUInt32LE(data.length, 8);
+      desc.writeUInt32LE(data.length, 12);
+      const c = Buffer.alloc(46);
+      c.writeUInt32LE(0x02014b50, 0);
+      c.writeUInt16LE(20, 4); c.writeUInt16LE(20, 6); c.writeUInt16LE(0x0008, 8);
+      c.writeUInt32LE(crc, 16);
+      c.writeUInt32LE(data.length, 20); c.writeUInt32LE(data.length, 24);
+      c.writeUInt16LE(nb.length, 28);
+      c.writeUInt32LE(off, 42);
+      locals.push(h, nb, data, desc);
+      centrals.push(c, nb);
+      off += h.length + nb.length + data.length + desc.length;
+    }
+    const cd = Buffer.concat(centrals);
+    const localBuf = Buffer.concat(locals);
+    const eocd = Buffer.alloc(22);
+    eocd.writeUInt32LE(0x06054b50, 0);
+    eocd.writeUInt16LE(entries.length, 8); eocd.writeUInt16LE(entries.length, 10);
+    eocd.writeUInt32LE(cd.length, 12); eocd.writeUInt32LE(localBuf.length, 16);
+    return Buffer.concat([localBuf, cd, eocd]);
+  };
+  const sfxPath = path.join(zipDir, "sfx.zip");
+  fs.writeFileSync(sfxPath, Buffer.concat([
+    Buffer.from("SFX-STUB"),
+    descriptorZip([["first.txt", "one\n"], ["second.txt", "two\n"]]),
+  ]));
+  const sfxRead = await zipReadTool.execute({ path: sfxPath, entry: "second.txt" }, zipCtx);
+  assert(
+    sfxRead.isError !== true && sfxRead.content.includes("two"),
+    "zipread handles data-descriptor archives with a prepended SFX stub", sfxRead.content,
+  );
+  fs.rmSync(zipDir, { recursive: true, force: true });
   const bcfg = DEFAULT_CONFIG.permissions.bash;
   const table = [
     // [command, expected action]

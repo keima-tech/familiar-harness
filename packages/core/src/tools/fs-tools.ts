@@ -1,6 +1,7 @@
 import type { PlatformPath } from "node:path";
 import path from "node:path";
 import { unifiedDiff } from "./diff.js";
+import { listZip, readZipEntry, ZIP_MAX_FILE_BYTES } from "./zip-read.js";
 import type { Tool } from "./registry.js";
 import type { FileChange, ToolContext, ToolOutput } from "./registry.js";
 
@@ -519,4 +520,124 @@ function describeErr(err: unknown): string {
   if (code === "ENOENT") return "file not found";
   if (code === "EACCES") return "permission denied";
   return String((err as Error | null)?.message ?? err);
+}
+
+// ---------------------------------------------------------------------------
+// ZIP attachments — list and read members without extracting to disk
+// ---------------------------------------------------------------------------
+
+/** Check size before reading: the local backend otherwise allocates the whole file. */
+async function readZipCapped(ctx: ToolContext, absolute: string): Promise<Buffer> {
+  const max = ZIP_MAX_FILE_BYTES;
+  const tooBig = `zip exceeds ${Math.floor(max / 1024 / 1024)} MB`;
+  if (typeof ctx.backend.stat === "function") {
+    try {
+      const info = await ctx.backend.stat(absolute);
+      if (info.size > max) throw new Error(tooBig);
+    } catch (err) {
+      if (err instanceof Error && err.message === tooBig) throw err;
+      // stat may be unsupported on a backend; readFile still applies a cap
+    }
+  }
+  const buf = await ctx.backend.readFile(absolute, max + 1);
+  if (buf.length > max) throw new Error(tooBig);
+  return buf;
+}
+
+/** List members of an attached .zip (read-only, no extraction). */
+export function createZipListTool(): Tool {
+  return {
+    name: "ziplist",
+    description:
+      "List the entries inside a ZIP attachment (path, size, directory flag). Use zipread to read a text entry.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "ZIP file path (absolute, or relative to cwd)" },
+      },
+      required: ["path"],
+      additionalProperties: false,
+    },
+    read_only: true,
+    async execute(args, ctx) {
+      const argPath = typeof args.path === "string" ? args.path : "";
+      if (!argPath) return { content: "argument 'path' is required", isError: true };
+      const absolute = resolveInCwd(argPath, ctx);
+      const approved = await approveRead(ctx, absolute, {
+        tool: "ziplist",
+        summary: `read zip outside the session folder: ${absolute}`,
+      });
+      if (!approved) return { content: `[denied: read outside the session folder: ${absolute}]`, isError: true };
+      try {
+        const buf = await readZipCapped(ctx, absolute);
+        const entries = listZip(buf);
+        const shown = entries.slice(0, 200);
+        const lines = shown.map((e) =>
+          `${e.dir ? "[dir] " : ""}${e.name}  ${e.size} B`);
+        if (entries.length > shown.length) lines.push(`… ${entries.length - shown.length} more entries`);
+        return {
+          content: lines.length > 0
+            ? `${absolute}\n${lines.join("\n")}`
+            : "(empty zip archive)",
+          isError: false,
+        };
+      } catch (err) {
+        return { content: `ziplist failed: ${describeErr(err)}`, isError: true };
+      }
+    },
+  };
+}
+
+/** Read one text member of an attached .zip (never written to disk). */
+export function createZipReadTool(): Tool {
+  return {
+    name: "zipread",
+    description:
+      "Read one text entry from a ZIP file by its exact name (as shown by ziplist). Binary entries are rejected. Use offset/limit for long files.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "ZIP file path" },
+        entry: { type: "string", description: "Exact entry name inside the archive" },
+        offset: { type: "number", description: "1-based line number to start from" },
+        limit: { type: "number", description: "Maximum number of lines (default 500)" },
+      },
+      required: ["path", "entry"],
+      additionalProperties: false,
+    },
+    read_only: true,
+    async execute(args, ctx) {
+      const argPath = typeof args.path === "string" ? args.path : "";
+      const name = typeof args.entry === "string" ? args.entry : "";
+      if (!argPath || !name) {
+        return { content: "arguments 'path' and 'entry' are required", isError: true };
+      }
+      const absolute = resolveInCwd(argPath, ctx);
+      const approved = await approveRead(ctx, absolute, {
+        tool: "zipread",
+        summary: `read zip outside the session folder: ${absolute}`,
+      });
+      if (!approved) return { content: `[denied: read outside the session folder: ${absolute}]`, isError: true };
+      try {
+        const buf = await readZipCapped(ctx, absolute);
+        const data = readZipEntry(buf, name);
+        if (isBinary(data)) {
+          return {
+            content: `entry '${name}' is binary — use a dedicated tool for Office documents or extract it with bash`,
+            isError: true,
+          };
+        }
+        const all = data.toString("utf8").split("\n");
+        if (all.length > 0 && all[all.length - 1] === "") all.pop();
+        const offset = Math.max(1, Number.isFinite(args.offset) ? Number(args.offset) : 1);
+        const limit = Math.min(5_000, Math.max(1, Number.isFinite(args.limit) ? Number(args.limit) : 500));
+        const slice = all.slice(offset - 1, offset - 1 + limit);
+        let out = slice.map((line, i) => `${offset + i}\t${line.length > 2000 ? `${line.slice(0, 2000)}…` : line}`).join("\n");
+        if (slice.length < all.length) out += `\n(showing ${slice.length} of ${all.length} lines; use offset/limit)`;
+        return { content: out || "(empty entry)", isError: false };
+      } catch (err) {
+        return { content: `zipread failed: ${describeErr(err)}`, isError: true };
+      }
+    },
+  };
 }

@@ -935,6 +935,46 @@ try {
     JSON.stringify(webSearchUi),
   );
 
+  const memoryUi = await evaluate(`(async () => {
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const rpcGet = window.rpc;
+    const card = () => document.querySelector('#settings-content .card[data-section="memory"]');
+    try {
+      openSettingsModal("memory");
+      for (let i = 0; i < 60; i++) {
+        if (card()?.querySelector('.mem-textarea')) break;
+        await sleep(100);
+      }
+      const ta = card()?.querySelector('.mem-textarea');
+      if (!ta) return { stage: 'no-textarea' };
+      const initial = await rpcGet('memory.file.get');
+      ta.value = '# E2E decisions\\nAlways use mock in tests.';
+      card().querySelector('.perm-save').click();
+      let saved = false;
+      for (let i = 0; i < 60; i++) {
+        const res = await rpcGet('memory.file.get');
+        if ((res.content ?? '').includes('Always use mock in tests.')) { saved = true; break; }
+        await sleep(100);
+      }
+      openSettingsModal("general");
+      openSettingsModal("memory");
+      for (let i = 0; i < 60; i++) {
+        if (card()?.querySelector('.mem-textarea')) break;
+        await sleep(100);
+      }
+      const reloaded = (card()?.querySelector('.mem-textarea')?.value ?? '').includes('Always use mock in tests.');
+      await rpcGet('memory.file.set', { content: initial.content ?? '' });
+      return { saved, reloaded };
+    } finally {
+      closeSettingsModal();
+    }
+  })()`);
+  check(
+    memoryUi?.saved === true && memoryUi?.reloaded === true,
+    "Settings → Memory edits and reloads the user-owned MEMORY.md",
+    JSON.stringify(memoryUi),
+  );
+
   const picker = await evaluate(`(async () => {
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     closeSettingsModal();

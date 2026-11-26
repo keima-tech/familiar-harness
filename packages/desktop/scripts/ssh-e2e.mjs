@@ -2188,6 +2188,7 @@ try {
       skillsEn: navEn.includes("Skills"),
       connectorsEn: navEn.includes("Connectors"),
       websearchEn: navEn.includes("Web search"),
+      memoryEn: navEn.includes("Memory"),
       extensionsEn: navEn.includes("Extensions"),
       serverHeadingEn: serverHeading === "Servers",
       serviceHeadingEn: serviceHeading === "External services",
@@ -2200,8 +2201,9 @@ try {
   check(langSwitch?.changed === true, "switching language updates the settings nav immediately", JSON.stringify(langSwitch));
   check(
     langSwitch?.skillsEn === true && langSwitch?.connectorsEn === true &&
-      langSwitch?.websearchEn === true && langSwitch?.extensionsEn === false,
-    "the English settings nav exposes Skills, Connectors and Web search without Extensions",
+      langSwitch?.websearchEn === true && langSwitch?.memoryEn === true &&
+      langSwitch?.extensionsEn === false,
+    "the English settings nav exposes Skills, Connectors, Web search and Memory without Extensions",
     JSON.stringify(langSwitch),
   );
   check(

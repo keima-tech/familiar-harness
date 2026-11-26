@@ -62,6 +62,8 @@ POST /rpc
 | `memory.approve`(M3) | `{ id }` | `{ approved: true }`(id は 8 文字 prefix 可) |
 | `memory.reject`(M3) | `{ id }` | `{ rejected: true }` |
 | `memory.approval`(M3) | `{ set?: "on"\|"off" }` | `{ memoryWriteApproval, skillsWriteApproval }` |
+| `memory.file.get` | `{}` | `{ path, content }` — ユーザー所有の `MEMORY.md` を読む |
+| `memory.file.set` | `{ content }` | `{ ok, path, bytes, max }` — 原子書き込み(64 KiB 上限)。エージェントは自動書き込みしない |
 | `skills.list`(M3) | `{}` | `{ skills: SkillCatalogEntry[], pendingCount }` |
 | `skills.view`(M3) | `{ name }` | `{ body, warnings }` |
 | `skills.pending`(M3) | `{}` | `{ items: PendingItem[] }` |

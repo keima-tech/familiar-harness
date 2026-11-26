@@ -27,6 +27,7 @@ import type { FileChange, ToolOutput } from "../tools/registry.js";
 import { buildSystemPrompt, todoSection } from "./prompts.js";
 import type { SelfImproveContext } from "../selfimprove/context.js";
 import { memorySection, skillsSection } from "../selfimprove/memory/inject.js";
+import { userMemorySection } from "../selfimprove/memory/user-memory.js";
 import { SELF_IMPROVE_TOOLS } from "../tools/index.js";
 
 export interface RunTurnOptions {
@@ -273,8 +274,9 @@ export class AgentRunner {
         // steering messages sent since the previous step join this step's history
         appendInjections();
 
-        // Build injected prompt sections: memory + skills catalog (M3),
-        // todos first, then caller extras (later phases).
+        // Build injected prompt sections: ranked JSON memory + skills,
+        // todos, then caller extras. User-owned MEMORY.md is appended last so
+        // human-authored facts win over agent-written memory on conflict.
         const extra: string[] = [];
         if (this.selfImprove) {
           const memoryCap = this.cfg.memory?.max_prompt_chars ?? 4000;
@@ -310,6 +312,9 @@ export class AgentRunner {
               `locally spawned MCP tools are hidden in this session.`,
           );
         }
+        // Read from disk every step — never cached at session creation.
+        const userMem = userMemorySection(this.cfg.homeDir, session.cwd);
+        if (userMem.text !== "") extra.push(userMem.text);
 
         const system = buildSystemPrompt(this.cfg, {
           cwd: session.cwd,

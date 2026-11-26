@@ -197,8 +197,13 @@ cron:
 #   1. ~/.familiar/SOUL.md                       … 全セッション共通(最も弱い)
 #   2. profiles.<p>.system_prompt_file
 #      | ~/.familiar/profiles/<p>/SOUL.md        … プロファイル個別(--profile で選択)
-#   3. <cwd>/.familiar/SOUL.md                   … プロジェクト固有(最も強い)
+#   3. <cwd>/.familiar/SOUL.md                   … プロジェクト固有(ペルソナ内で最も強い)
 # 注入見出しは順に "# Persona instructions" / "# Profile instructions" / "# Project persona"。
+# MEMORY.md(ユーザー所有・手動編集。エージェントは自動書き込みしない):
+#   ~/.familiar/MEMORY.md        … 全セッションの毎ターンに注入
+#   <cwd>/.familiar/MEMORY.md    … その cwd のセッションのみ(後勝ち)
+# JSON の memory store(承認制・関連度ランキング付き)とは別に併用する。
+# ペルソナ層より後に注入され、JSON memory より後ろ(最終勝ち)になる。
 lsp:
   servers:
     # typescript: { command: typescript-language-server, args: ["--stdio"], extensions: [ts, tsx, js, jsx] }
@@ -258,6 +263,8 @@ provider 名・model 名はマークと併記し、装飾用の SVG 自体はス
     削除できる。LSP ハブは設定の変更を検出して再構築する。
 - **Web検索**: `permissions.websearch` の provider / SearXNG エンドポイントを編集する
   独立した設定項目(DuckDuckGo が既定)。「権限」には bash ポリシーのみを残す。
+- **メモリ**: `~/.familiar/MEMORY.md` を設定画面から編集する。決定事項・前提を
+  人間が管理するファイルで、エージェントは自動更新しない(毎ターン注入)。
 - 旧 **拡張機能** 項目は、内容を上記2項目へ移設したため廃止する。スキル作成完了の
   メッセージから「拡張機能」への案内も、それぞれ「設定 → スキル」へ更新する。
 

@@ -67,6 +67,12 @@ mutation to a ledger, and snapshots the skill tree before a consolidation pass
 (`familiar curator rollback <id>`). `familiar demo` runs this whole loop offline against
 a throw-away home directory.
 
+Separately from that agent-written memory, you can keep a hand-edited
+`~/.familiar/MEMORY.md` (all sessions) and `<cwd>/.familiar/MEMORY.md` (that
+project only). Both are loaded every turn and are never rewritten by the agent —
+edit them directly or from **Settings → Memory**. Use them for decisions and
+premises you want to survive closing a conversation.
+
 ## Features
 
 - **Approvals.** Risky tool calls go through an approval adapter; `--plan` limits a

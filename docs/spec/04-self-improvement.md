@@ -15,6 +15,21 @@
 
 Hermes Agent の実装を参考に、以下の 5 部品で構成する。**memory は「常時コンテキストに載る小さな事実」、skills は「関連時のみロードする手続き」**という役割分担が原則。
 
+## ユーザー所有の MEMORY.md(手動編集可能な記憶)
+
+- `~/.familiar/MEMORY.md`(全セッション)と `<cwd>/.familiar/MEMORY.md`(その cwd のセッションのみ)を、
+  **毎ターン・毎ステップ**でシステムプロンプトへ注入する(`selfimprove/memory/user-memory.ts` → `agent/loop.ts`)。
+- JSON の memory store とは別物。**エージェントは自動書き込みせず**、利用者がエディタまたは
+  「設定 → メモリ」のテキストエリアから編集する。承認 staging や CAS は不要。
+- 関連度ランキングはかけず全文を注入する(既定上限 8000 文字、超過分は切り詰めを明記)。
+  JSON memory は関連度ランキング付きで別セクションとして注入され、両者は併用する。
+  注入順は JSON memory → ユーザー MEMORY.md(global → project)で、ユーザー所有の
+  プロジェクト版が最終的に優先される。SOUL.md などのペルソナ層より後に注入される
+  (人格・指示と事実・決定事項で役割が異なる)。
+- 書き込み RPC は `memory.file.get` / `memory.file.set`。`set` は tmp + rename の原子書き込み、
+  0644 ではなく 0600、上限 64 KiB。
+- SOUL.md が「人格・指示」、MEMORY.md が「事実・決定事項」であることをドキュメント上で区別する。
+
 ```
   turn 完了
     │

@@ -353,6 +353,7 @@ const STR = {
     "nav.cron": "Cron",
     "nav.approvals": "権限",
     "nav.websearch": "Web検索",
+    "nav.memory": "メモリ",
     "nav.system": "このアプリについて",
     "perm.desc": "bash コマンドの allow/ask/deny ポリシーを編集できます。組み込みの保護パターンは常に union されます。下のテスターで判定を確認できます。",
     "perm.mode": "既定モード",
@@ -386,6 +387,13 @@ const STR = {
     "perm.webLoadFailed": "Web 検索設定を読み込めませんでした: {0}",
     "perm.webBadUrl": "エンドポイントは http:// または https:// で始めてください",
     "perm.webNeedUrl": "SearXNG を利用する場合はエンドポイントを入力してください(ご自身でインスタンスを用意してください)",
+    "mem.desc": "ここに書いた決定事項や前提は、すべてのセッションで毎ターン読み込まれます。エージェントはこのファイルを自動変更しません。",
+    "mem.path": "保存先: {0}",
+    "mem.projectHint": "プロジェクト固有の内容は <cwd>/.familiar/MEMORY.md に書くと、そのフォルダのセッションだけに読み込まれます。",
+    "mem.save": "MEMORY.md を保存",
+    "mem.saved": "MEMORY.md を保存しました",
+    "mem.saveFailed": "保存できませんでした: {0}",
+    "mem.loadFailed": "読み込めませんでした: {0}",
     "cron.desc": "config の cron.jobs で定義したスケジュール実行。ここから手動実行・一時停止できます。",
     "cron.empty": "スケジュールされたジョブはありません",
     "cron.once": "起動時に1回",
@@ -1001,6 +1009,7 @@ const STR = {
     "nav.cron": "Cron",
     "nav.approvals": "Permissions",
     "nav.websearch": "Web search",
+    "nav.memory": "Memory",
     "nav.system": "About",
     "perm.desc": "Edit the bash allow/ask/deny policy. Built-in guards are always unioned in. Use the tester below to check a command.",
     "perm.mode": "Default mode",
@@ -1034,6 +1043,13 @@ const STR = {
     "perm.webLoadFailed": "could not load web search settings: {0}",
     "perm.webBadUrl": "endpoint must start with http:// or https://",
     "perm.webNeedUrl": "enter an endpoint to use SearXNG (prepare your own instance)",
+    "mem.desc": "Decisions and premises written here are loaded every turn in every session. The agent never rewrites this file automatically.",
+    "mem.path": "Saved at: {0}",
+    "mem.projectHint": "Project-specific notes in <cwd>/.familiar/MEMORY.md are loaded only for sessions in that folder.",
+    "mem.save": "Save MEMORY.md",
+    "mem.saved": "MEMORY.md saved",
+    "mem.saveFailed": "could not save: {0}",
+    "mem.loadFailed": "could not load: {0}",
     "cron.desc": "Scheduled runs from cron.jobs in config. Run now or pause from here.",
     "cron.empty": "no scheduled jobs",
     "cron.once": "once at boot",
@@ -4831,6 +4847,7 @@ const SETTINGS_SECTIONS = [
   { id: "templates", labelKey: "nav.templates", icon: "📄" },
   { id: "connectors", labelKey: "nav.connectors", icon: "🔗" },
   { id: "websearch", labelKey: "nav.websearch", icon: "🔍" },
+  { id: "memory", labelKey: "nav.memory", icon: "🧠" },
   { id: "connections", labelKey: "nav.connections", icon: "🖥" },
   { id: "cron", labelKey: "nav.cron", icon: "⏱" },
   { id: "approvals", labelKey: "nav.approvals", icon: "🛡" },
@@ -4885,6 +4902,7 @@ function renderSettingsSection(id) {
   else if (id === "templates") void renderTemplatesSection(content, stale);
   else if (id === "connectors") void renderConnectorsSection(content, stale);
   else if (id === "websearch") void renderWebSearchSection(content, stale);
+  else if (id === "memory") void renderMemorySection(content, stale);
   else if (id === "connections") void renderConnectionsSection(content, stale);
   else if (id === "cron") void renderCronSection(content, stale);
   else if (id === "approvals") void renderApprovalsSection(content, stale);
@@ -6484,6 +6502,58 @@ async function renderConnectionsSection(content, stale = () => false) {
 }
 
 /** Settings → templates: register Office files whose design office_create reuses. */
+/** Settings → Memory: human-owned MEMORY.md (never written by the agent). */
+async function renderMemorySection(content, stale = () => false) {
+  const c = card(t("nav.memory"), t("mem.desc"));
+  c.dataset.section = "memory";
+  content.appendChild(c);
+  let res;
+  try {
+    res = await rpc("memory.file.get");
+  } catch (err) {
+    if (stale()) return;
+    const note = document.createElement("div");
+    note.className = "note";
+    note.textContent = t("mem.loadFailed", err.message);
+    c.appendChild(note);
+    return;
+  }
+  if (stale()) return;
+  const ta = document.createElement("textarea");
+  ta.className = "mem-textarea";
+  ta.rows = 14;
+  ta.spellcheck = false;
+  ta.value = res.content ?? "";
+  c.appendChild(ta);
+
+  const path = document.createElement("p");
+  path.className = "note";
+  path.textContent = t("mem.path", res.path ?? "");
+  const hint = document.createElement("p");
+  hint.className = "note";
+  hint.textContent = t("mem.projectHint");
+  c.append(path, hint);
+
+  const save = document.createElement("button");
+  save.type = "button";
+  save.className = "perm-save";
+  save.textContent = t("mem.save");
+  save.addEventListener("click", async () => {
+    save.disabled = true;
+    try {
+      await rpc("memory.file.set", { content: ta.value });
+      if (stale()) return;
+      toast(t("mem.saved"), "ok");
+    } catch (err) {
+      if (stale()) return;
+      toast(t("mem.saveFailed", err.message), "err");
+    } finally {
+      save.disabled = false;
+    }
+  });
+  c.appendChild(save);
+}
+
 /** Settings → Web search: standalone section for the search backend. */
 function renderWebSearchSection(content, stale = () => false) {
   const webCard = card(t("nav.websearch"), t("perm.webDesc"));

@@ -1722,12 +1722,12 @@ button.ghost:hover, .ghost:hover { color: var(--text); }
 /* permissions editor + rule tester */
 .perm-list { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
 .perm-list-head { font-size: 12px; color: var(--dim); }
-.perm-textarea, .perm-input {
+.perm-textarea, .perm-input, .mem-textarea {
   width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--border);
   border-radius: 8px; background: var(--bg); color: var(--text);
   font-family: var(--mono, monospace); font-size: 12px; resize: vertical;
 }
-.perm-textarea:focus, .perm-input:focus { outline: none; border-color: var(--accent, var(--border)); }
+.perm-textarea:focus, .perm-input:focus, .mem-textarea:focus { outline: none; border-color: var(--accent, var(--border)); }
 .perm-tester { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
 .perm-test-row { display: flex; gap: 8px; margin-top: 6px; }
 .perm-test-out { margin-top: 8px; font-size: 13px; min-height: 1.2em; }

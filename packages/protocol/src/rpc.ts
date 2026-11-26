@@ -101,6 +101,8 @@ export const RPC_METHODS = [
   "memory.approve",
   "memory.reject",
   "memory.approval",
+  "memory.file.get",
+  "memory.file.set",
   "skills.list",
   "skills.view",
   "skills.pending",

@@ -675,6 +675,12 @@ console.log("— scenario I: web ui transport —");
     "web UI: a standalone Web search section exposes the provider/endpoint editor",
   );
   assert(
+    appJs.includes('id: "memory"') && appJs.includes('labelKey: "nav.memory"') &&
+      appJs.includes("renderMemorySection") && appJs.includes("mem-textarea") &&
+      appJs.includes("memory.file.get") && appJs.includes("memory.file.set"),
+    "web UI: a Memory section edits the user-owned MEMORY.md",
+  );
+  assert(
     !page.includes('id="stop"') && appJs.includes("steerRunningTurn") &&
       appJs.includes('rpc("session.steer"') && appJs.includes("mobileComposer") &&
       appJs.includes("composer.phMobile"),
@@ -936,6 +942,27 @@ console.log("— scenario I: web ui transport —");
     provider: "duckduckgo", base_url: "http://ignored.example",
   });
   assert(webBack.result?.websearch?.base_url === "", "choosing DuckDuckGo clears the endpoint");
+  // User-owned MEMORY.md: Settings editor RPC + per-turn prompt injection
+  const memWrite = await rpcCall(260, "memory.file.set", { content: "# Decisions\nUse mock provider in tests.\n" });
+  assert(
+    memWrite.result?.ok === true && memWrite.result?.path?.endsWith("MEMORY.md"),
+    "memory.file.set writes the user-owned MEMORY.md", JSON.stringify(memWrite.error ?? {}).slice(0, 160),
+  );
+  const memRead = await rpcCall(261, "memory.file.get", {});
+  assert(
+    memRead.result?.content?.includes("Use mock provider in tests."),
+    "memory.file.get returns the edited MEMORY.md", JSON.stringify(memRead.result).slice(0, 160),
+  );
+  const memMode = fs.statSync(path.join(familiarHome, "MEMORY.md")).mode & 0o777;
+  assert(memMode === 0o600, "MEMORY.md is written with mode 0600", memMode.toString(8));
+  const memBad = await rpcCall(262, "memory.file.set", { content: 42 });
+  assert(!!memBad.error, "memory.file.set rejects non-string content");
+  const memTooBig = await rpcCall(264, "memory.file.set", { content: "x".repeat(65_537) });
+  assert(!!memTooBig.error && /exceeds/.test(String(memTooBig.error?.message ?? "")), "memory.file.set rejects >64 KiB content");
+  const memClear = await rpcCall(263, "memory.file.set", { content: "" });
+  assert(memClear.result?.ok === true, "memory.file.set clears MEMORY.md");
+  const memTmp = fs.readdirSync(familiarHome).filter((name) => name.startsWith("MEMORY.md.tmp-"));
+  assert(memTmp.length === 0, "MEMORY.md writes leave no temp files");
   // v1.1: models.probe — list models from an endpoint that is NOT saved yet
   const probeOllama = await fetch(`http://127.0.0.1:${PORT}/rpc`, {
     method: "POST",
@@ -1628,6 +1655,59 @@ console.log("— scenario Q: bash approval tiers —");
     badWebCfg.permissions.websearch.provider === "duckduckgo" && badWebCfg.permissions.websearch.base_url === "",
     "invalid websearch config falls back to DuckDuckGo on load",
   );
+  const { userMemorySection } = await import(
+    path.join(repoRoot, "packages/core/dist/selfimprove/memory/user-memory.js")
+  );
+  const memHome = fs.mkdtempSync(path.join(os.tmpdir(), "familiar-umem-home-"));
+  const memProject = fs.mkdtempSync(path.join(os.tmpdir(), "familiar-umem-proj-"));
+  fs.mkdirSync(path.join(memProject, ".familiar"), { recursive: true });
+  fs.writeFileSync(path.join(memHome, "MEMORY.md"), "Global decision\n");
+  fs.writeFileSync(path.join(memProject, ".familiar", "MEMORY.md"), "Project decision\n");
+  const memLayer = userMemorySection(memHome, memProject);
+  assert(
+    memLayer.text.includes("Global decision") && memLayer.text.includes("Project decision") &&
+      memLayer.text.indexOf("Global decision") < memLayer.text.indexOf("Project decision"),
+    "MEMORY.md layers are injected with the project layer last",
+  );
+  fs.writeFileSync(path.join(memHome, "MEMORY.md"), "x".repeat(900));
+  const memCap = userMemorySection(memHome, memProject, 500);
+  assert(memCap.truncated === true && memCap.text.includes("[truncated"), "MEMORY.md injection enforces its char cap");
+  fs.rmSync(memHome, { recursive: true, force: true });
+  fs.rmSync(memProject, { recursive: true, force: true });
+
+  // End-to-end: a real turn reads MEMORY.md from disk, not from session creation.
+  const memFile = path.join(familiarHome, "MEMORY.md");
+  const memBefore = fs.existsSync(memFile) ? fs.readFileSync(memFile, "utf8") : null;
+  const marker = "USERMEMORY-SMOKE-MARKER-42";
+  fs.writeFileSync(memFile, `# Decisions\n${marker}\n`);
+  const dumpedText = (res) => res.parsed
+    .filter((ev) => ev?.type === "text.delta")
+    .map((ev) => ev.text)
+    .join("");
+  const freshSession = await run(
+    ["run", "-p", `@dump-prompt ${marker}`, "--cwd", project, "--json", "--yolo"],
+    project,
+    familiarHome,
+  );
+  assert(
+    dumpedText(freshSession).includes("PROMPT-PRESENT"),
+    "MEMORY.md is injected into a fresh session's system prompt",
+    dumpedText(freshSession).slice(0, 120),
+  );
+  const sessionId = freshSession.lines.find((line) => typeof line.sessionId === "string")?.sessionId;
+  assert(!!sessionId, "the run reported its session id", JSON.stringify(freshSession.lines).slice(0, 120));
+  const existingSession = await run(
+    ["run", "--session", sessionId, "-p", `@dump-prompt ${marker}`, "--cwd", project, "--json", "--yolo"],
+    project,
+    familiarHome,
+  );
+  assert(
+    dumpedText(existingSession).includes("PROMPT-PRESENT"),
+    "MEMORY.md is injected on a pre-existing session's next turn",
+    dumpedText(existingSession).slice(0, 120),
+  );
+  if (memBefore === null) fs.rmSync(memFile, { force: true });
+  else fs.writeFileSync(memFile, memBefore);
   const bcfg = DEFAULT_CONFIG.permissions.bash;
   const table = [
     // [command, expected action]

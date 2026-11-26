@@ -48,6 +48,10 @@ import {
   type PermissionMode,
   MemoryStore,
   PendingMemoryStore,
+  readUserMemoryFile,
+  writeUserMemoryFile,
+  userMemoryPaths,
+  USER_MEMORY_MAX_FILE_BYTES,
   SkillStore,
   PendingSkillStore,
   resolveSkillRoots,
@@ -637,6 +641,10 @@ export class AgentServer {
         return this.memoryReject(params);
       case "memory.approval":
         return this.memoryApproval(params);
+      case "memory.file.get":
+        return this.memoryFileGet();
+      case "memory.file.set":
+        return this.memoryFileSet(params);
       case "office.templates":
         return { templates: listOfficeTemplates(this.cfg.homeDir || familiarPaths.home()) };
       case "office.templates.import": {
@@ -2558,6 +2566,26 @@ export class AgentServer {
       this.selfImprove.settings.set("memory_write_approval", set === "on");
     }
     return this.approvalState();
+  }
+
+  /** Human-owned MEMORY.md: read for the Settings → Memory editor. */
+  private memoryFileGet(): Record<string, unknown> {
+    const file = userMemoryPaths(this.cfg.homeDir || familiarPaths.home(), process.cwd()).global;
+    return { path: file, content: readUserMemoryFile(file) };
+  }
+
+  /** Human-owned MEMORY.md: atomic write from the Settings editor. */
+  private memoryFileSet(params: Record<string, unknown>): Record<string, unknown> {
+    const content = params["content"];
+    if (typeof content !== "string") {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, "content must be a string");
+    }
+    try {
+      const path = writeUserMemoryFile(this.cfg.homeDir || familiarPaths.home(), content);
+      return { ok: true, path, bytes: Buffer.byteLength(content, "utf8"), max: USER_MEMORY_MAX_FILE_BYTES };
+    } catch (err) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, err instanceof Error ? err.message : String(err));
+    }
   }
 
   private approvalState(): Record<string, unknown> {

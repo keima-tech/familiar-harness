@@ -23,6 +23,8 @@ export const RPC_ERROR_INTERNAL = -32603;
 export interface RpcContext {
   /** Called whenever the server produces an AgentEvent for a session. */
   onEvent?: (sessionId: string, event: unknown) => void;
+  /** False for unauthenticated remote callers. Omitted = trusted in-process. */
+  admin?: boolean;
 }
 
 // ---- method params / results (M1 subset) ----

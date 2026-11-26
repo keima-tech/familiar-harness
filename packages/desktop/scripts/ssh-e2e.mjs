@@ -502,7 +502,7 @@ try {
 
   // ---- healthz through the tunnel: this really is the other home -----------
   const health = await probe(`fetch("/healthz").then((r) => r.json())`);
-  check(health?.home === remoteHome, "tunnel reaches the remote server", JSON.stringify(health));
+  check(health?.ok === true && health?.auth === "required", "tunnel reaches the remote server", JSON.stringify(health));
   check(health?.hostname === os.hostname() && health?.platform === process.platform, "healthz reports the remote host identity");
 
   // ---- create the session remotely, run a tool -----------------------------
@@ -742,7 +742,7 @@ try {
   const tunnelHealth = await fetch(`${tunnel.url}/healthz`, { headers: { Authorization: `Bearer ${tunnel.token}` } })
     .then((r) => r.json())
     .catch(() => null);
-  check(tunnelHealth?.ok === true && tunnelHealth?.home === remoteHome, "the server tunnel reaches the remote server", JSON.stringify(tunnelHealth));
+  check(tunnelHealth?.ok === true && tunnelHealth?.hostname === os.hostname(), "the server tunnel reaches the remote server", JSON.stringify(tunnelHealth));
   const statusWhileUp = await evalOnce(`rpc("conn.status").then((r) => r.current)`);
   check(statusWhileUp?.id === serveProfileId && !!statusWhileUp?.hostname, "conn.status reports the active tunnel", JSON.stringify(statusWhileUp));
 

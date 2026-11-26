@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import type { PlatformPath } from "node:path";
 import path from "node:path";
 import { unifiedDiff } from "./diff.js";
@@ -26,6 +27,21 @@ function resolveInCwd(argsPath: string, ctx: ToolContext): string {
 function isInside(p: PlatformPath, base: string, target: string): boolean {
   const rel = p.relative(base, target);
   return rel === "" || (!rel.startsWith("..") && !p.isAbsolute(rel));
+}
+
+/** Symlink-aware path for containment checks (local backend only). */
+function realPathForCheck(ctx: ToolContext, absolute: string): string {
+  if (ctx.backend.kind !== "local") return absolute;
+  try {
+    return fs.realpathSync(absolute);
+  } catch {
+    // A file being created has no realpath yet — resolve its parent instead.
+    try {
+      return path.join(fs.realpathSync(path.dirname(absolute)), path.basename(absolute));
+    } catch {
+      return absolute;
+    }
+  }
 }
 
 function isBinary(buf: Buffer): boolean {
@@ -186,7 +202,9 @@ export async function approveWrite(
   // backend's path API (a bare tool context may not carry one)
   if (mode === "yolo" || ctx.yolo) return true;
   if (mode === "edit") return true;
-  const inside = isInside(backendPath(ctx), ctx.cwd, absolute);
+  const p = backendPath(ctx);
+  const base = realPathForCheck(ctx, ctx.cwd);
+  const inside = isInside(p, base, absolute) && isInside(p, base, realPathForCheck(ctx, absolute));
   if (inside) return true;
   return ctx.approval.request(req);
 }
@@ -207,13 +225,13 @@ export async function approveRead(
   if (!files || files.bounds === "unrestricted") return true;
   if (ctx.yolo || ctx.permissionMode === "yolo") return true;
   const p = backendPath(ctx);
-  if (isInside(p, ctx.cwd, absolute)) return true;
+  const base = realPathForCheck(ctx, ctx.cwd);
+  if (isInside(p, base, absolute) && isInside(p, base, realPathForCheck(ctx, absolute))) return true;
   const policy = files.read ?? "ask";
   if (policy === "deny") return false; // explicit hard block, not bypassed by "edit"
   if (policy === "allow") return true;
-  // "edit" mode trusts filesystem work (mirrors approveWrite) — reading a file
-  // is a prerequisite for editing it.
-  if (ctx.permissionMode === "edit") return true;
+  // "edit" mode auto-approves writes, but reading secrets outside cwd must
+  // still ask: reading is not a prerequisite for arbitrary paths.
   return ctx.approval.request(req);
 }
 

@@ -1,8 +1,101 @@
+import { lookup } from "node:dns/promises";
+import http from "node:http";
+import https from "node:https";
+import net from "node:net";
 import type { Tool } from "./registry.js";
+
+/** True for addresses that must never be reached from a public-page fetch. */
+export function isPrivateAddress(ip: string): boolean {
+  const address = ip.replace(/^\[|\]$/g, "");
+  if (net.isIPv4(address)) {
+    const [a = 0, b = 0] = address.split(".").map(Number);
+    return (
+      a === 0 || a === 10 || a === 127 || a >= 224 ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b !== undefined && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 100 && b !== undefined && b >= 64 && b <= 127) ||
+      (a === 198 && b !== undefined && (b === 18 || b === 19))
+    );
+  }
+  if (net.isIPv6(address)) {
+    const lower = address.toLowerCase();
+    if (lower.startsWith("::ffff:")) return isPrivateAddress(lower.slice(7));
+    if (/^::[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/.test(lower)) {
+      return isPrivateAddress(lower.slice(2)); // IPv4-compatible
+    }
+    return (
+      lower === "::" || lower === "::1" || lower.startsWith("fc") || lower.startsWith("fd") ||
+      lower.startsWith("fe8") || lower.startsWith("fe9") || lower.startsWith("fea") ||
+      lower.startsWith("feb") || lower.startsWith("2001:db8") ||
+      lower.startsWith("2002:") || lower.startsWith("64:ff9b:")
+    );
+  }
+  return true; // unknown address family: fail closed
+}
+
+interface PinnedAddress { ip: string; family: number }
+
+/** Pick a public address to pin the connection to (defeats DNS rebinding). */
+async function resolvePublic(
+  host: string,
+  allowExplicit: boolean,
+): Promise<PinnedAddress | string> {
+  const literal = host.replace(/^\[|\]$/g, "");
+  if (net.isIP(literal)) {
+    if (!allowExplicit && isPrivateAddress(literal)) return `${host} is a private address`;
+    return { ip: literal, family: net.isIP(literal) };
+  }
+  try {
+    const addresses = await lookup(host, { all: true });
+    const usable = allowExplicit
+      ? addresses
+      : addresses.filter((entry) => !isPrivateAddress(entry.address));
+    if (addresses.length === 0) return `could not resolve ${host}`;
+    if (usable.length === 0) return `${host} resolves only to private addresses`;
+    return { ip: usable[0]!.address, family: usable[0]!.family };
+  } catch {
+    return `could not resolve ${host}`;
+  }
+}
+
+interface PinnedResponse {
+  status: number;
+  headers: Record<string, string | string[] | undefined>;
+  body: Buffer;
+}
+
+/** HTTP(S) GET pinned to the address we validated (no second DNS lookup). */
+function fetchPinned(url: string, address: PinnedAddress): Promise<PinnedResponse> {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const lib = u.protocol === "https:" ? https : http;
+    const req = lib.get(
+      u,
+      {
+        lookup: (_host, _opts, cb) => cb(null, address.ip, address.family),
+        servername: u.hostname,
+        headers: { "user-agent": "familiar-harness/0.2 (+local agent)", host: u.host },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => {
+          chunks.push(c);
+          if (chunks.reduce((n, b) => n + b.length, 0) > 2_000_000) req.destroy(new Error("response too large"));
+        });
+        res.on("end", () =>
+          resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks) }),
+        );
+      },
+    );
+    req.on("error", reject);
+    req.setTimeout(30_000, () => req.destroy(new Error("timeout")));
+  });
+}
 
 /**
  * Fetch a URL and return readable text. HTML is crudely converted to text.
- * Domain policy from config (internal addresses denied by default — SSRF guard).
+ * Domain policy from config plus resolved-IP checks (SSRF guard).
  */
 export function createWebFetchTool(): Tool {
   return {
@@ -36,15 +129,10 @@ export function createWebFetchTool(): Tool {
         return { content: `invalid URL: ${url}`, isError: true };
       }
       const webCfg = ctx.config.permissions.webfetch;
-      const policy = decideDomain(host, webCfg);
-      if (!policy.allowed) {
-        return { content: `webfetch denied by policy: ${policy.reason}`, isError: true };
-      }
-
-      // Follow redirects manually: every hop is re-checked against the domain
-      // policy, otherwise a public host could redirect us into the LAN.
+      // Follow redirects manually: every hop is re-checked, and the TCP
+      // connection is pinned to the exact address we validated.
       let current = url;
-      let res: Response | undefined;
+      let res: PinnedResponse | undefined;
       try {
         for (let hop = 0; hop <= 5; hop++) {
           const hopHost = new URL(current).hostname;
@@ -52,14 +140,15 @@ export function createWebFetchTool(): Tool {
           if (!hopPolicy.allowed) {
             return { content: `webfetch denied by policy: ${hopPolicy.reason}`, isError: true };
           }
-          res = await fetch(current, {
-            redirect: "manual",
-            headers: { "user-agent": "familiar-harness/0.2 (+local agent)" },
-            signal: AbortSignal.timeout(30_000),
-          });
-          const loc = res.headers.get("location");
+          const explicit = matchesDomain(hopHost, webCfg.allow_domains);
+          const address = await resolvePublic(hopHost, explicit);
+          if (typeof address === "string") {
+            return { content: `webfetch denied by IP policy: ${address}`, isError: true };
+          }
+          res = await fetchPinned(current, address);
+          const rawLoc = res.headers["location"];
+          const loc = Array.isArray(rawLoc) ? rawLoc[0] : rawLoc;
           if (res.status >= 300 && res.status < 400 && loc) {
-            res.body?.cancel().catch(() => undefined);
             current = new URL(loc, current).toString();
             continue;
           }
@@ -69,16 +158,15 @@ export function createWebFetchTool(): Tool {
       } catch (err) {
         return { content: `fetch failed: ${err instanceof Error ? err.message : String(err)}`, isError: true };
       }
-      if (!res.ok) {
+      if (res.status >= 400) {
         return { content: `HTTP ${res.status} for ${url}`, isError: true };
       }
-      const contentType = res.headers.get("content-type") ?? "";
+      const rawType = res.headers["content-type"];
+      const contentType = Array.isArray(rawType) ? (rawType[0] ?? "") : (rawType ?? "");
       if (!/^(text\/|application\/json|application\/xhtml)/.test(contentType)) {
         return { content: `unsupported content-type: ${contentType || "unknown"} (binary refused)`, isError: true };
       }
-      const limited = await res.arrayBuffer().catch(() => null);
-      if (!limited) return { content: "failed to read response body", isError: true };
-      const text = new TextDecoder("utf8", { fatal: false }).decode(limited.slice(0, 1_000_000));
+      const text = new TextDecoder("utf8", { fatal: false }).decode(res.body.subarray(0, 1_000_000));
       const body = contentType.includes("html") || /<\s*[a-z!]/i.test(text) ? htmlToText(text) : text;
       const trimmed = body.length > maxChars ? `${body.slice(0, maxChars)}\n[familiar: truncated at ${maxChars} chars]` : body;
       return { content: trimmed.trim() || "(empty page)", isError: false };
@@ -90,6 +178,8 @@ export function decideDomain(
   host: string,
   cfg: { allow_domains: string[]; deny_domains: string[] },
 ): { allowed: boolean; reason: string } {
+  // An explicit allowlist (e.g. a local dev server) overrides the default
+  // deny patterns; otherwise the internal/SSRF deny list wins.
   if (matchesDomain(host, cfg.allow_domains)) return { allowed: true, reason: "allowlist" };
   if (matchesDomain(host, cfg.deny_domains)) {
     return { allowed: false, reason: `${host} matches deny_domains (internal/SSRF guard)` };

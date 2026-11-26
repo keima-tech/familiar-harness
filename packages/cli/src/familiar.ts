@@ -1397,6 +1397,12 @@ async function cmdServe(flags: Record<string, string | boolean>): Promise<void> 
   const authTokenFile = tokenFileFlag ?? cfg.server.auth_token_file;
   const printReady = flagBool(flags, "print-ready");
   const authToken = resolveServerAuthToken(authTokenFile);
+  const loopback = bind === "" || bind === "127.0.0.1" || bind === "localhost" || bind === "::1";
+  if (!authToken && !loopback) {
+    throw new Error(
+      `refusing to bind ${bind} without server.auth_token_file — set a token file or use --bind 127.0.0.1`,
+    );
+  }
   const server = new AgentServer({ config: cfg, rpcApprovals: true });
   const transport = await startHttpTransport(server, {
     port,
@@ -1645,9 +1651,9 @@ interface UpdateRelease {
 }
 
 /**
- * GET a URL as a buffer, tolerating self-signed CAs on the second try
- * (self-hosted Forgejo instances). Prefer NODE_EXTRA_CA_CERTS for a trusted
- * setup; FAMILIAR_TLS_STRICT=1 disables the fallback.
+ * GET a URL as a buffer. TLS verification is strict by default; an insecure
+ * retry is only available with FAMILIAR_TLS_ALLOW_INSECURE=1 (prefer
+ * NODE_EXTRA_CA_CERTS for a trusted self-hosted CA).
  */
 async function httpGet(url: string): Promise<{ ok: boolean; status: number; buffer: Buffer }> {
   try {
@@ -1655,10 +1661,10 @@ async function httpGet(url: string): Promise<{ ok: boolean; status: number; buff
     return { ok: res.ok, status: res.status, buffer: Buffer.from(await res.arrayBuffer()) };
   } catch (err) {
     const code = String((err as { cause?: { code?: string } }).cause?.code ?? "");
-    if (!/CERT|SSL|TLS/i.test(code) || process.env.FAMILIAR_TLS_STRICT === "1") throw err;
+    if (!/CERT|SSL|TLS/i.test(code) || process.env.FAMILIAR_TLS_ALLOW_INSECURE !== "1") throw err;
     process.stdout.write(
       `warn: TLS verification failed (${code}) — retrying without verification; ` +
-        "set NODE_EXTRA_CA_CERTS to trust your CA, or FAMILIAR_TLS_STRICT=1 to abort\n",
+        "set NODE_EXTRA_CA_CERTS to trust your CA, or unset FAMILIAR_TLS_ALLOW_INSECURE to abort\n",
     );
     return new Promise((resolve, reject) => {
       const req = https.get(url, { rejectUnauthorized: false }, (res) => {

@@ -134,6 +134,9 @@ type ToolOutput = { content: string; isError?: boolean };
 
 - シェル: `resolveShellCommand()`(Windows: PowerShell / それ以外: bash)。
 - stdout+stderr 結合、上限 256KB(超過で末尾を残す)。
+- 既定モード `allow` でも、送信系(`curl -d` / `scp` / `nc`)、GET URL への
+  コマンド置換、ファイル→ネットワークのパイプ、DNS 問い合わせは `ask` 対象。
+  シェル間接手段による完全な遮断は困難なため、公開環境では慎重な運用を推奨。
 ### 2.6 権限モード(コンポーザの 4 択)
 
 GUI の権限チップは 4 択で、**ターンごとに `session.send.permissionMode` として送られる**
@@ -190,7 +193,8 @@ needsApproval → required でない → 実行
 
 - HTML は簡易 text 化(script/style 除去・タグ剥ぎ・実体参照デコード)。
 - content-type は text/* / json のみ(バイナリ拒否)。取得上限 1MB。
-- ドメインポリシー `permissions.webfetch.{allow_domains,deny_domains}`。**既定で内部アドレス(localhost / 127.* / ::1 / 10.* / 192.168.* / 172.16–31.* / 169.254.*)を deny**(SSRF 対策)。allow が deny に優先。
+- ドメインポリシー `permissions.webfetch.{allow_domains,deny_domains}`。**既定で内部アドレス(localhost / 127.* / ::1 / 10.* / 192.168.* / 172.16–31.* / 169.254.* / 100.64–127.* / IPv6 ULA・link-local)を deny**(SSRF 対策)。明示的な allow_domains は既定 deny に優先(ローカル開発用)。リダイレクト各ホップで
+DNS 解決後の IP を検査し、内部アドレスなら拒否。接続は検査済み IP に pin する。
 
 ### websearch(read_only)
 

@@ -3,6 +3,7 @@ import https from "node:https";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { PlatformPath } from "node:path";
 import type {
   ChatMessage,
   MessageAttachment,
@@ -106,6 +107,24 @@ function installMcpExitCleanup(hub: McpHub): void {
   });
 }
 
+/** RPCs that mutate configuration, credentials or files: admin tier only. */
+const PRIVILEGED_RPC_METHODS = new Set([
+  "config.provider.set",
+  "connectors.set", "connectors.delete", "connectors.test",
+  "conn.connect", "conn.disconnect", "conn.delete", "conn.save", "conn.test",
+  "conn.hostkey", "conn.trusthost",
+  "cron.setEnabled", "curator.run",
+  "fs.delete", "fs.rename", "fs.upload",
+  "google.authUrl", "google.exchange", "google.test", "google.gmailList", "google.calendarList",
+  "lsp.servers.set", "lsp.servers.delete",
+  "mcp.restart", "mcp.servers.set", "mcp.servers.delete",
+  "memory.approve", "memory.reject", "memory.approval", "memory.file.set",
+  "office.templates.import", "office.templates.delete",
+  "permissions.setPolicy", "permissions.websearch.set", "permission.respond",
+  "skills.save", "skills.delete", "skills.approve", "skills.reject",
+  "session.delete",
+]);
+
 /**
  * Transport-independent agent service. HTTP/WS wrappers and the CLI's
  * in-process bridge both drive this via dispatch().
@@ -142,6 +161,11 @@ export class AgentServer {
     this.serverVersion = opts.version ?? "0.0.0";
 
     this.cfg = opts.config ?? loadConfig();
+    for (const [kind, c] of Object.entries(this.cfg.connectors ?? {})) {
+      if (this.hasConnectorSecret(c)) {
+        this.connectorSecretEndpoint.set(kind, String(c?.base_url ?? ""));
+      }
+    }
     this.store = opts.store ?? new SqliteSessionStore(familiarPaths.stateDb());
     this.providers = new ProviderRegistry(this.cfg);
     this.todos = new SessionTodoStore();
@@ -504,6 +528,12 @@ export class AgentServer {
     params: Record<string, unknown> = {},
     ctx: RpcContext = {},
   ): Promise<unknown> {
+    // A single privilege tier is unsafe once the server can be reached over a
+    // network: config/fs/connector writes are admin-only. In-process callers
+    // (CLI, cron, desktop bridge) leave ctx.admin unset and stay trusted.
+    if (ctx.admin === false && PRIVILEGED_RPC_METHODS.has(method)) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, "admin authorization required");
+    }
     switch (method) {
       case "ping":
         return "pong";
@@ -802,7 +832,7 @@ export class AgentServer {
         return { started: true };
       }
       case "permissions.policy":
-        return { user: readBashPolicy(), effective: this.cfg.permissions.bash };
+        return { user: readBashPolicy({ configFile: this.cfg.configFile }), effective: this.cfg.permissions.bash };
       case "permissions.test": {
         const command = str(params, "command") ?? "";
         if (command.trim() === "") {
@@ -824,7 +854,7 @@ export class AgentServer {
         if (allow) user.allow = allow;
         if (ask) user.ask = ask;
         if (deny) user.deny = deny;
-        writeBashPolicy(user);
+        writeBashPolicy(user, { configFile: this.cfg.configFile });
         // hot-swap the effective policy (built-ins stay unioned)
         const builtin = DEFAULT_CONFIG.permissions.bash;
         const union = (a: string[], b?: string[]): string[] => [...new Set([...a, ...(b ?? [])])];
@@ -843,7 +873,7 @@ export class AgentServer {
         const enabled = params["enabled"] === true;
         // live toggle for a running server, then persist so it survives restart
         this.cronScheduler?.setEnabled(name, enabled);
-        const updated = writeCronJobEnabled(name, enabled);
+        const updated = writeCronJobEnabled(name, enabled, { configFile: this.cfg.configFile });
         if (!updated && !this.cronScheduler) {
           throw new RpcError(RPC_ERROR_INVALID_PARAMS, `unknown cron job: ${name}`);
         }
@@ -904,7 +934,7 @@ export class AgentServer {
       if (apiKey !== undefined && apiKey.trim() !== "") patch.api_key = apiKey.trim();
     }
 
-    const updated = writeProviderToDisk(patch);
+    const updated = writeProviderToDisk(patch, { configFile: this.cfg.configFile });
 
     // hot-swap: replace the entry in the shared (reference-captured) config
     // graph, then drop cached provider instances so secrets are re-resolved.
@@ -1155,6 +1185,7 @@ export class AgentServer {
     const backend = this.backendFor(params);
     const raw = (str(params, "path") ?? "").trim();
     const target = await this.resolveOnBackend(backend, raw);
+    await this.guardSensitiveRead(backend, target);
     let stat: Awaited<ReturnType<ExecBackend["stat"]>>;
     try {
       stat = await backend.stat(target);
@@ -1254,6 +1285,7 @@ export class AgentServer {
     const backend = this.backendFor(params);
     const raw = (str(params, "path") ?? "").trim();
     const target = await this.resolveOnBackend(backend, raw);
+    await this.guardSensitiveRead(backend, target);
     let listed;
     try {
       listed = await backend.listDir(target);
@@ -1261,7 +1293,7 @@ export class AgentServer {
       throw new RpcError(RPC_ERROR_INVALID_PARAMS, `cannot list directory: ${target}`);
     }
     const mapped = listed
-      .filter((e) => !e.name.startsWith("."))
+      .filter((e) => !e.name.startsWith(".") && !this.isSensitiveName(e.name))
       .map((e) => ({ name: e.name, path: e.path, dir: e.dir, size: e.size }))
       .slice(0, 500);
     return { path: target, entries: mapped, home: await backend.home() };
@@ -1278,6 +1310,7 @@ export class AgentServer {
     const backend = this.backendFor(params);
     const raw = (str(params, "path") ?? "").trim();
     const target = await this.resolveOnBackend(backend, raw);
+    await this.guardSensitiveRead(backend, target);
     let stat: Awaited<ReturnType<ExecBackend["stat"]>>;
     try {
       stat = await backend.stat(target);
@@ -1316,6 +1349,17 @@ export class AgentServer {
   }
 
 
+  /** Endpoint each stored connector secret was configured for. A masked "***"
+   *  round-trip must not let a caller redirect that credential elsewhere. */
+  private readonly connectorSecretEndpoint = new Map<string, string>();
+
+  private hasConnectorSecret(cfg: Record<string, unknown> | undefined): boolean {
+    if (!cfg) return false;
+    return Object.entries(cfg).some(([key, value]) =>
+      /secret|token|password|api_?key|credential|signature/i.test(key) &&
+      typeof value === "string" && value !== "" && value !== "***");
+  }
+
   /** Mask secret-looking connector fields: API responses never carry them. */
   private maskConnectors(
     connectors: Record<string, Record<string, unknown> | undefined>,
@@ -1348,8 +1392,35 @@ export class AgentServer {
     const connectors = { ...(this.cfg.connectors ?? {}) };
     const incoming = { ...(settings as Record<string, unknown>) };
     // keep stored secrets when the GUI round-trips the masked "***"
+    let keptMasked = false;
+    let explicitSecret = false;
     for (const [k, v] of Object.entries(incoming)) {
-      if (v === "***" && typeof connectors[kind]?.[k] === "string") incoming[k] = connectors[kind][k];
+      if (v === "***" && typeof connectors[kind]?.[k] === "string") {
+        incoming[k] = connectors[kind][k];
+        keptMasked = true;
+      } else if (
+        /secret|token|password|api_?key|credential|signature/i.test(k) &&
+        typeof v === "string" && v !== ""
+      ) {
+        explicitSecret = true;
+      }
+    }
+    if (this.hasConnectorSecret(incoming)) {
+      const recorded = this.connectorSecretEndpoint.get(kind);
+      const current = String(incoming["base_url"] ?? "");
+      // A masked round-trip must not move the stored credential to a new host:
+      // this also protects the agent tools, which use the stored value.
+      if (keptMasked && !explicitSecret && recorded !== undefined && recorded !== current) {
+        throw new RpcError(
+          RPC_ERROR_INVALID_PARAMS,
+          "re-enter the credential to use a different endpoint",
+        );
+      }
+      if (!keptMasked || explicitSecret) {
+        this.connectorSecretEndpoint.set(kind, current);
+      }
+    } else {
+      this.connectorSecretEndpoint.delete(kind);
     }
     connectors[kind] = incoming;
     this.cfg.connectors = connectors;
@@ -1370,6 +1441,17 @@ export class AgentServer {
     const base = (c.base_url ?? "").replace(/\/+$/, "");
     if (needsBase && base === "") {
       throw new RpcError(RPC_ERROR_INVALID_PARAMS, `${kind} requires base_url`);
+    }
+    // A stored credential must never be replayed to a different endpoint just
+    // because the GUI sent "***" for the secret and a new base_url.
+    if (this.hasConnectorSecret(c)) {
+      const recorded = this.connectorSecretEndpoint.get(kind);
+      if (recorded !== undefined && recorded !== base) {
+        throw new RpcError(
+          RPC_ERROR_INVALID_PARAMS,
+          "re-enter the credential to test a different endpoint",
+        );
+      }
     }
     let url = "";
     const headers: Record<string, string> = {};
@@ -1433,8 +1515,8 @@ export class AgentServer {
     return 0;
   }
 
-  /** GET a URL as a buffer, tolerating self-signed CAs on the second try
-   * (self-hosted Forgejo instances). FAMILIAR_TLS_STRICT=1 disables the fallback. */
+  /** GET a URL as a buffer. TLS verification is strict by default; the
+   * insecure fallback is an explicit opt-in for self-hosted CAs. */
   private httpsGetBuffer(url: string): Promise<{ ok: boolean; status: number; buffer: Buffer }> {
     const viaNodeHttps = () =>
       new Promise<{ ok: boolean; status: number; buffer: Buffer }>((resolve, reject) => {
@@ -1460,7 +1542,7 @@ export class AgentServer {
       }))
       .catch((err) => {
         const code = String((err as { cause?: { code?: string } }).cause?.code ?? "");
-        if (!/CERT|SSL|TLS/i.test(code) || process.env.FAMILIAR_TLS_STRICT === "1") throw err;
+        if (!/CERT|SSL|TLS/i.test(code) || process.env.FAMILIAR_TLS_ALLOW_INSECURE !== "1") throw err;
         return viaNodeHttps();
       });
   }
@@ -1809,10 +1891,53 @@ export class AgentServer {
     return { deleted: true };
   }
 
+  /** Names that are credentials wherever they appear (project fixtures included). */
+  private isSensitiveName(name: string): boolean {
+    return /^(?:\.env|server\.token|state\.db(?:-.*)?|\.npmrc|\.netrc|\.git-credentials|id_[A-Za-z0-9_]+|.*\.pem|.*\.p12|.*\.pfx|credentials\.json|service-account\.json)$/i.test(name);
+  }
+
+  /** Resolve symlinks for the local backend so a project link cannot point the
+   *  GUI browser at a token store. */
+  private realPathForRpc(p: PlatformPath, backend: ExecBackend, target: string): string {
+    const norm = p.resolve(target);
+    if (backend.kind !== "local") return norm;
+    try { return fs.realpathSync(norm); } catch { return norm; }
+  }
+
+  /** Read guard for GUI browsing: block credential stores while still allowing
+   *  uploads and ordinary project files (including their config.yaml fixtures). */
+  private async guardSensitiveRead(backend: ExecBackend, target: string): Promise<void> {
+    const p = backend.path;
+    const norm = this.realPathForRpc(p, backend, target);
+    if (this.isSensitiveName(p.basename(norm))) {
+      throw new RpcError(RPC_ERROR_INVALID_PARAMS, `refusing to read a sensitive file: ${p.basename(norm)}`);
+    }
+    let home = "";
+    try { home = await backend.home(); } catch { home = ""; }
+    if (home === "") return;
+    const realHome = this.realPathForRpc(p, backend, home);
+    const familiar = p.resolve(realHome, ".familiar");
+    if (norm === familiar || norm.startsWith(familiar + p.sep)) {
+      for (const rel of ["secrets", "server.token", "config.yaml", "state.db", "settings.json"]) {
+        const base = p.resolve(familiar, rel);
+        if (norm === base || norm.startsWith(base + p.sep)) {
+          throw new RpcError(RPC_ERROR_INVALID_PARAMS, "refusing to read Familiar private data");
+        }
+      }
+    }
+    for (const dir of [".ssh", ".aws", ".gnupg", ".kube", ".config/gh", ".docker/config.json"]) {
+      const base = p.resolve(realHome, dir);
+      if (norm === base || norm.startsWith(base + p.sep)) {
+        throw new RpcError(RPC_ERROR_INVALID_PARAMS, "refusing to read credential files");
+      }
+    }
+  }
+
   /** Refuse to rename/delete a filesystem root or the host home directory. */
   private async guardProtected(backend: ExecBackend, target: string): Promise<void> {
+    await this.guardSensitiveRead(backend, target);
     const p = backend.path;
-    const norm = p.resolve(target);
+    const norm = this.realPathForRpc(p, backend, target);
     if (norm === p.parse(norm).root) {
       throw new RpcError(RPC_ERROR_INVALID_PARAMS, "refusing to modify a filesystem root");
     }
@@ -1833,6 +1958,7 @@ export class AgentServer {
     const sessionId = str(params, "session");
     const cwdOf = sessionId ? this.store.getSession(sessionId)?.cwd : undefined;
     const target = await this.resolveOnBackend(backend, raw, cwdOf);
+    await this.guardSensitiveRead(backend, target);
     let dirs: string[];
     try {
       const entries = await backend.listDir(target);
@@ -1870,6 +1996,7 @@ export class AgentServer {
       const fallback = backend.kind === "local" ? process.cwd() : await backend.home();
       target = await this.resolveOnBackend(backend, dirPart, cwd && cwd !== "" ? cwd : fallback);
     }
+    await this.guardSensitiveRead(backend, target);
     let entries;
     try {
       entries = await backend.listDir(target);
@@ -1877,7 +2004,8 @@ export class AgentServer {
       return { items: [] };
     }
     const q = namePrefix.toLowerCase();
-    const matched = entries.filter((e) => e.name.toLowerCase().startsWith(q));
+    const matched = entries.filter((e) =>
+      e.name.toLowerCase().startsWith(q) && !this.isSensitiveName(e.name));
     matched.sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name));
     const items = matched.slice(0, 20).map((e) => ({ path: e.path, dir: e.dir }));
     return { items };

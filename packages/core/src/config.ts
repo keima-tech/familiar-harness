@@ -377,6 +377,10 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
         "\\bgit\\s+(push\\b.*--force|reset\\s+--hard|clean\\s+-[a-zA-Z]*f)",
         // data leaving the machine
         "\\b(curl|wget)\\b[^|;]*(\\s-d\\s|--data|\\s-F\\s|--form|--upload-file)",
+        // data leaving via GET URLs / DNS / pipes (command substitution)
+        "\\b(curl|wget)\\b[^|;]*[$\\x60]",
+        "\\b(cat|head|tail|base64|xxd)\\b[^|;]*\\|[\\s]*\\b(curl|wget|nc|ncat)\\b",
+        "\\b(dig|nslookup|host|drill)\\b",
         "\\b(nc|ncat|netcat)\\b",
         "\\bscp\\b",
         "\\brsync\\b",
@@ -407,7 +411,7 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
     files: { bounds: "cwd", read: "ask" },
     webfetch: {
       allow_domains: [],
-      deny_domains: ["localhost", "127.*", "::1", "10.*", "192.168.*", "172.16.*", "172.17.*", "172.18.*", "172.19.*", "172.20.*", "172.21.*", "172.22.*", "172.23.*", "172.24.*", "172.25.*", "172.26.*", "172.27.*", "172.28.*", "172.29.*", "172.30.*", "172.31.*", "169.254.*", "0.0.0.0", "*.local"],
+      deny_domains: ["localhost", "127.*", "::1", "10.*", "192.168.*", "172.16.*", "172.17.*", "172.18.*", "172.19.*", "172.20.*", "172.21.*", "172.22.*", "172.23.*", "172.24.*", "172.25.*", "172.26.*", "172.27.*", "172.28.*", "172.29.*", "172.30.*", "172.31.*", "169.254.*", "0.0.0.0", "100.64.*", "100.65.*", "100.66.*", "100.67.*", "100.68.*", "100.69.*", "100.70.*", "100.71.*", "100.72.*", "100.73.*", "100.74.*", "100.75.*", "100.76.*", "100.77.*", "100.78.*", "100.79.*", "100.80.*", "100.81.*", "100.82.*", "100.83.*", "100.84.*", "100.85.*", "100.86.*", "100.87.*", "100.88.*", "100.89.*", "100.90.*", "100.91.*", "100.92.*", "100.93.*", "100.94.*", "100.95.*", "100.96.*", "100.97.*", "100.98.*", "100.99.*", "100.100.*", "100.101.*", "100.102.*", "100.103.*", "100.104.*", "100.105.*", "100.106.*", "100.107.*", "100.108.*", "100.109.*", "100.110.*", "100.111.*", "100.112.*", "100.113.*", "100.114.*", "100.115.*", "100.116.*", "100.117.*", "100.118.*", "100.119.*", "100.120.*", "100.121.*", "100.122.*", "100.123.*", "100.124.*", "100.125.*", "100.126.*", "100.127.*", "fc00::*", "fd00::*", "fe80::*", "*.local"],
     },
     websearch: { provider: "duckduckgo", base_url: "" },
   },
@@ -845,7 +849,12 @@ export function writeProviderToDisk(
     const secretsDir = path.join(familiarHome(), "secrets");
     fs.mkdirSync(secretsDir, { recursive: true });
     const secretFile = path.join(secretsDir, `${name}.key`);
-    fs.writeFileSync(secretFile, patch.api_key + "\n", { mode: 0o600 });
+    // Atomic replace: mode is enforced even if the file already existed, and
+    // a pre-planted symlink is replaced rather than followed.
+    const secretTmp = `${secretFile}.tmp-${process.pid}-${Date.now()}`;
+    fs.writeFileSync(secretTmp, patch.api_key + "\n", { mode: 0o600 });
+    fs.renameSync(secretTmp, secretFile);
+    fs.chmodSync(secretFile, 0o600);
     entry["auth"] = { api_key_file: secretFile };
   }
 
@@ -1082,7 +1091,8 @@ export function loadConfig(options: LoadConfigOptions = {}): ResolvedConfig {
  * Copy of the config safe to expose via `config.get` RPC: secret values are
  * replaced by their origin + resolution status.
  */
-const CONNECTOR_SECRET_KEYS = new Set(["token", "api_key", "password", "secret"]);
+/** Same rule as the GUI connector masker: client_secret / access_token / ... are secrets too. */
+const CONNECTOR_SECRET_KEY = /secret|token|password|api_?key|credential|signature/i;
 
 export function sanitizeConfigForApi(cfg: ResolvedConfig): Record<string, unknown> {
   const clone = structuredClone(cfg) as unknown as Record<string, unknown>;
@@ -1098,7 +1108,7 @@ export function sanitizeConfigForApi(cfg: ResolvedConfig): Record<string, unknow
     for (const kind of Object.keys(connectors)) {
       const c = connectors[kind] ?? {};
       for (const key of Object.keys(c)) {
-        if (CONNECTOR_SECRET_KEYS.has(key) && typeof c[key] === "string" && c[key] !== "") {
+        if (CONNECTOR_SECRET_KEY.test(key) && typeof c[key] === "string" && c[key] !== "") {
           c[key] = "***";
         }
       }
@@ -1195,7 +1205,8 @@ permissions:
     read: ask
   webfetch:
     allow_domains: []
-    # internal addresses are denied by default (SSRF protection)
+    # internal addresses are denied by default (SSRF protection). Deny wins
+    # over allow; every redirect and every resolved IP is checked too.
   websearch:
     provider: duckduckgo   # default — no API key or configuration needed
     # SearXNG: prepare your own instance, then set:

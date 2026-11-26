@@ -16,8 +16,13 @@
     "clean": "tsc -b . --clean"
   },
   "dependencies": {
-    "@familiar/protocol": "*",
+    "@familiar/protocol": "0.1.0",
     "yaml": "^2.6.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/keima-tech/familiar-harness.git"
+  },
+  "homepage": "https://github.com/keima-tech/familiar-harness"
 }

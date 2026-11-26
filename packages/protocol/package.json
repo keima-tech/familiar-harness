@@ -15,5 +15,10 @@
     "build": "tsc -b .",
     "clean": "tsc -b . --clean"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/keima-tech/familiar-harness.git"
+  },
+  "homepage": "https://github.com/keima-tech/familiar-harness"
 }

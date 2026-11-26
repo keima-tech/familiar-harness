@@ -1,9 +1,14 @@
 {
   "name": "familiar-harness",
-  "description": "Familiar Harness - a client/server agent harness (CLI + Web UI + Desktop) inspired by OpenCode, HermEs Agent, and Claude Code",
+  "description": "Familiar Harness - a local-first client/server agent harness with CLI, Web UI and Desktop frontends",
   "private": true,
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/keima-tech/familiar-harness.git"
+  },
+  "homepage": "https://github.com/keima-tech/familiar-harness",
   "workspaces": [
     "packages/*"
   ],

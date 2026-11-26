@@ -118,8 +118,8 @@ function semverCmp(a, b) {
   return 0;
 }
 
-/** GET a URL as a buffer, tolerating self-signed CAs on the second try
- * (self-hosted Forgejo). FAMILIAR_TLS_STRICT=1 disables the fallback. */
+/** GET a URL as a buffer. TLS verification is strict by default; the insecure
+ * retry is an explicit opt-in for self-hosted CAs. */
 function httpGetBuffer(url) {
   const viaHttps = () =>
     new Promise((resolve, reject) => {
@@ -137,7 +137,7 @@ function httpGetBuffer(url) {
     .then(async (res) => ({ ok: res.ok, status: res.status, buffer: Buffer.from(await res.arrayBuffer()) }))
     .catch((err) => {
       const code = String(err?.cause?.code ?? "");
-      if (!/CERT|SSL|TLS/i.test(code) || process.env.FAMILIAR_TLS_STRICT === "1") throw err;
+      if (!/CERT|SSL|TLS/i.test(code) || process.env.FAMILIAR_TLS_ALLOW_INSECURE !== "1") throw err;
       return viaHttps();
     });
 }

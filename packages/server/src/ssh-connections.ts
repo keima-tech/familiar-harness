@@ -270,8 +270,24 @@ export function sanitizeProfile(input: unknown, existing?: SshProfile | null): S
   if (user && !/^[A-Za-z0-9._-]+$/.test(user)) return null;
   const portRaw = Number.parseInt(String(o["port"] ?? 22), 10);
   const port = Number.isInteger(portRaw) && portRaw > 0 && portRaw < 65536 ? portRaw : 22;
-  const identityFile = clean(o["identityFile"], 4096);
-  const remoteBin = clean(o["remoteBin"], 4096) || "familiar";
+  const rawIdentity = clean(o["identityFile"], 4096);
+  // Only a simple absolute / ~-relative path: no "..", no shell metacharacters.
+  const identityFile =
+    /^(?:\/|~\/|\.\/|[A-Za-z]:[\\/])[A-Za-z0-9._/\\-]+$/.test(rawIdentity) &&
+    !rawIdentity.includes("..")
+      ? rawIdentity
+      : "";
+  // The remote launcher must be Familiar itself (a bare name or an explicit
+  // familiar* path); never an arbitrary executable such as a shell.
+  const requestedBin = clean(o["remoteBin"], 4096);
+  const base = requestedBin.includes("/") ? requestedBin.split("/").pop() ?? "" : requestedBin;
+  const remoteBin =
+    /^(familiar|familiar-harness|familiar-[A-Za-z0-9._-]+)$/.test(base) &&
+    !requestedBin.includes("..") &&
+    (requestedBin.startsWith("/") || requestedBin.startsWith("~/") ||
+      !requestedBin.includes("/") || !requestedBin.includes("\\"))
+      ? requestedBin
+      : "familiar";
   const mode = o["mode"] === "proxy" ? "proxy" : "serve";
   const auth = o["auth"] === "password" ? "password" : "key";
   const name = clean(o["name"], 80) || `${user ? `${user}@` : ""}${host}`;

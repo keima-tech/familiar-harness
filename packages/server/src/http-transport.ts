@@ -25,8 +25,8 @@ export interface HttpTransportOptions {
    * (Authorization: Bearer <token> header or ?token= query, e.g. for /ws).
    */
   authToken?: string;
-  /** Path the token was read from — reported by /healthz so local clients
-   * (the desktop shell) can pick it up. Never the value itself. */
+  /** Path the token was read from (used by local launchers). Never returned
+   * by the unauthenticated /healthz probe — not even as a path. */
   authTokenFile?: string;
   /** server build version, surfaced by /healthz for the GUI about card */
   version?: string;
@@ -59,6 +59,11 @@ function publicDir(): string {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
 }
 
+/** Loopback binds are the only ones allowed without authentication. */
+function isLoopbackBind(bind: string): boolean {
+  return bind === "" || bind === "127.0.0.1" || bind === "localhost" || bind === "::1";
+}
+
 /** Length-independent comparison for bearer tokens (avoids timing leaks). */
 function safeEqual(a: string, b: string): boolean {
   const ba = Buffer.from(a, "utf8");
@@ -74,6 +79,11 @@ export function startHttpTransport(
   const clients = new Set<WebSocket>();
 
   const authRequired = typeof opts.authToken === "string" && opts.authToken !== "";
+  if (!authRequired && !isLoopbackBind(opts.bind)) {
+    throw new Error(
+      "refusing to bind a non-loopback interface without authentication — set server.auth_token_file or use --bind 127.0.0.1",
+    );
+  }
 
   /** Constant-time comparison against the configured bearer token. */
     const COOKIE_NAME = "familiar_token";
@@ -105,8 +115,14 @@ export function startHttpTransport(
     if (typeof header === "string" && header.startsWith("Bearer ")) {
       if (safeEqual(header.slice("Bearer ".length).trim(), opts.authToken ?? "")) return "explicit";
     }
-    const queryToken = new URL(req.url ?? "/", "http://localhost").searchParams.get("token");
-    if (queryToken !== null && safeEqual(queryToken, opts.authToken ?? "")) return "explicit";
+    // A raw token in the query string is accepted only on the token entry
+    // page and the WebSocket handshake (the browser WS API cannot set a
+    // header). Other URLs use the cookie or Authorization header.
+    const parsedUrl = new URL(req.url ?? "/", "http://localhost");
+    if (parsedUrl.pathname === "/" || parsedUrl.pathname === "/ws") {
+      const queryToken = parsedUrl.searchParams.get("token");
+      if (queryToken !== null && safeEqual(queryToken, opts.authToken ?? "")) return "explicit";
+    }
     const cookie = cookieToken(req);
     if (cookie !== null && safeEqual(cookie, opts.authToken ?? "")) return "cookie";
     return "none";
@@ -232,8 +248,11 @@ export function startHttpTransport(
             // the remote server is the one whose cwd/tools actually run.
             hostname: os.hostname(),
             platform: process.platform,
-            home: os.homedir(),
-            ...(authRequired && opts.authTokenFile ? { tokenFile: opts.authTokenFile } : {}),
+            // Only a loopback peer needs the token file path (local desktop
+            // shell); never disclose it to a LAN caller.
+            ...(authRequired && opts.authTokenFile && isLoopbackBind(req.socket?.remoteAddress ?? "")
+              ? { tokenFile: opts.authTokenFile }
+              : {}),
             ...(opts.version ? { version: opts.version } : {}),
             // UI asset build stamp: confirms which app.js a client is running
             uiBuild: (() => {
@@ -257,7 +276,9 @@ export function startHttpTransport(
       const setCookie =
         kind === "explicit"
           ? {
-              "Set-Cookie": `${COOKIE_NAME}=${encodeURIComponent(opts.authToken ?? "")}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000`,
+              "Set-Cookie":
+                `${COOKIE_NAME}=${encodeURIComponent(opts.authToken ?? "")}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000` +
+                (req.headers["x-forwarded-proto"] === "https" ? "; Secure" : ""),
             }
           : {};
       const asset = STATIC_FILES[url];
@@ -349,7 +370,13 @@ export function startHttpTransport(
     });
     req.on("end", async () => {
       if (overflowed) return;
-      const ctx: RpcContext = { onEvent: broadcast };
+      // FAMILIAR_READONLY=1 makes a server instance a read-only RPC peer:
+      // privileged methods are rejected even for an authenticated caller.
+      const readOnly = process.env.FAMILIAR_READONLY === "1";
+      const ctx: RpcContext = {
+        onEvent: broadcast,
+        admin: !readOnly && (authRequired ? authorized(req) : true),
+      };
       const body = Buffer.concat(chunks).toString("utf8");
       const reply = await handleRpc(agent, body, ctx);
       res.writeHead(reply.error ? 400 : 200, { "Content-Type": "application/json" });

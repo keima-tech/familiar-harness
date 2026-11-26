@@ -117,8 +117,21 @@ function sanitizeProfile(input, existing) {
   if (user && !/^[A-Za-z0-9._-]+$/.test(user)) return null;
   const portRaw = Number.parseInt(String(input.port ?? 22), 10);
   const port = Number.isInteger(portRaw) && portRaw > 0 && portRaw < 65536 ? portRaw : 22;
-  const identityFile = clean(input.identityFile, 4096);
-  const remoteBin = clean(input.remoteBin, 4096) || "familiar";
+  const rawIdentity = clean(input.identityFile, 4096);
+  const identityFile =
+    /^(?:\/|~\/|\.\/|[A-Za-z]:[\\/])[A-Za-z0-9._/\\-]+$/.test(rawIdentity) &&
+    !rawIdentity.includes("..")
+      ? rawIdentity
+      : "";
+  const requestedBin = clean(input.remoteBin, 4096);
+  const base = requestedBin.includes("/") ? requestedBin.split("/").pop() ?? "" : requestedBin;
+  const remoteBin =
+    /^(familiar|familiar-harness|familiar-[A-Za-z0-9._-]+)$/.test(base) &&
+    !requestedBin.includes("..") &&
+    (requestedBin.startsWith("/") || requestedBin.startsWith("~/") ||
+      !requestedBin.includes("/") || !requestedBin.includes("\\"))
+      ? requestedBin
+      : "familiar";
   // serve: start `familiar serve` on the host over a tunnel (needs familiar there)
   // proxy: nothing installed remotely — every tool call runs over ssh
   const mode = input.mode === "proxy" ? "proxy" : "serve";

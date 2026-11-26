@@ -942,6 +942,39 @@ console.log("— scenario I: web ui transport —");
     provider: "duckduckgo", base_url: "http://ignored.example",
   });
   assert(webBack.result?.websearch?.base_url === "", "choosing DuckDuckGo clears the endpoint");
+  // Release-gate: connector secrets, redirect guard and fs read guard
+  const connSet = await rpcCall(265, "connectors.set", {
+    kind: "redmine", settings: { base_url: "http://127.0.0.1:9999", api_key: "fixture-secret" },
+  });
+  assert(connSet.result?.ok === true, "connectors.set stores a test credential", JSON.stringify(connSet.error ?? {}).slice(0, 160));
+  const cfgConn = await rpcCall(266, "config.get", {});
+  assert(
+    cfgConn.result?.connectors?.redmine?.api_key === "***" &&
+      !JSON.stringify(cfgConn.result).includes("fixture-secret"),
+    "config.get masks connector api_key values",
+  );
+  await rpcCall(270, "connectors.set", {
+    kind: "google", settings: { client_id: "fixture-id", client_secret: "fixture-oauth-secret" },
+  });
+  const cfgGoogle = await rpcCall(271, "config.get", {});
+  assert(
+    cfgGoogle.result?.connectors?.google?.client_secret === "***" &&
+      !JSON.stringify(cfgGoogle.result).includes("fixture-oauth-secret"),
+    "config.get masks OAuth client_secret values",
+  );
+  const replay = await rpcCall(268, "connectors.set", {
+    kind: "redmine", settings: { base_url: "http://attacker.invalid", api_key: "***" },
+  });
+  assert(
+    !!replay.error && /re-enter/.test(String(replay.error?.message ?? "")),
+    "masked credentials cannot be moved to a different endpoint",
+  );
+  const tokenFixture = path.join(familiarHome, "server.token");
+  fs.writeFileSync(tokenFixture, "fixture-only\n", { mode: 0o600 });
+  const secretFile = await rpcCall(272, "fs.read", { path: tokenFixture });
+  assert(!!secretFile.error, "fs.read refuses token/secret files");
+  await rpcCall(273, "connectors.set", { kind: "redmine", settings: {} });
+  await rpcCall(274, "connectors.set", { kind: "google", settings: {} });
   // User-owned MEMORY.md: Settings editor RPC + per-turn prompt injection
   const memWrite = await rpcCall(260, "memory.file.set", { content: "# Decisions\nUse mock provider in tests.\n" });
   assert(
@@ -1550,12 +1583,33 @@ server:
     await new Promise((r) => setTimeout(r, 200));
     try {
       const h = await fetch(`http://127.0.0.1:${PORT}/healthz`).then((r) => r.json());
-      up = h.ok === true && h.auth === "required" && typeof h.tokenFile === "string";
+      up = h.ok === true && h.auth === "required" && h.home === undefined;
     } catch {
       up = false;
     }
   }
-  assert(up, "serve /healthz reports auth required + tokenFile");
+  assert(up, "serve /healthz reports auth required without disclosing paths");
+  const wsOk = await new Promise((resolve) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws?token=${encodeURIComponent(token)}`);
+    const timer = setTimeout(() => { ws.terminate(); resolve(false); }, 5_000);
+    ws.addEventListener("open", () => { clearTimeout(timer); ws.close(); resolve(true); });
+    ws.addEventListener("error", () => { clearTimeout(timer); resolve(false); });
+  });
+  assert(wsOk, "WebSocket handshake accepts the ?token= exchange on /ws");
+  // Non-loopback bind without a token must fail closed.
+  const unauthBind = spawn(process.execPath, [
+    familiarBin, "serve", "--port", "0", "--bind", "0.0.0.0", "--print-ready",
+  ], { env: env(familiarHome), cwd: project, stdio: ["ignore", "pipe", "pipe"] });
+  let bindErr = "";
+  unauthBind.stderr.on("data", (d) => { bindErr += d.toString(); });
+  const bindExit = await new Promise((resolve) => {
+    const timer = setTimeout(() => { unauthBind.kill("SIGKILL"); resolve("timeout"); }, 10_000);
+    unauthBind.on("close", (code) => { clearTimeout(timer); resolve(code); });
+  });
+  assert(
+    bindExit !== "timeout" && bindExit !== 0 && /refusing to bind/.test(bindErr),
+    "serve refuses a non-loopback bind without a token", bindErr.slice(0, 160),
+  );
   const rpc = (headers) => fetch(`http://127.0.0.1:${PORT}/rpc`, {
     method: "POST",
     headers: { "content-type": "application/json", ...headers },
@@ -1654,6 +1708,12 @@ console.log("— scenario Q: bash approval tiers —");
   assert(
     badWebCfg.permissions.websearch.provider === "duckduckgo" && badWebCfg.permissions.websearch.base_url === "",
     "invalid websearch config falls back to DuckDuckGo on load",
+  );
+  const { isPrivateAddress } = await import(path.join(repoRoot, "packages/core/dist/tools/webfetch.js"));
+  assert(
+    ["127.0.0.1", "10.1.2.3", "100.64.0.1", "169.254.169.254", "::1", "fe80::1"].every(isPrivateAddress) &&
+      !isPrivateAddress("1.1.1.1"),
+    "webfetch IP guard covers private, CGNAT, link-local and metadata ranges",
   );
   const { userMemorySection } = await import(
     path.join(repoRoot, "packages/core/dist/selfimprove/memory/user-memory.js")

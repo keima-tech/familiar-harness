@@ -213,8 +213,12 @@ export class AgentRunner {
 
     // Plan mode (M2): only read-only tools are advertised and executable.
     const plan = opts.plan === true;
+    // MCP tools get their read_only flag from config.yaml (GUI-editable), so a
+    // caller-marked "read-only" MCP tool is not proof of safety in plan mode.
+    const planSafe = (t: Tool): boolean =>
+      t.read_only === true && !t.name.startsWith("mcp__");
     let baseTools: Tool[] = plan
-      ? this.tools.list().filter((t) => t.read_only === true)
+      ? this.tools.list().filter(planSafe)
       : this.tools.list();
     // SSH sessions must not advertise local-only dynamic tools (MCP servers
     // spawned on this machine): the server passes per-host tools instead.
@@ -224,7 +228,10 @@ export class AgentRunner {
     }
     if (opts.extraTools && opts.extraTools.length > 0) {
       const present = new Set(baseTools.map((t) => t.name));
-      baseTools = [...baseTools, ...opts.extraTools.filter((t) => !present.has(t.name))];
+      baseTools = [
+        ...baseTools,
+        ...opts.extraTools.filter((t) => !present.has(t.name) && (!plan || planSafe(t))),
+      ];
     }
     // Connector tools are only advertised when their connector is configured:
     // ~14 unconfigured ones would otherwise eat a large slice of the prompt.

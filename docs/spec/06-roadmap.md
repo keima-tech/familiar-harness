@@ -590,7 +590,7 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
   `--check` でドライラン、`--forgejo` / `--repo` で接続先変更。
   自己署名証明書(自前 Forgejo)では Node fetch が失敗するため、
   CERT 系エラー時に限り検証スキップの https 再試行にフォールバック
-  (警告表示。NODE_EXTRA_CA_CERTS 推奨、FAMILIAR_TLS_STRICT=1 で無効化)。
+  (警告表示。NODE_EXTRA_CA_CERTS 推奨、FAMILIAR_TLS_ALLOW_INSECURE=1 を明示した場合のみフォールバック可(既定は厳守))。
   モック Forgejo HTTP サーバで 0.1.0→0.1.1 の E2E 検証済み
   (スワップ後 --version・残骸なし・--check up-to-date・serve 200)。
 - **ベア `familiar` = TUI** は既存実装(㉒)だが README のクイックスタートを
@@ -1080,10 +1080,12 @@ roadmap の「CLI リッチ化(diff 描画・スピナー・スラッシュコ�
     ミラー後の fresh clone で `-- .orca` の履歴が 0 件であることを確認。
   - テスト fixture のホームパスとフェイク ssh エラーのユーザー名を Neutral 化
     (`/home/user/...`、`user@`)して同様に履歴から置換。
-  - 廃止した fallback コードに含まれていた社内ホスト名とリポジトリ slug も
-    この変更でリポジトリから消えた。ただし旧コミットの **diff 内**には残っていたため、
-    全履歴の tree/msg を sed で書き換え(`example.invalid` → `example.invalid`、slug → `owner/familiar-harness`、
-    ユーザー名 → `user`)して履歴からも完全に除去した(HEAD のツリー内容は不変)。
+  - 廃止した fallback コードに含まれていた社内ホスト名とリポジトリ slug は HEAD の
+    ツリーからは削除した。ただし2026-11-27 の再監査で、旧コミットの diff 内には
+    内部ホスト名が依然として残っていることが判明した(秘密情報はなし)。
+    履歴の書き換えは公開時の判断事項とし、ここでは「完全に除去した」という
+    従来の記述を訂正する。公開時は内部ホスト名が履歴に残る点を許容するか、
+    別途 filter-repo による全履歴書き換え(タグ/リリース再発行が必要)を判断する。
     Windows アセット(NSIS / portable exe)は fallback 削除前のビルドだったため、削除後のツリーから
     再ビルド(wine 同梱環境で `pack:win` + `electron-builder --win portable`)して 5 アセットとも再公開した。
   - トークン・秘密鍵・.env・state.db・実セッションデータの追跡は無し(.gitignore で補強)。
@@ -1973,3 +1975,29 @@ Web UI / サーバ RPC / CLI を含む変更のため GUI e2e も確認する。
   使うため、データディスクリプタ形式(ローカルのサイズが 0)や先頭に stub を持つ
   SFX アーカイブも読める。読み取り前に `stat` でサイズを確認し、巨大ファイルを
   丸ごと確保しない。
+
+## v0.1.0 の実装メモ㊼(2026-11-27、公開前セキュリティゲート)
+
+- **認証 fail-closed**: `0.0.0.0` 等の非 loopback bind はトークンファイルが無いと
+  起動しない(`familiar serve` / `startHttpTransport` の両方で拒否)。UI の
+  `?token=` はトークン入力ページだけが受け付け、Cookie は HTTPS 時に `Secure` を付与。
+  `/healthz` はホスト名・プラットフォーム・バージョンのみを返し、home / token ファイル
+  パスは公開しない。
+- **RPC 権限分離**: 設定・資格情報・ファイルを変更する RPC を admin tier に分類。
+  認証なし loopback と in-process 呼び出しは信頼し、リモートの未認証呼び出しは拒否。
+  `FAMILIAR_READONLY=1` で起動したサーバは認証済みでも admin 権限を与えず、
+  変更系 RPC をすべて拒否する(read-only 公開モード)。
+- **シークレット**: `config.get` のコネクタ遮蔽を `client_secret` / `access_token` /
+  `refresh_token` にも適用(deny は allow に優先)。マスク `"***"` を送って
+  `base_url` だけを差し替えると保存済み認証情報が送出される問題を修正し、
+  別エンドポイントのテストには認証情報の再入力を要求する。
+- **ファイル RPC**: `fs.read/preview/list/dirs/suggest` にトークン・鍵・設定・SSH
+  ディレクトリの読み取り拒否を追加。`rename`/`delete` も同じ保護パスを拒否。
+  エージェントツールの cwd 判定は realpath でシンボリックリンクを解決し、
+  `edit` モードでも cwd 外の読み取りは承認する。
+- **その他**: webfetch は DNS 解決後の IP(IPv4/IPv6 の内部範囲・CGNAT)も検査し、
+  リダイレクトごとに再-check。更新チェックの TLS 検証スキップは
+  `FAMILIAR_TLS_ALLOW_INSECURE=1` の明示 opt-in に変更。Plan モードでは
+  設定で `read_only` とマークされた MCP ツールも広告しない。SSH プロファイルの
+  `remoteBin` / `identityFile` を安全な値へ制限。npm 公開メタデータと
+  依存バージョンを明示化。

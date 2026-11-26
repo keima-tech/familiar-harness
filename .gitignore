@@ -23,6 +23,34 @@ tmp/
 # Runtime data (created at user level ~/.familiar, but guard anyway)
 state.db
 state.db-*
+.familiar/
+config.yaml
+desktop.json
+settings.json
+
+# Local keys / credentials (provider keys use <name>.key under ~/.familiar)
+*.key
+*.pem
+id_rsa*
+*.p12
+*.pfx
+credentials*.json
+service-account*.json
+*secret*
+
+# Packaged desktop artifacts outside release/
+*.AppImage
+*.deb
+*.exe
+*.dmg
+latest*.yml
+*.blockmap
+
+# Editor / coverage output
+.vscode/
+.idea/
+coverage/
+.nyc_output/
 
 # release artifacts
 familiar-v*.tar.gz

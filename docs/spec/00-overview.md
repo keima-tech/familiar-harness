@@ -1,12 +1,12 @@
 # 00 — 概要とプロダクト方針
 
-ステータス: 確定 / 最終更新: 2026-10-17
+ステータス: 確定 / 最終更新: 2026-11-27
 
 ## 1. Familiar とは
 
 ローカルファーストのクライアント/サーバ型エージェントハーネス。LLM エージェントの
 実行基盤(ループ・ツール・権限・永続化・自己改善)を単一のコアとして提供し、
-CLI とデスクトップアプリがそのコアを共有する。
+CLI / Web UI / デスクトップアプリの3フロントエンドがそのコアを共有する。
 
 ## 2. 参考プロダクトから取り入れた設計判断
 
@@ -19,11 +19,12 @@ CLI とデスクトップアプリがそのコアを共有する。
 ## 3. 製品要件(確定事項)
 
 1. **コア**: TypeScript / Node 24+ (ESM)。npm workspaces monorepo(tsc -b project references)。
-2. **UI**: CLI(Node 版 TUI/REPL)と Electron デスクトップ。通信はすべて `@familiar/protocol` 定義の JSON-RPC + イベントストリーム。デスクトップは後日 Tauri への移植が可能な薄クライアント。
+2. **UI**: CLI(Node 版 TUI/REPL)、Web UI(`familiar serve`)、Electron デスクトップ。通信はすべて `@familiar/protocol` 定義の JSON-RPC + イベントストリーム。デスクトップは後日 Tauri への移植が可能な薄クライアント。
 3. **OS**: Windows / Linux 両対応を全機能の前提とする(macOS は追従対象)。
 4. **プロバイダ**: OpenAI 互換(OpenAI/OpenRouter/Ollama/LM Studio 等)、Anthropic、mock(テスト)。Google は M2。
 5. **自己改善**: Hermes 方式を段階投入(M3: memory/skills/self-review/write_approval、M4: curator)。
-6. **周辺機能 v1**: MCP / LSP / hooks・プラグイン / cron(メッセージング gateway は v2)。
+6. **周辺機能 v1**: MCP / LSP / hooks / cron / コネクタ / Web 検索 / ユーザー編集可能な MEMORY.md。
+   独立性の高いプラグイン API は v1.1 以降の継続課題(メッセージング gateway は v2)。
 
 ## 4. Non-goals(v1)
 

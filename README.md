@@ -7,6 +7,9 @@ A self-hosted coding agent: one core engine, a terminal UI, a web UI and a deskt
 
 [日本語版はこちら / Japanese](README.ja.md)
 
+**New here?** Start with the [illustrated user guide](docs/guide.md)
+(日本語: [スクショ付きユーザーガイド](docs/guide.ja.md)).
+
 </div>
 
 ---
@@ -182,6 +185,7 @@ providers:
 
 | | |
 |---|---|
+| **[user guide (screenshots)](docs/guide.md)** | **step-by-step usage, Japanese: [guide.ja.md](docs/guide.ja.md)** |
 | [overview](docs/spec/00-overview.md) | scope and goals |
 | [architecture](docs/spec/01-architecture.md) | packages, turn flow, persistence |
 | [protocol](docs/spec/02-protocol.md) | JSON-RPC methods and events |

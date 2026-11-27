@@ -7,6 +7,9 @@
 
 [English README](README.md)
 
+**初めての方へ:** [スクショ付きユーザーガイド](docs/guide.ja.md)
+(English: [illustrated user guide](docs/guide.md)) からどうぞ。
+
 </div>
 
 ---
@@ -147,6 +150,7 @@ providers:
 
 | | |
 |---|---|
+| **[ユーザーガイド(スクショ付き)](docs/guide.ja.md)** | **使い方を順に解説。英語版: [guide.md](docs/guide.md)** |
 | [概要](docs/spec/00-overview.md) | 目的と範囲 |
 | [アーキテクチャ](docs/spec/01-architecture.md) | パッケージ構成、1 ターンの流れ、永続化 |
 | [プロトコル](docs/spec/02-protocol.md) | JSON-RPC のメソッドとイベント |

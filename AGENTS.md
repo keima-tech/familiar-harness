@@ -38,6 +38,7 @@ client/server 型エージェントハーネス。コア(`packages/core`)は UI 
 
 - `npm run smoke` — mock プロバイダで headless run 全経路(ループ・ツール呼び出し・保存)を検証。**コミット前に必ず通す**
 - `npm run typecheck` — 型チェック。コミット前に必ず通す
+- `npm run -w packages/desktop capture:guide` — ガイド用スクショを isolated 環境で再撮影(UI 変更時に更新)
 
 ## コミット
 

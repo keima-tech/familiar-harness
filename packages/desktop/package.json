@@ -17,6 +17,7 @@
     "stage": "node scripts/stage.mjs",
     "e2e": "node scripts/e2e.mjs",
     "e2e:ssh": "node scripts/ssh-e2e.mjs",
+    "capture:guide": "node scripts/capture-guide.mjs",
     "pack:linux": "npm run stage && electron-builder --linux deb AppImage",
     "pack:win": "npm run stage && electron-builder --win nsis"
   },

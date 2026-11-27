@@ -157,8 +157,7 @@ providers:
 | [ツール](docs/spec/03-tools.md) | ツール一覧と承認ルール |
 | [自己改善](docs/spec/04-self-improvement.md) | memory・skills・curator |
 | [設定](docs/spec/05-config.md) | 設定リファレンス |
-| [比較](docs/comparison.md) | 他のハーネスとの違い(日付入り) |
-| [ロードマップ](docs/spec/06-roadmap.md) | 実装履歴とメモ |
+| **[変更履歴](CHANGELOG.ja.md)** | **利用者向けの変更点 — 英語版: [CHANGELOG.md](CHANGELOG.md)** |
 
 仕様書は日本語、コードと CLI は英語です。
 
@@ -173,8 +172,6 @@ npm run mdtest      # markdown レンダラのフィクスチャ
 ```
 
 `familiar serve` はビルド済みの `packages/*/dist` を読み続けるため、コードを変更したら再起動してください(Web UI の静的アセットは自動で再読み込みされます)。
-
-メンテナ向け: `npm run version:set -- 0.2.0` で全パッケージのバージョンを揃え、`v0.2.0` タグを打ってから `scripts/release.sh --publish` を実行します。tarball とデスクトップ版をビルドして GitHub Releases に公開します。社内 Forgejo にも公開する場合は `FAMILIAR_FORGEJO` / `FAMILIAR_REPO` / `FORGEJO_TOKEN_FILE` を設定してください。
 
 ## ライセンス
 

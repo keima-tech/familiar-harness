@@ -192,8 +192,7 @@ providers:
 | [tools](docs/spec/03-tools.md) | tool set and approval rules |
 | [self-improvement](docs/spec/04-self-improvement.md) | memory, skills, curator |
 | [config](docs/spec/05-config.md) | configuration reference |
-| [comparison](docs/comparison.md) | how it differs from other harnesses (dated) |
-| [roadmap](docs/spec/06-roadmap.md) | implementation history and notes |
+| **[changelog](CHANGELOG.md)** | **user-visible changes — Japanese: [CHANGELOG.ja.md](CHANGELOG.ja.md)** |
 
 The specs are written in Japanese; the code and CLI are in English.
 
@@ -209,11 +208,6 @@ npm run mdtest      # markdown renderer fixtures
 
 `familiar serve` keeps running the built `packages/*/dist`; restart it after code
 changes (the static web assets reload on their own).
-
-Maintainers: bump every package with `npm run version:set -- 0.2.0`, tag
-`v0.2.0`, then run `scripts/release.sh --publish` to build the tarball and
-desktop installers and publish them to GitHub Releases (set `FAMILIAR_FORGEJO`,
-`FAMILIAR_REPO` and `FORGEJO_TOKEN_FILE` to also publish to the in-house Forgejo).
 
 ## License
 

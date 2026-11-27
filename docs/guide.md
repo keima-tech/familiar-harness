@@ -154,6 +154,6 @@ attachments are uploaded to the remote host when the session is remote.
 | Self-improvement details | [spec/04-self-improvement.md](spec/04-self-improvement.md) |
 | JSON-RPC methods | [spec/02-protocol.md](spec/02-protocol.md) |
 | Architecture | [spec/01-architecture.md](spec/01-architecture.md) |
-| Implementation notes (Japanese) | [spec/06-roadmap.md](spec/06-roadmap.md) |
+| Changelog | [CHANGELOG.md](../CHANGELOG.md) — Japanese: [CHANGELOG.ja.md](../CHANGELOG.ja.md) |
 
 The specs are written in Japanese; the code and CLI are in English.

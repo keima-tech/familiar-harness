@@ -150,6 +150,6 @@ DuckDuckGo を選ぶと入力はクリアされます。
 | 自己改善の詳細 | [spec/04-self-improvement.md](spec/04-self-improvement.md) |
 | JSON-RPC メソッド | [spec/02-protocol.md](spec/02-protocol.md) |
 | アーキテクチャ | [spec/01-architecture.md](spec/01-architecture.md) |
-| 実装メモ(日本語) | [spec/06-roadmap.md](spec/06-roadmap.md) |
+| 変更履歴 | [CHANGELOG.ja.md](../CHANGELOG.ja.md) — 英語版: [CHANGELOG.md](../CHANGELOG.md) |
 
 仕様は日本語、コードと CLI は英語です。

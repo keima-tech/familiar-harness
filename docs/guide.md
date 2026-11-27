@@ -30,6 +30,35 @@ If no API key is configured, Familiar uses the first provider it can actually
 call (a local Ollama endpoint, for example). Pin a provider and model in
 `~/.familiar/config.yaml` when you want a specific one.
 
+### How it works
+
+The agent engine lives in one core. The TUI, web UI and desktop app are clients
+of `familiar serve`, which exposes the core over JSON-RPC and events. A **turn**
+is one user request; each model call inside it is a **step**. Sessions — messages,
+tool calls and results — are stored in SQLite and shared by all frontends, so you
+can start in the terminal and continue in the browser.
+
+### Configuration basics
+
+Settings live in `~/.familiar/config.yaml` (created on first run). The keys you
+are most likely to touch:
+
+```yaml
+default_provider: ollama        # provider name; omit to auto-pick a usable one
+server:
+  port: 46210
+  # auth_token_file: ~/.familiar/server.token   # required for non-loopback binds
+permissions:
+  bash: { mode: allow }         # allow / ask (destructive commands are still blocked)
+  websearch: { provider: duckduckgo, base_url: "" }
+memory:
+  write_approval: true          # staged proposals need your approval
+```
+
+Skills, connectors, web search, memory and permissions are easier to edit in the
+web UI (Settings); changes are written back to the same files. `.yaml` comments
+document the remaining options.
+
 ## 2. Your first conversation
 
 - Type a request and press `Enter` (`Shift+Enter` adds a newline).
@@ -149,11 +178,6 @@ attachments are uploaded to the remote host when the session is remote.
 
 | Topic | Document |
 |---|---|
-| Configuration reference | [spec/05-config.md](spec/05-config.md) |
-| Tools and approval rules | [spec/03-tools.md](spec/03-tools.md) |
-| Self-improvement details | [spec/04-self-improvement.md](spec/04-self-improvement.md) |
-| JSON-RPC methods | [spec/02-protocol.md](spec/02-protocol.md) |
-| Architecture | [spec/01-architecture.md](spec/01-architecture.md) |
 | Changelog | [CHANGELOG.md](../CHANGELOG.md) — Japanese: [CHANGELOG.ja.md](../CHANGELOG.ja.md) |
 
-The specs are written in Japanese; the code and CLI are in English.
+The code and CLI are in English; this guide and the changelog are available in both languages.

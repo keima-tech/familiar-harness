@@ -246,7 +246,7 @@ export async function cmdDemo(flags: Record<string, string | boolean>): Promise<
     out("  • the curator keeps skills fresh: stale → archive, optional LLM consolidation, ledger + snapshots");
     out("  • one core engine, three frontends (TUI / Web / desktop) on the same daemon");
     out();
-    out(c.dim("  Run it against a real model instead: familiar run -p \"...\"  (see docs/spec/05-config.md)"));
+    out(c.dim("  Run it against a real model instead: familiar run -p \"...\"  (see docs/guide.md)"));
     if (keep) out(c.dim(`  Demo home kept at: ${home}`));
     else out(c.dim(`  Demo home removed (--keep to inspect it)`));
   } finally {

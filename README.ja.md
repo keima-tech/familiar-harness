@@ -144,22 +144,16 @@ providers:
 
 - シークレットは `api_key` → `api_key_file` → `env` の順で解決します。GUI で入力したキーは `~/.familiar/secrets/<provider>.key`(パーミッション 0600)に保存され、設定ファイルからはそのファイルを参照します。
 - bash は、破壊的または情報漏えいの恐れがあると判断したときだけ確認します(`permissions.bash.ask`)。マシンを壊しかねないコマンドは、モードにかかわらず実行しません。
-- リモートホスト、SSH プロキシ / familiar-server モード、トンネル、トークンの設定は [docs/spec/05-config.md](docs/spec/05-config.md) にまとめてあります。
+- リモートホスト、SSH プロキシ / familiar-server モード、トンネル、トークンについては[ユーザーガイド](docs/guide.ja.md)で説明しています。
 
 ## ドキュメント
 
 | | |
 |---|---|
 | **[ユーザーガイド(スクショ付き)](docs/guide.ja.md)** | **使い方を順に解説。英語版: [guide.md](docs/guide.md)** |
-| [概要](docs/spec/00-overview.md) | 目的と範囲 |
-| [アーキテクチャ](docs/spec/01-architecture.md) | パッケージ構成、1 ターンの流れ、永続化 |
-| [プロトコル](docs/spec/02-protocol.md) | JSON-RPC のメソッドとイベント |
-| [ツール](docs/spec/03-tools.md) | ツール一覧と承認ルール |
-| [自己改善](docs/spec/04-self-improvement.md) | memory・skills・curator |
-| [設定](docs/spec/05-config.md) | 設定リファレンス |
 | **[変更履歴](CHANGELOG.ja.md)** | **利用者向けの変更点 — 英語版: [CHANGELOG.md](CHANGELOG.md)** |
 
-仕様書は日本語、コードと CLI は英語です。
+コードと CLI は英語です。ガイドと変更履歴は日英両言語で用意しています。
 
 ## 開発
 

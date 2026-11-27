@@ -28,6 +28,33 @@ familiar serve      # Web UI + JSON-RPC (http://127.0.0.1:46210)
 API キーが無い場合は、実際に呼び出せる最初のプロバイダ(ローカルの Ollama など)
 を使います。固定したい場合は `~/.familiar/config.yaml` で指定してください。
 
+### どう動くか
+
+エージェントの基盤は1つのコアにあり、TUI・Web UI・デスクトップは `familiar serve` の
+クライアントです。サーバはコアを JSON-RPC とイベントで公開します。
+ユーザーの1回の依頼が **ターン**、その中の1回のモデル呼び出しが **ステップ** です。
+セッション(メッセージ・ツール呼び出し・結果)は SQLite に保存され、全フロントエンドで
+共有されます。ターミナルで始めてブラウザで続きを、という使い方もできます。
+
+### 設定の基本
+
+設定は `~/.familiar/config.yaml`(初回起動時に作成)にあります。よく触る項目は次の通りです。
+
+```yaml
+default_provider: ollama        # プロバイダ名。省略すると利用可能なものを自動選択
+server:
+  port: 46210
+  # auth_token_file: ~/.familiar/server.token   # ループバック外へ開く場合に必須
+permissions:
+  bash: { mode: allow }         # allow / ask(破壊的なコマンドは常にブロック)
+  websearch: { provider: duckduckgo, base_url: "" }
+memory:
+  write_approval: true          # 提案された変更は承認後に反映
+```
+
+スキル・コネクタ・Web検索・メモリ・権限は Web UI の設定画面から編集する方が簡単で、
+変更は同じファイルへ書き戻されます。その他の項目は `.yaml` のコメントを参照してください。
+
 ## 2. 最初の会話
 
 - 入力して `Enter` で送信(`Shift+Enter` は改行)
@@ -145,11 +172,6 @@ DuckDuckGo を選ぶと入力はクリアされます。
 
 | 項目 | ドキュメント |
 |---|---|
-| 設定リファレンス | [spec/05-config.md](spec/05-config.md) |
-| ツールと承認ルール | [spec/03-tools.md](spec/03-tools.md) |
-| 自己改善の詳細 | [spec/04-self-improvement.md](spec/04-self-improvement.md) |
-| JSON-RPC メソッド | [spec/02-protocol.md](spec/02-protocol.md) |
-| アーキテクチャ | [spec/01-architecture.md](spec/01-architecture.md) |
 | 変更履歴 | [CHANGELOG.ja.md](../CHANGELOG.ja.md) — 英語版: [CHANGELOG.md](../CHANGELOG.md) |
 
-仕様は日本語、コードと CLI は英語です。
+コードと CLI は英語です。このガイドと変更履歴は日英両言語で用意しています。

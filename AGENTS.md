@@ -5,7 +5,9 @@
 client/server 型エージェントハーネス。コア(`packages/core`)は UI 非依存の純粋ロジック、
 `server`/`cli`/`desktop` は `@familiar/protocol` の RPC 経由でコアを利用する。
 
-詳細仕様は `docs/spec/`。仕様と実装が乖離したら、まず spec を更新してから実装を変える。
+詳細仕様・設計判断・実装ログはリポジトリ外の開発記録(チケット #88)に集約する。
+仕様と実装が乖離したら、まず開発記録を更新してから実装を変える。GitHub 側には
+利用者向けの README / ガイド / CHANGELOG だけを置く。
 
 ## 技術スタック
 
@@ -22,7 +24,7 @@ client/server 型エージェントハーネス。コア(`packages/core`)は UI 
   - パスは `node:path` の API で組み立て(OS 固有の `/` 直書き禁止)
   - シェル実行は `resolveShellCommand()` を経由(Windows は PowerShell 既定)
   - 改行・エンコーディングを決め打ちしない
-- UI 文字列: CLI表示は英語。README は `README.md`(英語)と `README.ja.md`(日本語)の2ファイル構成で、互いに冒頭でリンクし合い内容を同期する。docs/spec は日本語
+- UI 文字列: CLI表示は英語。README は `README.md`(英語)と `README.ja.md`(日本語)の2ファイル構成で、互いに冒頭でリンクし合い内容を同期する。ガイドも `docs/guide.md` / `guide.ja.md` の2ファイル構成で同期する
 
 ## セキュリティ(最重要)
 

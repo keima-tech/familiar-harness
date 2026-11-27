@@ -178,23 +178,17 @@ providers:
   stored in `~/.familiar/secrets/<provider>.key` (0600) and referenced by file.
 - Bash runs without a prompt unless a command looks destructive or leaks data
   (`permissions.bash.ask`); machine-wiping commands are blocked regardless of mode.
-- Remote hosts, SSH proxy / familiar-server modes, tunnels and tokens are covered in
-  [docs/spec/05-config.md](docs/spec/05-config.md).
+- Remote hosts, SSH proxy / familiar-server modes, tunnels and tokens are explained in
+  the [user guide](docs/guide.md).
 
 ## Docs
 
 | | |
 |---|---|
 | **[user guide (screenshots)](docs/guide.md)** | **step-by-step usage, Japanese: [guide.ja.md](docs/guide.ja.md)** |
-| [overview](docs/spec/00-overview.md) | scope and goals |
-| [architecture](docs/spec/01-architecture.md) | packages, turn flow, persistence |
-| [protocol](docs/spec/02-protocol.md) | JSON-RPC methods and events |
-| [tools](docs/spec/03-tools.md) | tool set and approval rules |
-| [self-improvement](docs/spec/04-self-improvement.md) | memory, skills, curator |
-| [config](docs/spec/05-config.md) | configuration reference |
 | **[changelog](CHANGELOG.md)** | **user-visible changes — Japanese: [CHANGELOG.ja.md](CHANGELOG.ja.md)** |
 
-The specs are written in Japanese; the code and CLI are in English.
+The code and CLI are in English; the guide and changelog are available in both languages.
 
 ## Development
 

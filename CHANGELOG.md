@@ -1,7 +1,5 @@
 # Changelog
 
-User-visible changes only. Internal implementation notes are kept outside this repository.
-
 ## v0.1.0 (2026-11-27)
 
 - **Three frontends, one core.** Terminal UI, web UI (`familiar serve`) and an
